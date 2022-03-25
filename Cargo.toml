@@ -1,7 +1,6 @@
-[package]
-name = "vaux"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = [
+    "vaux-broker",
+    "vaux-test"
+]
 
-[dependencies]
-tokio = { version = "1.17.0", features = ["full"] }
