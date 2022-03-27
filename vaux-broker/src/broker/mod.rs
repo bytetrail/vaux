@@ -1,7 +1,9 @@
+use bytes::Bytes;
+use futures::{SinkExt, StreamExt};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio_util::codec::{BytesCodec, Framed};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
@@ -15,7 +17,6 @@ impl Default for Broker {
     /// Creates a new MQTT broker listening to local loopback on the default MQTT
     /// port (1883) for unsecure traffic
     fn default() -> Self {
-        println!("default()");
         Broker {
             listen_addr: SocketAddr::try_from((
                 Ipv4Addr::from_str(DEFAULT_LISTEN_ADDR).unwrap(),
@@ -51,21 +52,12 @@ impl Broker {
     }
 
     async fn handle_client(stream: &mut TcpStream) {
-        let mut buf = [0; 1024];
-        loop {
-            let count = match stream.read(&mut buf).await {
-                Ok(count) if count == 0 => return,
-                Ok(count) => count,
-                Err(e) => {
-                    eprintln!("failed to read from socket; error = {:?}", e);
-                    return;
-                }
-            };
-            // write the data in the buffer back out
-            if let Err(e) = stream.write_all(&buf[0..count]).await {
-                eprintln!("failed to write data to socket; error = {:?}", e);
-            }
-        }
+        let mut frame = Framed::new(stream, BytesCodec::new());
+        let request = frame.next().await;
+        println!("{:?}", request);
+        let response = Bytes::from(vec![32u8, 2, 0, 0]);
+        println!("{:?}", response);
+        frame.send(response).await;
     }
 }
 
