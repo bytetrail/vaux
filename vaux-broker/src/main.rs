@@ -1,5 +1,4 @@
 mod broker;
-mod mqtt;
 
 use broker::Broker;
 
