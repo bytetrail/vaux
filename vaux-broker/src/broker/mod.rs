@@ -1,9 +1,9 @@
-use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_util::codec::{BytesCodec, Framed};
+use tokio_util::codec::Framed;
+use vaux_mqtt::{ControlPacket, MQTTCodec, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
@@ -28,7 +28,10 @@ impl Default for Broker {
 }
 
 impl Broker {
-    // Creates a new broker with the configuration specified
+    #[allow(dead_code)]
+    /// Creates a new broker with the configuration specified. This method will 
+    /// not be used until the command line interface is developed. Remove the
+    /// dead_code override when complete
     pub fn new(listen_addr: SocketAddr) -> Self {
         Broker { listen_addr }
     }
@@ -51,13 +54,15 @@ impl Broker {
         }
     }
 
-    async fn handle_client(stream: &mut TcpStream) {
-        let mut frame = Framed::new(stream, BytesCodec::new());
+    async fn handle_client(stream: &mut TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+        let mut frame = Framed::new(stream, MQTTCodec {});
         let request = frame.next().await;
         println!("{:?}", request);
-        let response = Bytes::from(vec![32u8, 2, 0, 0]);
-        println!("{:?}", response);
+        let response = ControlPacket::new(PacketType::PingResp);
+        println!("Responding with {:?}", response);
         frame.send(response).await;
+
+        Ok(())
     }
 }
 

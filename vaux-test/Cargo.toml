@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 vaux-mqtt = { path="../vaux-mqtt"}
+bytes = "1.1.0"
+tokio-util = { version = "0.7.0", features = ["codec"] }

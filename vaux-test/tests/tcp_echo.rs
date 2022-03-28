@@ -6,10 +6,12 @@ const DEFAULT_HOST: &'static str = "127.0.0.1";
 const ECHO_MSG: &'static str = "Echo Test!";
 const ECHO_MSG_LEN: usize = 10;
 
-#[test]
+#[deprecated]
 /// This tests expects the basic TCP server to be running on
 /// * Host: 127.0.0.1
 /// * Port: 1883
+/// This test no longer functions and has been replaced with the MQTT ping test.
+/// TODO remove test completely
 fn test_echo() {
     match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
         Ok(mut stream) => {
