@@ -114,12 +114,28 @@ impl Decoder for MQTTCodec {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         let packet_type = PacketType::from(src[0]);
+        let flags = src[0] &0x0f;
         match packet_type {
-            PacketType::PingReq | PacketType::PingResp => Ok(Some(ControlPacket {
-                packet_type,
-                flags: src[0] & 0x0f,
-                remaining: 0_u32,
-            })),
+            PacketType::PingReq | PacketType::PingResp => {
+                if flags != 0 {
+                    MQTTCodecError::new(format!("invalid flags for connect: {}", flags).as_str());
+                }
+                Ok(Some(ControlPacket {
+                    packet_type,
+                    flags,
+                    remaining: 0_u32,
+                }))
+            },
+            PacketType::Connect => {
+                if flags != 0 {
+                    MQTTCodecError::new(format!("invalid flags for connect: {}", flags).as_str());
+                }
+                Ok(Some(ControlPacket {
+                    packet_type,
+                    flags,
+                    remaining: 0_u32
+                }))
+            },
             _ => Err(MQTTCodecError::new("unexpeccted packet type")),
         }
     }
@@ -142,9 +158,41 @@ impl Encoder<ControlPacket> for MQTTCodec {
     }
 }
 
+
+fn decode_variable_len_integer(data: &[u8]) -> (u32, usize) {
+    let mut result = 0_u32;
+    let mut shift = 0;
+    let mut idx = 0_usize;
+    let mut next_byte = data[0];
+    let mut decode = true;
+    while decode && idx < 4 {
+        println!("shift by {}", shift);
+        result += ((next_byte & 0x7f) as u32) << shift;
+        println!("result {}", result);
+        shift += 7;
+        idx += 1;
+        if next_byte & 0x80 == 0 {
+            decode = false;
+        }
+        next_byte = data[idx];
+    }
+    (result, idx)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+
+
+    #[test]
+    fn decode_var_int() {
+        let mut test_value = [0_u8; 4];
+        test_value[0] = 0x80;
+        test_value[1] = 0x01;
+        let (val, len) = decode_variable_len_integer(&test_value);
+        assert_eq!(2, len);
+        assert_eq!(128, val);
+    }
 
     #[test]
     /// Random test of display trait for packet types.
