@@ -3,7 +3,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
-use vaux_mqtt::{ControlPacket, MQTTCodec, PacketType};
+use vaux_mqtt::{ControlPacket, MQTTCodec, MQTTCodecError, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
@@ -29,7 +29,7 @@ impl Default for Broker {
 
 impl Broker {
     #[allow(dead_code)]
-    /// Creates a new broker with the configuration specified. This method will 
+    /// Creates a new broker with the configuration specified. This method will
     /// not be used until the command line interface is developed. Remove the
     /// dead_code override when complete
     pub fn new(listen_addr: SocketAddr) -> Self {
@@ -43,7 +43,13 @@ impl Broker {
                 loop {
                     let (mut socket, _) = listener.accept().await?;
                     tokio::spawn(async move {
-                        Broker::handle_client(&mut socket).await;
+                        match Broker::handle_client(&mut socket).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                // TODO unhandled error in client handler should result in disconnect
+                                eprintln!("error in child process: {}", e);
+                            }
+                        }
                     });
                 }
             }
@@ -57,11 +63,26 @@ impl Broker {
     async fn handle_client(stream: &mut TcpStream) -> Result<(), Box<dyn std::error::Error>> {
         let mut frame = Framed::new(stream, MQTTCodec {});
         let request = frame.next().await;
-        println!("{:?}", request);
-        let response = ControlPacket::new(PacketType::PingResp);
-        println!("Responding with {:?}", response);
-        frame.send(response).await;
-
+        if let Some(request) = request {
+            match request {
+                Ok(request) => match request.packet_type() {
+                    PacketType::PingReq => {
+                        let response = ControlPacket::new(PacketType::PingResp);
+                        frame.send(response).await?;
+                    }
+                    PacketType::Connect => {
+                        let response = ControlPacket::new(PacketType::ConnAck);
+                        frame.send(response).await?;
+                    }
+                    _ => {
+                        return Err(Box::new(MQTTCodecError::new(
+                            format!("unsupported packet type: {}", request.packet_type()).as_str(),
+                        )))
+                    }
+                },
+                Err(e) => return Err(Box::new(e)),
+            }
+        }
         Ok(())
     }
 }

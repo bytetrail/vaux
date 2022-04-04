@@ -1,6 +1,22 @@
-use bytes::{BufMut, BytesMut};
+pub mod codec;
+
+pub use crate::codec::{MQTTCodec, MQTTCodecError};
 use std::fmt::{Display, Formatter};
-use tokio_util::codec::{Decoder, Encoder};
+
+const PACKET_RESERVED_NONE: u8 = 0x00;
+const PACKET_RESERVED_BIT1: u8 = 0x02;
+
+pub trait VariableHeader {
+    fn transport_size() -> u32;
+}
+
+pub trait Payload {
+    fn transport_size() -> u32;
+}
+
+pub trait Packet {
+    fn remaining() -> u32;
+}
 
 /// MQTT Control Packet Type
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -60,14 +76,14 @@ pub struct ControlPacket {
 impl ControlPacket {
     pub fn new(packet_type: PacketType) -> Self {
         match packet_type {
-            PacketType::PingReq => ControlPacket {
+            PacketType::PubRel | PacketType::Subscribe | PacketType::Unsubscribe => ControlPacket {
                 packet_type,
-                flags: 0_u8,
-                remaining: 0_u32,
+                flags: PACKET_RESERVED_BIT1,
+                remaining: 0,
             },
             _ => ControlPacket {
                 packet_type,
-                flags: 0,
+                flags: PACKET_RESERVED_NONE,
                 remaining: 0,
             },
         }
@@ -76,123 +92,15 @@ impl ControlPacket {
     pub fn packet_type(&self) -> PacketType {
         self.packet_type
     }
-}
 
-#[derive(Debug)]
-pub struct MQTTCodecError {
-    reason: String,
-}
-
-impl Display for MQTTCodecError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MQTT codec error: {}", self.reason)
+    pub fn set_remaining(&mut self, remaining: u32) {
+        self.remaining = remaining;
     }
-}
-
-impl From<std::io::Error> for MQTTCodecError {
-    fn from(_err: std::io::Error) -> Self {
-        MQTTCodecError {
-            reason: "IO error".to_string(),
-        }
-    }
-}
-
-impl MQTTCodecError {
-    pub fn new(reason: &str) -> Self {
-        MQTTCodecError {
-            reason: reason.to_string(),
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct MQTTCodec {}
-
-impl Decoder for MQTTCodec {
-    type Item = ControlPacket;
-    type Error = MQTTCodecError;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let packet_type = PacketType::from(src[0]);
-        let flags = src[0] &0x0f;
-        match packet_type {
-            PacketType::PingReq | PacketType::PingResp => {
-                if flags != 0 {
-                    MQTTCodecError::new(format!("invalid flags for connect: {}", flags).as_str());
-                }
-                Ok(Some(ControlPacket {
-                    packet_type,
-                    flags,
-                    remaining: 0_u32,
-                }))
-            },
-            PacketType::Connect => {
-                if flags != 0 {
-                    MQTTCodecError::new(format!("invalid flags for connect: {}", flags).as_str());
-                }
-                Ok(Some(ControlPacket {
-                    packet_type,
-                    flags,
-                    remaining: 0_u32
-                }))
-            },
-            _ => Err(MQTTCodecError::new("unexpeccted packet type")),
-        }
-    }
-}
-
-impl Encoder<ControlPacket> for MQTTCodec {
-    type Error = MQTTCodecError;
-
-    fn encode(&mut self, packet: ControlPacket, dest: &mut BytesMut) -> Result<(), Self::Error> {
-        match packet.packet_type {
-            PacketType::PingReq | PacketType::PingResp => {
-                dest.put_u8(packet.packet_type as u8);
-                dest.put_u8(packet.flags);
-                Ok(())
-            }
-            _ => Err(MQTTCodecError::new(
-                format!("unexpeccted packet type: {}", packet.packet_type).as_str(),
-            )),
-        }
-    }
-}
-
-
-fn decode_variable_len_integer(data: &[u8]) -> (u32, usize) {
-    let mut result = 0_u32;
-    let mut shift = 0;
-    let mut idx = 0_usize;
-    let mut next_byte = data[0];
-    let mut decode = true;
-    while decode && idx < 4 {
-        println!("shift by {}", shift);
-        result += ((next_byte & 0x7f) as u32) << shift;
-        println!("result {}", result);
-        shift += 7;
-        idx += 1;
-        if next_byte & 0x80 == 0 {
-            decode = false;
-        }
-        next_byte = data[idx];
-    }
-    (result, idx)
 }
 
 #[cfg(test)]
-mod test {
+mod Test {
     use super::*;
-
-
-    #[test]
-    fn decode_var_int() {
-        let mut test_value = [0_u8; 4];
-        test_value[0] = 0x80;
-        test_value[1] = 0x01;
-        let (val, len) = decode_variable_len_integer(&test_value);
-        assert_eq!(2, len);
-        assert_eq!(128, val);
-    }
 
     #[test]
     /// Random test of display trait for packet types.
