@@ -1,7 +1,9 @@
+use futures::{SinkExt, StreamExt};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio_util::codec::Framed;
+use vaux_mqtt::{ControlPacket, MQTTCodec, MQTTCodecError, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
@@ -15,7 +17,6 @@ impl Default for Broker {
     /// Creates a new MQTT broker listening to local loopback on the default MQTT
     /// port (1883) for unsecure traffic
     fn default() -> Self {
-        println!("default()");
         Broker {
             listen_addr: SocketAddr::try_from((
                 Ipv4Addr::from_str(DEFAULT_LISTEN_ADDR).unwrap(),
@@ -27,7 +28,10 @@ impl Default for Broker {
 }
 
 impl Broker {
-    // Creates a new broker with the configuration specified
+    #[allow(dead_code)]
+    /// Creates a new broker with the configuration specified. This method will
+    /// not be used until the command line interface is developed. Remove the
+    /// dead_code override when complete
     pub fn new(listen_addr: SocketAddr) -> Self {
         Broker { listen_addr }
     }
@@ -39,7 +43,13 @@ impl Broker {
                 loop {
                     let (mut socket, _) = listener.accept().await?;
                     tokio::spawn(async move {
-                        Broker::handle_client(&mut socket).await;
+                        match Broker::handle_client(&mut socket).await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                // TODO unhandled error in client handler should result in disconnect
+                                eprintln!("error in child process: {}", e);
+                            }
+                        }
                     });
                 }
             }
@@ -50,22 +60,30 @@ impl Broker {
         }
     }
 
-    async fn handle_client(stream: &mut TcpStream) {
-        let mut buf = [0; 1024];
-        loop {
-            let count = match stream.read(&mut buf).await {
-                Ok(count) if count == 0 => return,
-                Ok(count) => count,
-                Err(e) => {
-                    eprintln!("failed to read from socket; error = {:?}", e);
-                    return;
-                }
-            };
-            // write the data in the buffer back out
-            if let Err(e) = stream.write_all(&buf[0..count]).await {
-                eprintln!("failed to write data to socket; error = {:?}", e);
+    async fn handle_client(stream: &mut TcpStream) -> Result<(), Box<dyn std::error::Error>> {
+        let mut frame = Framed::new(stream, MQTTCodec {});
+        let request = frame.next().await;
+        if let Some(request) = request {
+            match request {
+                Ok(request) => match request.packet_type() {
+                    PacketType::PingReq => {
+                        let response = ControlPacket::new(PacketType::PingResp);
+                        frame.send(response).await?;
+                    }
+                    PacketType::Connect => {
+                        let response = ControlPacket::new(PacketType::ConnAck);
+                        frame.send(response).await?;
+                    }
+                    _ => {
+                        return Err(Box::new(MQTTCodecError::new(
+                            format!("unsupported packet type: {}", request.packet_type()).as_str(),
+                        )))
+                    }
+                },
+                Err(e) => return Err(Box::new(e)),
             }
         }
+        Ok(())
     }
 }
 

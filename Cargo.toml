@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "vaux-mqtt",
     "vaux-broker",
     "vaux-test"
 ]

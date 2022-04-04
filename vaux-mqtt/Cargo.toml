@@ -1,11 +1,10 @@
 [package]
-name = "vaux-broker"
+name = "vaux-mqtt"
 version = "0.1.0"
 edition = "2021"
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
 [dependencies]
-tokio = { version = "1.17.0", features = ["full"] }
 tokio-util = { version = "0.7.0", features = ["codec"] }
-futures = "0.3.21"
 bytes = "1.1.0"
-vaux-mqtt = { path="../vaux-mqtt" }
