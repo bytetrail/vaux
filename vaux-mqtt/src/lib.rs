@@ -1,215 +1,104 @@
 pub mod codec;
 
-pub use crate::codec::{MQTTCodec, MQTTCodecError};
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+pub use crate::codec::{ControlPacket, PacketType, MQTTCodec, MQTTCodecError};
 
-const PACKET_RESERVED_NONE: u8 = 0x00;
-const PACKET_RESERVED_BIT1: u8 = 0x02;
 
-pub trait VariableHeader {
-    fn transport_size() -> u32;
+/// MQTT property type. For more information on the specific property types,
+/// please see the
+/// [MQTT Specification](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901027).
+/// Identifier | Name | Type
+/// -----------+------+-----
+/// 0x01 | Payload Format Indicator | byte
+/// 0x02 | Message Expiry Interval | 4 byte Integer
+/// 0x03 | Content Type | UTF-8 string
+/// 0x08 | Response Topic | UTF-8 string
+/// 0x09 | Correlation Data | Binary Data
+/// 0x0b | Subscription Identifier | Variable Length Integer
+/// 0x11 | Session Expiry Interval | 4 byte Integer
+/// 0x12 | Assigned Client Identifier | UTF-8 string
+/// 0x13 | Server Keep Alive | 2 byte integer
+/// 0x15 | Authentication Method | UTF-8 string
+/// 0x16 | Authentication Data | binary data
+/// 0x17 | Request Problem Information | byte
+/// 0x18 | Will Delay Interval | 4 byte integer
+/// 0x19 | Request Response Information | byte
+/// 0x1a | Response Information | UTF-8 string
+/// 0x1c | Server Reference | UTF-8 string
+/// 0x1f | Reason String | UTF-8 string
+/// 0x23 | Topic Alias | 2 byte integer
+/// 0x24 | Maximum QoS | byte
+/// 0x25 | Retain Available | byte
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum PropertyType {
+    PayloadFormat = 0x01,
+    MessageExpiry = 0x02,
+    ContentType = 0x03,
+    ResponseTopic = 0x08,
+    CorrelationData = 0x09,
+    SubscriptionId = 0x0b,
+    SessionExpiry = 0x11,
+    ClientId = 0x12,
+    KeepAlive = 0x13,
+    AuthMethod = 0x15,
+    AuthData = 0x16,
+    RequestInfo = 0x17,
+    WillDelay = 0x18,
+    ReqRespInfo = 0x19,
+    RespInfo = 0x1a,
+    ServerRef = 0x1c,
+    Reason = 0x1f,
+    RecvMax = 0x21,
+    TopicAliasMax = 0x22,
+    TopicAlias = 0x23,
+    MaxQoS = 0x24,
+    RetainAvail = 0x25,
 }
 
-pub trait Payload {
-    fn transport_size() -> u32;
-}
 
-pub trait Packet {
-    fn remaining() -> u32;
-}
-
-/// MQTT Control Packet Type
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub enum PacketType {
-    Connect = 0x10,
-    ConnAck = 0x20,
-    Publish = 0x30,
-    PubAck = 0x40,
-    PubRec = 0x50,
-    PubRel = 0x60,
-    PubComp = 0x70,
-    Subscribe = 0x80,
-    SubAck = 0x90,
-    Unsubscribe = 0xa0,
-    UnsubAck = 0xb0,
-    PingReq = 0xc0,
-    PingResp = 0xd0,
-    Disconnect = 0xe0,
-    Auth = 0xf0,
+enum QoSLevel {
+    AtMostOnce,
+    AtLeastOnce,
+    ExactlyOnce,
 }
 
-impl From<u8> for PacketType {
-    fn from(val: u8) -> Self {
-        match val & 0xf0 {
-            0x10 => PacketType::Connect,
-            0x20 => PacketType::ConnAck,
-            0x30 => PacketType::Publish,
-            0x40 => PacketType::PubAck,
-            0x50 => PacketType::PubRec,
-            0x60 => PacketType::PubRel,
-            0x70 => PacketType::PubComp,
-            0x80 => PacketType::Subscribe,
-            0x90 => PacketType::SubAck,
-            0xa0 => PacketType::Unsubscribe,
-            0xb0 => PacketType::UnsubAck,
-            0xc0 => PacketType::PingReq,
-            0xd0 => PacketType::PingResp,
-            0xe0 => PacketType::Disconnect,
-            _ => PacketType::Auth,
-        }
-    }
+
+pub struct WillMessage {
+    qos: QoSLevel,
+    retain: bool,
+    topic: String,
+    message: Vec<u8>,
 }
 
-impl Display for PacketType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", format!("{:?}", &self).as_str().to_uppercase())
-    }
+struct AuthData {
+    method: String,
+    data: Vec<u8>,
 }
 
-#[derive(Debug)]
-pub struct ControlPacket {
-    packet_type: PacketType,
-    flags: u8,
-    remaining: u32,
+struct UserProperty {
+    key: String,
+    value: String,
 }
 
-impl ControlPacket {
-    pub fn new(packet_type: PacketType) -> Self {
-        match packet_type {
-            PacketType::PubRel | PacketType::Subscribe | PacketType::Unsubscribe => ControlPacket {
-                packet_type,
-                flags: PACKET_RESERVED_BIT1,
-                remaining: 0,
-            },
-            _ => ControlPacket {
-                packet_type,
-                flags: PACKET_RESERVED_NONE,
-                remaining: 0,
-            },
-        }
-    }
-
-    pub fn packet_type(&self) -> PacketType {
-        self.packet_type
-    }
-
-    pub fn set_remaining(&mut self, remaining: u32) {
-        self.remaining = remaining;
-    }
+pub struct Connect {
+    clean_start: bool,
+    keep_alive: u16,
+    session_expiry_interval: u32,
+    receive_max: u16,
+    max_packet_size: u32,
+    topic_alias_max: u16,
+    req_resp_info: bool,
+    request_info: bool,
+    auth: Option<AuthData>,
+    will_message: Option<WillMessage>,
+    user_property: Option<HashMap<String, String>>,
 }
 
 #[cfg(test)]
-mod Test {
+mod test {
     use super::*;
 
-    #[test]
-    /// Random test of display trait for packet types.
-    fn test_packet_type_display() {
-        let p = PacketType::UnsubAck;
-        assert_eq!("UNSUBACK", format!("{}", p));
-        let p = PacketType::PingReq;
-        assert_eq!("PINGREQ", format!("{}", p));
-    }
 
-    #[test]
-    fn test_control_packet_type_from() {
-        let val = 0x12;
-        assert_eq!(
-            PacketType::Connect,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::Connect
-        );
-        let val = 0x2f;
-        assert_eq!(
-            PacketType::ConnAck,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::ConnAck
-        );
-        let val = 0x35;
-        assert_eq!(
-            PacketType::Publish,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::Publish
-        );
-        let val = 0x47;
-        assert_eq!(
-            PacketType::PubAck,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::PubAck
-        );
-        let val = 0x5f;
-        assert_eq!(
-            PacketType::PubRec,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::PubRec
-        );
-        let val = 0x6f;
-        assert_eq!(
-            PacketType::PubRel,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::PubRel
-        );
-        let val = 0x7f;
-        assert_eq!(
-            PacketType::PubComp,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::PubComp
-        );
-        let val = 0x8f;
-        assert_eq!(
-            PacketType::Subscribe,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::Subscribe
-        );
-        let val = 0x9f;
-        assert_eq!(
-            PacketType::SubAck,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::SubAck
-        );
-        let val = 0xaf;
-        assert_eq!(
-            PacketType::Unsubscribe,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::Unsubscribe
-        );
-        let val = 0xbf;
-        assert_eq!(
-            PacketType::UnsubAck,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::UnsubAck
-        );
-        let val = 0xcf;
-        assert_eq!(
-            PacketType::PingReq,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::PingReq
-        );
-        let val = 0xdf;
-        assert_eq!(
-            PacketType::PingResp,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::PingResp
-        );
-        let val = 0xff;
-        assert_eq!(
-            PacketType::Auth,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::Auth
-        );
-    }
 }
