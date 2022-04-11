@@ -2,7 +2,7 @@ use bytes::BytesMut;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder};
-use vaux_mqtt::{ControlPacket, MQTTCodec, PacketType};
+use vaux_mqtt::{FixedHeader, MQTTCodec, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_HOST: &'static str = "127.0.0.1";
@@ -27,7 +27,7 @@ fn test_basic(request_type: PacketType, expected_len: usize, response_type: Pack
     match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
         Ok(mut stream) => {
             let mut buffer = [0u8; 128];
-            let request = ControlPacket::new(request_type);
+            let request = FixedHeader::new(request_type);
             let mut dest = BytesMut::new();
             let _result = codec.encode(request, &mut dest);
 

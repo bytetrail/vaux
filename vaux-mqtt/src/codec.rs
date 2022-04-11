@@ -1,7 +1,7 @@
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use std::fmt::{Display, Formatter};
 use tokio_util::codec::{Decoder, Encoder};
-
+use crate::connect::Connect;
 
 
 const PACKET_RESERVED_NONE: u8 = 0x00;
@@ -57,21 +57,21 @@ impl Display for PacketType {
 
 
 #[derive(Debug)]
-pub struct ControlPacket {
+pub struct FixedHeader {
     packet_type: PacketType,
     flags: u8,
     remaining: u32,
 }
 
-impl ControlPacket {
+impl FixedHeader {
     pub fn new(packet_type: PacketType) -> Self {
         match packet_type {
-            PacketType::PubRel | PacketType::Subscribe | PacketType::Unsubscribe => ControlPacket {
+            PacketType::PubRel | PacketType::Subscribe | PacketType::Unsubscribe => FixedHeader {
                 packet_type,
                 flags: PACKET_RESERVED_BIT1,
                 remaining: 0,
             },
-            _ => ControlPacket {
+            _ => FixedHeader {
                 packet_type,
                 flags: PACKET_RESERVED_NONE,
                 remaining: 0,
@@ -121,67 +121,25 @@ impl MQTTCodecError {
 #[derive(Debug)]
 pub struct MQTTCodec {}
 
-impl MQTTCodec {
-    fn decode_remaining(&mut self, src: &mut BytesMut) -> (u32, usize) {
-        let mut end = 5;
-        // handle a degenerate case where there is a remaining length but bytes not present
-        if src.len() < 5 {
-            end = src.len();
-        }
-        decode_variable_len_integer(&src[1..end])
-    }
-}
-
 impl Decoder for MQTTCodec {
-    type Item = ControlPacket;
+    type Item = FixedHeader;
     type Error = MQTTCodecError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let packet_type = PacketType::from(src[0]);
-        let flags = src[0] & 0x0f;
-        match packet_type {
-            PacketType::Connect
-            | PacketType::PubRel
-            | PacketType::Subscribe
-            | PacketType::Unsubscribe => {
-                let (remaining, _len) = self.decode_remaining(src);
-                if flags != PACKET_RESERVED_NONE {
-                    MQTTCodecError::new(format!("invalid flags for {}: {}", packet_type, flags).as_str());
-                }
-                Ok(Some(ControlPacket {
-                    packet_type,
-                    flags,
-                    remaining,
-                }))
-            }
-            PacketType::ConnAck
-            | PacketType::PubRec
-            | PacketType::PubComp
-            | PacketType::SubAck
-            | PacketType::UnsubAck
-            | PacketType::PingReq
-            | PacketType::PingResp
-            | PacketType::Disconnect
-            | PacketType::Auth => {
-                let (remaining, _len) = self.decode_remaining(src);
-                if flags != PACKET_RESERVED_NONE {
-                    MQTTCodecError::new(format!("invalid flags for {}: {}", packet_type, flags).as_str());
-                }
-                Ok(Some(ControlPacket {
-                    packet_type,
-                    flags,
-                    remaining,
-                }))
-            }
-            _ => Err(MQTTCodecError::new("unexpected packet type")),
+        match decode_fixed_header(src) {
+            Ok(packet_header) => {
+                Ok(Some(packet_header))
+            },
+            Err(e) => Err(e),
         }
+
     }
 }
 
-impl Encoder<ControlPacket> for MQTTCodec {
+impl Encoder<FixedHeader> for MQTTCodec {
     type Error = MQTTCodecError;
 
-    fn encode(&mut self, packet: ControlPacket, dest: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, packet: FixedHeader, dest: &mut BytesMut) -> Result<(), Self::Error> {
         match packet.packet_type {
             PacketType::Connect
             | PacketType::ConnAck
@@ -216,24 +174,65 @@ fn encode_variable_len_integer(val: u32, result: &mut [u8]) -> usize {
     idx
 }
 
-fn decode_variable_len_integer(data: &[u8]) -> (u32, usize) {
+fn decode_variable_len_integer(src: &mut BytesMut) ->  u32 {
     let mut result = 0_u32;
     let mut shift = 0;
-    let mut idx = 0_usize;
-    let mut next_byte = data[0];
+    let mut next_byte = src.get_u8();
     let mut decode = true;
-    while decode && idx < 4 {
+    while decode {
         result += ((next_byte & 0x7f) as u32) << shift;
         shift += 7;
-        idx += 1;
         if next_byte & 0x80 == 0 {
             decode = false;
         } else {
-            next_byte = data[idx];
+            next_byte = src.get_u8();
         }
     }
-    (result, idx)
+    result
 }
+
+fn decode_fixed_header(src: &mut BytesMut) -> Result<FixedHeader, MQTTCodecError> {
+    let first_byte = src.get_u8();
+    let packet_type = PacketType::from(first_byte);
+    let flags = first_byte;
+    match packet_type {
+        PacketType::Connect
+        | PacketType::PubRel
+        | PacketType::Subscribe
+        | PacketType::Unsubscribe => {
+            let remaining = decode_variable_len_integer(src);
+            if flags != PACKET_RESERVED_NONE {
+                MQTTCodecError::new(format!("invalid flags for {}: {}", packet_type, flags).as_str());
+            }
+            Ok(FixedHeader {
+                packet_type,
+                flags,
+                remaining,
+            })
+        }
+        PacketType::ConnAck
+        | PacketType::PubRec
+        | PacketType::PubComp
+        | PacketType::SubAck
+        | PacketType::UnsubAck
+        | PacketType::PingReq
+        | PacketType::PingResp
+        | PacketType::Disconnect
+        | PacketType::Auth => {
+            let remaining= decode_variable_len_integer(src);
+            if flags != PACKET_RESERVED_NONE {
+                MQTTCodecError::new(format!("invalid flags for {}: {}", packet_type, flags).as_str());
+            }
+            Ok(FixedHeader {
+                packet_type,
+                flags,
+                remaining,
+            })
+        }
+        _ => Err(MQTTCodecError::new("unexpected packet type")),
+    }
+}
+
 
 #[cfg(test)]
 mod test {
@@ -368,18 +367,16 @@ mod test {
 
     #[test]
     fn test_decode_var_int() {
-        let mut test_value = [0_u8; 4];
+        let mut encoded: BytesMut = BytesMut::with_capacity(6);
         // 0x80
-        test_value[0] = 0x80;
-        test_value[1] = 0x01;
-        let (val, len) = decode_variable_len_integer(&test_value);
-        assert_eq!(2, len);
+        encoded[0] = 0x80;
+        encoded[1] = 0x01;
+        let val = decode_variable_len_integer(&mut encoded);
         assert_eq!(128, val);
         // 777 --- 0x309
-        test_value[0] = 0x89;
-        test_value[1] = 0x06;
-        let (val, len) = decode_variable_len_integer(&test_value);
-        assert_eq!(2, len);
+        encoded[0] = 0x89;
+        encoded[1] = 0x06;
+        let val = decode_variable_len_integer(&mut encoded);
         assert_eq!(777, val);
     }
 

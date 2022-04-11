@@ -3,7 +3,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
-use vaux_mqtt::{ControlPacket, MQTTCodec, MQTTCodecError, PacketType};
+use vaux_mqtt::{FixedHeader, MQTTCodec, MQTTCodecError, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
@@ -67,11 +67,11 @@ impl Broker {
             match request {
                 Ok(request) => match request.packet_type() {
                     PacketType::PingReq => {
-                        let response = ControlPacket::new(PacketType::PingResp);
+                        let response = FixedHeader::new(PacketType::PingResp);
                         frame.send(response).await?;
                     }
                     PacketType::Connect => {
-                        let response = ControlPacket::new(PacketType::ConnAck);
+                        let response = FixedHeader::new(PacketType::ConnAck);
                         frame.send(response).await?;
                     }
                     _ => {
