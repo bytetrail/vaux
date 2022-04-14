@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use bytes::{Buf, BytesMut};
 use tokio_util::codec::Decoder;
-use crate::{AuthData, MQTTCodecError, QoSLevel, WillMessage};
-
+use crate::{AuthData, QoSLevel, WillMessage};
+use crate::codec::{check_property, decode_variable_len_integer, encode_variable_len_integer, MQTTCodecError, PropertyType};
 
 const MQTT_PROTOCOL_U32: u32 = 0x4d515454;
 const MQTT_PROTOCOL_VERSION: u8 = 0x05;
@@ -15,6 +15,7 @@ const CONNECT_FLAG_WILL: u8 = 0b_0000_0100;
 const CONNECT_FLAG_CLEAN_START: u8 = 0b_0000_0010;
 
 const CONNECT_FLAG_SHIFT: u8 = 0x03;
+const DEFAULT_RECEIVE_MAX: u16 = 0xffff;
 
 #[derive(Debug)]
 pub struct Connect {
@@ -22,15 +23,72 @@ pub struct Connect {
     password: bool,
     clean_start: bool,
     keep_alive: u16,
-    session_expiry_interval: u32,
+    session_expiry_interval: Option<u32>,
     receive_max: u16,
-    max_packet_size: u32,
-    topic_alias_max: u16,
+    max_packet_size: Option<u32>,
+    topic_alias_max: Option<u16>,
     req_resp_info: bool,
-    request_info: bool,
+    problem_info: bool,
     auth: Option<AuthData>,
     will_message: Option<WillMessage>,
     user_property: Option<HashMap<String, String>>,
+}
+
+impl Connect {
+    fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        let prop_size = decode_variable_len_integer(src);
+        let read_until = src.remaining() - prop_size as usize;
+        let mut properties: HashSet<PropertyType> = HashSet::new();
+        while src.remaining() > read_until {
+            match PropertyType::try_from(src.get_u8()) {
+                Ok(property_type) => {
+                    match property_type {
+                        PropertyType::SessionExpiry => {
+                            check_property(PropertyType::SessionExpiry, &mut properties)?;
+                            self.session_expiry_interval = Some(src.get_u32());
+                        }
+                        PropertyType::RecvMax => {
+                            check_property(PropertyType::SessionExpiry, &mut properties)?;
+                            self.receive_max = src.get_u16();
+                        }
+                        PropertyType::MaxPacketSize => {
+                            check_property(PropertyType::SessionExpiry, &mut properties)?;
+                            self.max_packet_size = Some(src.get_u32());
+                        }
+                        PropertyType::TopicAliasMax => {
+                            check_property(PropertyType::SessionExpiry, &mut properties)?;
+                            self.topic_alias_max = Some(src.get_u16());
+                        }
+                        PropertyType::ReqRespInfo => {
+                            check_property(PropertyType::ReqRespInfo, &mut properties)?;
+                            match src.get_u8() {
+                                0 => self.req_resp_info = false,
+                                1 => self.req_resp_info = true,
+                                v => return Err(MQTTCodecError::new(format!("invalid value {} for {}", v, PropertyType::ReqRespInfo).as_str()))
+                            }
+                        }
+                        PropertyType::RespInfo => {
+                            check_property(PropertyType::RespInfo, &mut properties)?;
+                            match src.get_u8() {
+                                0 => self.problem_info = false,
+                                1 => self.problem_info = true,
+                                v => return Err(MQTTCodecError::new(format!("invalid value {} for {}", v, PropertyType::RespInfo).as_str()))
+                            }
+                        }
+                        PropertyType::UserProperty => {
+                            // TODO read UTF-8 string pair
+                        }
+                        _ => return Err(MQTTCodecError::new(format!("unexpected property").as_str())),
+                    }
+                },
+                Err(_) => return Err(MQTTCodecError::new("invalid property type"))
+            };
+            if src.remaining() < read_until {
+                return Err(MQTTCodecError::new("property size does not match expected length"))
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for Connect {
@@ -40,12 +98,12 @@ impl Default for Connect {
             password: false,
             clean_start: false,
             keep_alive: 0,
-            session_expiry_interval: 0,
-            receive_max: 0,
-            max_packet_size: 1024,
-            topic_alias_max: 10,
+            session_expiry_interval: None,
+            receive_max: DEFAULT_RECEIVE_MAX,
+            max_packet_size: None,
+            topic_alias_max: None,
             req_resp_info: false,
-            request_info: false,
+            problem_info: true,
             auth: None,
             will_message: None,
             user_property: None
@@ -86,6 +144,8 @@ impl Decoder for Connect {
                 return Err(MQTTCodecError::new("invalid Will QoS level"));
             }
         }
+        connect.keep_alive = src.get_u16();
+        connect.decode_properties(src);
         Ok(Some(connect))
     }
 }
