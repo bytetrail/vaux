@@ -152,6 +152,18 @@ pub(crate) fn check_property(property: PropertyType, properties: &mut HashSet<Pr
     Ok(())
 }
 
+pub(crate) fn read_utf8_string(src: &mut BytesMut) -> Result<String, MQTTCodecError>{
+    let len = src.get_u16();
+    let mut chars: Vec<u8> = Vec::with_capacity(len as usize);
+    for _ in 0..len {
+        chars.push(src.get_u8());
+    }
+    match String::from_utf8(chars) {
+        Ok(s) => Ok(s),
+        Err(e) => Err(MQTTCodecError::new(&format!("{:?}", e)))
+    }
+}
+
 /// MQTT Control Packet Type
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum PacketType {

@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use bytes::{Buf, BytesMut};
 use tokio_util::codec::Decoder;
-use crate::{AuthData, QoSLevel, WillMessage};
-use crate::codec::{check_property, decode_variable_len_integer, encode_variable_len_integer, MQTTCodecError, PropertyType};
+use crate::{QoSLevel, WillMessage};
+use crate::codec::{check_property, decode_variable_len_integer, encode_variable_len_integer, MQTTCodecError, PropertyType, read_utf8_string};
 
 const MQTT_PROTOCOL_U32: u32 = 0x4d515454;
 const MQTT_PROTOCOL_VERSION: u8 = 0x05;
@@ -29,9 +29,11 @@ pub struct Connect {
     topic_alias_max: Option<u16>,
     req_resp_info: bool,
     problem_info: bool,
-    auth: Option<AuthData>,
+    auth_method: Option<String>,
+    auth_data: Option<u8>,
     will_message: Option<WillMessage>,
     user_property: Option<HashMap<String, String>>,
+
 }
 
 impl Connect {
@@ -75,6 +77,21 @@ impl Connect {
                                 v => return Err(MQTTCodecError::new(format!("invalid value {} for {}", v, PropertyType::RespInfo).as_str()))
                             }
                         }
+                        PropertyType::AuthMethod => {
+                            check_property(PropertyType::AuthMethod, &mut properties)?;
+                            let result = read_utf8_string(src)?;
+                            self.auth_method = Some(result);
+                        }
+                        PropertyType::AuthData=> {
+                            if self.auth_method != None {
+                                check_property(PropertyType::AuthData, &mut properties)?;
+
+                            } else {
+                                // MQTT protocol not specific that auth method must appear before
+                                // auth data. This implementation imposes order and may be incorrect
+                                return Err(MQTTCodecError::new(&format!("Property: {} provided without providing {}", PropertyType::AuthData, PropertyType::AuthMethod)));
+                            }
+                        }
                         PropertyType::UserProperty => {
                             // TODO read UTF-8 string pair
                         }
@@ -104,7 +121,8 @@ impl Default for Connect {
             topic_alias_max: None,
             req_resp_info: false,
             problem_info: true,
-            auth: None,
+            auth_method: None,
+            auth_data: None,
             will_message: None,
             user_property: None
         }
@@ -145,7 +163,7 @@ impl Decoder for Connect {
             }
         }
         connect.keep_alive = src.get_u16();
-        connect.decode_properties(src);
+        connect.decode_properties(src)?;
         Ok(Some(connect))
     }
 }

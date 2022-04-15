@@ -47,11 +47,6 @@ impl WillMessage {
     }
 }
 
-#[derive(Debug)]
-struct AuthData {
-    method: String,
-    data: Vec<u8>,
-}
 
 #[cfg(test)]
 mod test {
