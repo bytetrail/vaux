@@ -3,7 +3,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
-use vaux_mqtt::{FixedHeader, MQTTCodec, MQTTCodecError, PacketType};
+use vaux_mqtt::{FixedHeader, MQTTCodec, MQTTCodecError, Packet, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
@@ -65,19 +65,21 @@ impl Broker {
         let request = frame.next().await;
         if let Some(request) = request {
             match request {
-                Ok(request) => match request.packet_type() {
-                    PacketType::PingReq => {
-                        let response = FixedHeader::new(PacketType::PingResp);
-                        frame.send(response).await?;
-                    }
-                    PacketType::Connect => {
-                        let response = FixedHeader::new(PacketType::ConnAck);
-                        frame.send(response).await?;
-                    }
-                    _ => {
-                        return Err(Box::new(MQTTCodecError::new(
-                            format!("unsupported packet type: {}", request.packet_type()).as_str(),
-                        )))
+                Ok(request)  => {
+                    match request {
+                        Packet::PingRequest(_) => {
+                            let header = FixedHeader::new(PacketType::PingResp);
+                            frame.send(Packet::PingResponse(header)).await?;
+                        }
+                        Packet::Connect(_) => {
+                            let header = FixedHeader::new(PacketType::ConnAck);
+                            frame.send(Packet::ConnAck(header)).await?;
+                        }
+                        _ => {
+                            return Err(Box::new(MQTTCodecError::new(
+                                format!("unsupported packet type: {:?}", request).as_str(),
+                            )))
+                        }
                     }
                 },
                 Err(e) => return Err(Box::new(e)),

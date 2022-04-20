@@ -2,7 +2,8 @@ use bytes::BytesMut;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder};
-use vaux_mqtt::{FixedHeader, MQTTCodec, PacketType};
+use vaux_mqtt::{FixedHeader, MQTTCodec,
+Connect, Packet, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_HOST: &'static str = "127.0.0.1";
@@ -14,20 +15,32 @@ const CONNACK_RESP_LEN: usize = 2;
 /// * Host: 127.0.0.1
 /// * Port: 1883
 fn test_basic_ping() {
-    test_basic(PacketType::PingReq, PING_RESP_LEN, PacketType::PingResp);
+    let fixed_header = FixedHeader::new(PacketType::PingResp);
+    test_basic(PacketType::PingReq, PING_RESP_LEN, Packet::PingResponse(fixed_header));
 }
 
 #[test]
 fn test_basic_connect() {
-    test_basic(PacketType::Connect, CONNACK_RESP_LEN, PacketType::ConnAck);
+    let fixed_header = FixedHeader::new(PacketType::ConnAck);
+    test_basic(PacketType::Connect, CONNACK_RESP_LEN, Packet::ConnAck(fixed_header));
 }
 
-fn test_basic(request_type: PacketType, expected_len: usize, response_type: PacketType) {
+fn test_basic(request_type: PacketType, expected_len: usize, expected_response: Packet) {
     let mut codec = MQTTCodec {};
     match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
         Ok(mut stream) => {
             let mut buffer = [0u8; 128];
-            let request = FixedHeader::new(request_type);
+            let header = FixedHeader::new(request_type);
+            let request = match request_type {
+                PacketType::PingReq => {
+                    Packet::PingRequest(header)
+                }
+                PacketType::Connect => {
+                    let connect = Connect::default();
+                    Packet::Connect(connect)
+                }
+                _ => { panic!()}
+            };
             let mut dest = BytesMut::new();
             let _result = codec.encode(request, &mut dest);
 
@@ -43,12 +56,12 @@ fn test_basic(request_type: PacketType, expected_len: usize, response_type: Pack
                         match result {
                             Ok(p) => {
                                 if let Some(packet) = p {
-                                    assert_eq!(response_type, packet.packet_type());
+                                    assert_eq!(expected_response, packet);
                                 } else {
                                     assert!(
                                         false,
-                                        "expected {} packet type, found None",
-                                        response_type
+                                        "expected {:?} packet type, found None",
+                                        expected_response
                                     );
                                 }
                             }

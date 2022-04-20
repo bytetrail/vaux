@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
-use bytes::{Buf, BytesMut};
-use tokio_util::codec::Decoder;
+use crate::codec::{check_property, decode_variable_len_integer, encode_variable_len_integer, read_utf8_string, MQTTCodecError, PropertyType, read_binary_data};
 use crate::{QoSLevel, WillMessage};
-use crate::codec::{check_property, decode_variable_len_integer, encode_variable_len_integer, MQTTCodecError, PropertyType, read_utf8_string};
+use bytes::{Buf, BytesMut};
+use std::collections::{HashMap, HashSet};
+use tokio_util::codec::Decoder;
 
 const MQTT_PROTOCOL_U32: u32 = 0x4d515454;
 const MQTT_PROTOCOL_VERSION: u8 = 0x05;
@@ -17,7 +17,7 @@ const CONNECT_FLAG_CLEAN_START: u8 = 0b_0000_0010;
 const CONNECT_FLAG_SHIFT: u8 = 0x03;
 const DEFAULT_RECEIVE_MAX: u16 = 0xffff;
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct Connect {
     username: bool,
     password: bool,
@@ -30,17 +30,73 @@ pub struct Connect {
     req_resp_info: bool,
     problem_info: bool,
     auth_method: Option<String>,
-    auth_data: Option<u8>,
+    auth_data: Option<Vec<u8>>,
     will_message: Option<WillMessage>,
     user_property: Option<HashMap<String, String>>,
-
 }
 
 impl Connect {
+    pub(crate) fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        let mut connect = Connect::default();
+        let len = src.get_u16();
+        if len != 0x04 {
+            return Err(MQTTCodecError::new(
+                format!("invalid protocol name length: {}", len).as_str(),
+            ));
+        }
+        let mqtt_str = src.get_u32();
+        if mqtt_str != MQTT_PROTOCOL_U32 {
+            return Err(MQTTCodecError::new("unsupported protocol"));
+        }
+        let protocol_version = src.get_u8();
+        if protocol_version != MQTT_PROTOCOL_VERSION {
+            return Err(MQTTCodecError::new(
+                format!("unsupported protocol version: {}", protocol_version).as_str(),
+            ));
+        }
+        // connect flags
+        let connect_flags = src.get_u8();
+        connect.username = if connect_flags & CONNECT_FLAG_USERNAME != 0 {
+            true
+        } else {
+            false
+        };
+        println!("Username {}", connect.username);
+        connect.password = if connect_flags & CONNECT_FLAG_PASSWORD != 0 {
+            true
+        } else {
+            false
+        };
+        println!("Passwer {}", connect.password);
+        connect.clean_start = if connect_flags & CONNECT_FLAG_CLEAN_START != 0 {
+            true
+        } else {
+            false
+        };
+        if connect_flags & CONNECT_FLAG_WILL != 0 {
+            let will_retain = if connect_flags & CONNECT_FLAG_WILL_RETAIN != 0 {
+                true
+            } else {
+                false
+            };
+            let qos = connect_flags & CONNECT_FLAG_WILL_QOS >> CONNECT_FLAG_SHIFT;
+            if let Ok(qos) = QoSLevel::try_from(qos) {
+                connect.will_message = Some(WillMessage::new(qos, will_retain));
+            } else {
+                return Err(MQTTCodecError::new("invalid Will QoS level"));
+            }
+        }
+        connect.keep_alive = src.get_u16();
+        println!("Keep alive: {}", connect.keep_alive);
+        connect.decode_properties(src)?;
+        Ok(())
+    }
+
     fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
         let prop_size = decode_variable_len_integer(src);
         let read_until = src.remaining() - prop_size as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
+        let user_properties: HashMap<String, String> = HashMap::new();
         while src.remaining() > read_until {
             match PropertyType::try_from(src.get_u8()) {
                 Ok(property_type) => {
@@ -66,7 +122,16 @@ impl Connect {
                             match src.get_u8() {
                                 0 => self.req_resp_info = false,
                                 1 => self.req_resp_info = true,
-                                v => return Err(MQTTCodecError::new(format!("invalid value {} for {}", v, PropertyType::ReqRespInfo).as_str()))
+                                v => {
+                                    return Err(MQTTCodecError::new(
+                                        format!(
+                                            "invalid value {} for {}",
+                                            v,
+                                            PropertyType::ReqRespInfo
+                                        )
+                                        .as_str(),
+                                    ))
+                                }
                             }
                         }
                         PropertyType::RespInfo => {
@@ -74,7 +139,16 @@ impl Connect {
                             match src.get_u8() {
                                 0 => self.problem_info = false,
                                 1 => self.problem_info = true,
-                                v => return Err(MQTTCodecError::new(format!("invalid value {} for {}", v, PropertyType::RespInfo).as_str()))
+                                v => {
+                                    return Err(MQTTCodecError::new(
+                                        format!(
+                                            "invalid value {} for {}",
+                                            v,
+                                            PropertyType::RespInfo
+                                        )
+                                        .as_str(),
+                                    ))
+                                }
                             }
                         }
                         PropertyType::AuthMethod => {
@@ -82,26 +156,48 @@ impl Connect {
                             let result = read_utf8_string(src)?;
                             self.auth_method = Some(result);
                         }
-                        PropertyType::AuthData=> {
+                        PropertyType::AuthData => {
                             if self.auth_method != None {
                                 check_property(PropertyType::AuthData, &mut properties)?;
-
+                                let mut dest = Vec::new();
+                                read_binary_data(&mut dest, src)?;
+                                self.auth_data = Some(dest);
                             } else {
                                 // MQTT protocol not specific that auth method must appear before
                                 // auth data. This implementation imposes order and may be incorrect
-                                return Err(MQTTCodecError::new(&format!("Property: {} provided without providing {}", PropertyType::AuthData, PropertyType::AuthMethod)));
+                                return Err(MQTTCodecError::new(&format!(
+                                    "Property: {} provided without providing {}",
+                                    PropertyType::AuthData,
+                                    PropertyType::AuthMethod
+                                )));
                             }
                         }
                         PropertyType::UserProperty => {
-                            // TODO read UTF-8 string pair
+                            if self.user_property == None {
+                                self.user_property = Some(HashMap::new());
+                            }
+                            let property_map = self.user_property.as_mut().unwrap();
+                            // MQTT v5.0 specification indicates that a key may appear multiple times
+                            // this implementation will overwrite existing values with duplicate
+                            // keys
+                            let key = read_utf8_string(src)?;
+                            let value = read_utf8_string(src)?;
+                            println!("User KV Pair: {}:{}", key, value);
+                            property_map.insert(key, value);
                         }
-                        _ => return Err(MQTTCodecError::new(format!("unexpected property").as_str())),
+                        _ => {
+                            return Err(MQTTCodecError::new(
+                                format!("unexpected property").as_str(),
+                            ))
+                        }
                     }
-                },
-                Err(_) => return Err(MQTTCodecError::new("invalid property type"))
+                }
+                Err(_) => return Err(MQTTCodecError::new("invalid property type")),
             };
             if src.remaining() < read_until {
-                return Err(MQTTCodecError::new("property size does not match expected length"))
+                return Err(MQTTCodecError::new(
+                    "property size does not match expected length",
+                ));
             }
         }
         Ok(())
@@ -110,7 +206,7 @@ impl Connect {
 
 impl Default for Connect {
     fn default() -> Self {
-        Connect{
+        Connect {
             username: false,
             password: false,
             clean_start: false,
@@ -124,46 +220,7 @@ impl Default for Connect {
             auth_method: None,
             auth_data: None,
             will_message: None,
-            user_property: None
+            user_property: None,
         }
-    }
-}
-
-impl Decoder for Connect {
-    type Item = Self;
-    type Error = MQTTCodecError;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        let mut connect = Connect::default();
-        let len = src.get_u16();
-        if len != 0x04 {
-            return Err(MQTTCodecError::new(format!("invalid protocol name length: {}", len).as_str()));
-        }
-        if src.get_u32() != MQTT_PROTOCOL_U32 {
-            return Err(MQTTCodecError::new("unsupported protocol"));
-        }
-        let protocol_version = src.get_u8();
-        if protocol_version != MQTT_PROTOCOL_VERSION {
-            return Err(MQTTCodecError::new(format!("unsupported protocol version: {}", protocol_version).as_str()));
-        }
-        // connect flags
-        let connect_flags = src.get_u8();
-        connect.username = if connect_flags & CONNECT_FLAG_USERNAME != 0 { true } else { false};
-        connect.password = if connect_flags & CONNECT_FLAG_PASSWORD != 0 { true } else { false};
-        connect.clean_start = if connect_flags & CONNECT_FLAG_CLEAN_START != 0{true} else { false};
-        if connect_flags & CONNECT_FLAG_WILL != 0 {
-            let will_retain = if connect_flags & CONNECT_FLAG_WILL_RETAIN != 0 {true} else { false};
-            let qos = connect_flags & CONNECT_FLAG_WILL_QOS >> CONNECT_FLAG_SHIFT;
-            if let Ok(qos) = QoSLevel::try_from(qos) {
-                connect.will_message = Some(
-                    WillMessage::new(qos, will_retain)
-                );
-            } else {
-                return Err(MQTTCodecError::new("invalid Will QoS level"));
-            }
-        }
-        connect.keep_alive = src.get_u16();
-        connect.decode_properties(src)?;
-        Ok(Some(connect))
     }
 }
