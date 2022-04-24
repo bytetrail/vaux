@@ -1,12 +1,19 @@
 mod codec;
 mod connect;
+mod connack;
 
 use std::collections::HashMap;
 pub use crate::codec::{MQTTCodec, MQTTCodecError, PacketType};
 pub use crate::connect::Connect;
+pub use crate::connack::ConnAck;
 
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
 pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
+
+
+pub(crate) trait Sized {
+    fn size(&self) -> usize;
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct FixedHeader {

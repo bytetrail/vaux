@@ -38,6 +38,7 @@ use tokio_util::codec::{Decoder, Encoder};
 /// 0x28 | Wildcard Subscription Available | byte
 /// 0x29 | Subscription Identifier Available | byte
 /// 0x2a | Shared Subscription Available | byte
+#[repr(u8)]
 #[derive(Hash, Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PropertyType {
     PayloadFormat = 0x01,
