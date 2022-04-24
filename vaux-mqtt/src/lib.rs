@@ -1,62 +1,55 @@
-pub mod codec;
+mod codec;
+mod connect;
 
 use std::collections::HashMap;
-use std::fmt::{Display, Formatter};
-pub use crate::codec::{ControlPacket, PacketType, MQTTCodec, MQTTCodecError};
+pub use crate::codec::{MQTTCodec, MQTTCodecError, PacketType};
+pub use crate::connect::Connect;
 
+pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
+pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
 
-/// MQTT property type. For more information on the specific property types,
-/// please see the
-/// [MQTT Specification](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901027).
-/// Identifier | Name | Type
-/// -----------+------+-----
-/// 0x01 | Payload Format Indicator | byte
-/// 0x02 | Message Expiry Interval | 4 byte Integer
-/// 0x03 | Content Type | UTF-8 string
-/// 0x08 | Response Topic | UTF-8 string
-/// 0x09 | Correlation Data | Binary Data
-/// 0x0b | Subscription Identifier | Variable Length Integer
-/// 0x11 | Session Expiry Interval | 4 byte Integer
-/// 0x12 | Assigned Client Identifier | UTF-8 string
-/// 0x13 | Server Keep Alive | 2 byte integer
-/// 0x15 | Authentication Method | UTF-8 string
-/// 0x16 | Authentication Data | binary data
-/// 0x17 | Request Problem Information | byte
-/// 0x18 | Will Delay Interval | 4 byte integer
-/// 0x19 | Request Response Information | byte
-/// 0x1a | Response Information | UTF-8 string
-/// 0x1c | Server Reference | UTF-8 string
-/// 0x1f | Reason String | UTF-8 string
-/// 0x23 | Topic Alias | 2 byte integer
-/// 0x24 | Maximum QoS | byte
-/// 0x25 | Retain Available | byte
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum PropertyType {
-    PayloadFormat = 0x01,
-    MessageExpiry = 0x02,
-    ContentType = 0x03,
-    ResponseTopic = 0x08,
-    CorrelationData = 0x09,
-    SubscriptionId = 0x0b,
-    SessionExpiry = 0x11,
-    ClientId = 0x12,
-    KeepAlive = 0x13,
-    AuthMethod = 0x15,
-    AuthData = 0x16,
-    RequestInfo = 0x17,
-    WillDelay = 0x18,
-    ReqRespInfo = 0x19,
-    RespInfo = 0x1a,
-    ServerRef = 0x1c,
-    Reason = 0x1f,
-    RecvMax = 0x21,
-    TopicAliasMax = 0x22,
-    TopicAlias = 0x23,
-    MaxQoS = 0x24,
-    RetainAvail = 0x25,
+#[derive(Debug, Eq, PartialEq)]
+pub struct FixedHeader {
+    packet_type: PacketType,
+    flags: u8,
+    remaining: u32,
 }
 
+impl FixedHeader {
+    pub fn new(packet_type: PacketType) -> Self {
+        match packet_type {
+            PacketType::PubRel | PacketType::Subscribe | PacketType::Unsubscribe => FixedHeader {
+                packet_type,
+                flags: PACKET_RESERVED_BIT1,
+                remaining: 0,
+            },
+            _ => FixedHeader {
+                packet_type,
+                flags: PACKET_RESERVED_NONE,
+                remaining: 0,
+            },
+        }
+    }
 
+    pub fn packet_type(&self) -> PacketType {
+        self.packet_type
+    }
+
+    pub fn set_remaining(&mut self, remaining: u32) {
+        self.remaining = remaining;
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum Packet {
+    PingRequest(FixedHeader),
+    PingResponse(FixedHeader),
+    Connect(Connect),
+    ConnAck(FixedHeader),
+    Disconnect(FixedHeader),
+}
+
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 enum QoSLevel {
     AtMostOnce,
@@ -64,41 +57,57 @@ enum QoSLevel {
     ExactlyOnce,
 }
 
+struct QoSParseError {}
 
+impl TryFrom<u8> for QoSLevel {
+    type Error = QoSParseError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(QoSLevel::AtMostOnce),
+            0x01 => Ok(QoSLevel::AtLeastOnce),
+            0x02 => Ok(QoSLevel::ExactlyOnce),
+            _ => Err(QoSParseError {}),
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub struct WillMessage {
     qos: QoSLevel,
     retain: bool,
     topic: String,
-    message: Vec<u8>,
-}
-
-struct AuthData {
-    method: String,
-    data: Vec<u8>,
-}
-
-struct UserProperty {
-    key: String,
-    value: String,
-}
-
-pub struct Connect {
-    clean_start: bool,
-    keep_alive: u16,
-    session_expiry_interval: u32,
-    receive_max: u16,
-    max_packet_size: u32,
-    topic_alias_max: u16,
-    req_resp_info: bool,
-    request_info: bool,
-    auth: Option<AuthData>,
-    will_message: Option<WillMessage>,
+    payload: Vec<u8>,
+    delay_interval: u32,
+    expiry_interval: Option<u32>,
+    payload_utf8: bool,
+    content_type: Option<String>,
+    response_topic: Option<String>,
+    is_request: bool,
+    correlation_data: Option<Vec<u8>>,
     user_property: Option<HashMap<String, String>>,
+}
+
+impl WillMessage {
+    fn new(qos: QoSLevel, retain: bool) -> Self {
+        WillMessage {
+            qos,
+            retain,
+            topic: "".to_string(),
+            payload: Vec::new(),
+            delay_interval: 0,
+            expiry_interval: None,
+            payload_utf8: false,
+            content_type: None,
+            response_topic: None,
+            is_request: false,
+            correlation_data: None,
+            user_property: None,
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-
-
 }
