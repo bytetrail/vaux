@@ -65,21 +65,19 @@ impl Broker {
         let request = frame.next().await;
         if let Some(request) = request {
             match request {
-                Ok(request)  => {
-                    match request {
-                        Packet::PingRequest(_) => {
-                            let header = FixedHeader::new(PacketType::PingResp);
-                            frame.send(Packet::PingResponse(header)).await?;
-                        }
-                        Packet::Connect(_) => {
-                            let header = FixedHeader::new(PacketType::ConnAck);
-                            frame.send(Packet::ConnAck(header)).await?;
-                        }
-                        _ => {
-                            return Err(Box::new(MQTTCodecError::new(
-                                format!("unsupported packet type: {:?}", request).as_str(),
-                            )))
-                        }
+                Ok(request) => match request {
+                    Packet::PingRequest(_) => {
+                        let header = FixedHeader::new(PacketType::PingResp);
+                        frame.send(Packet::PingResponse(header)).await?;
+                    }
+                    Packet::Connect(_) => {
+                        let header = FixedHeader::new(PacketType::ConnAck);
+                        frame.send(Packet::ConnAck(header)).await?;
+                    }
+                    _ => {
+                        return Err(Box::new(MQTTCodecError::new(
+                            format!("unsupported packet type: {:?}", request).as_str(),
+                        )))
                     }
                 },
                 Err(e) => return Err(Box::new(e)),

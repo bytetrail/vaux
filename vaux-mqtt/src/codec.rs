@@ -1,10 +1,9 @@
 use crate::connect::Connect;
+use crate::{FixedHeader, Packet, PACKET_RESERVED_NONE};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use tokio_util::codec::{Decoder, Encoder};
-use crate::{FixedHeader, Packet, PACKET_RESERVED_NONE};
-
 
 /// MQTT property type. For more information on the specific property types,
 /// please see the
@@ -183,14 +182,11 @@ impl From<u8> for PacketType {
     }
 }
 
-
 impl Display for PacketType {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", format!("{:?}", &self).as_str().to_uppercase())
     }
 }
-
-
 
 #[derive(Debug)]
 pub struct MQTTCodecError {
@@ -234,8 +230,11 @@ pub(crate) fn check_property(
     Ok(())
 }
 
-pub(crate) fn read_utf8_string(src: &mut BytesMut) -> Result<String, MQTTCodecError> {
+pub(crate) fn decode_utf8_string(src: &mut BytesMut) -> Result<String, MQTTCodecError> {
     let len = src.get_u16();
+    if src.remaining() < len as usize {
+        return Err(MQTTCodecError::new("malformed MQTT packet: string length"));
+    }
     let mut chars: Vec<u8> = Vec::with_capacity(len as usize);
     for _ in 0..len {
         chars.push(src.get_u8());
@@ -246,8 +245,10 @@ pub(crate) fn read_utf8_string(src: &mut BytesMut) -> Result<String, MQTTCodecEr
     }
 }
 
-
-pub(crate) fn read_binary_data(dest: &mut Vec<u8>, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+pub(crate) fn decode_binary_data(
+    dest: &mut Vec<u8>,
+    src: &mut BytesMut,
+) -> Result<(), MQTTCodecError> {
     let len = src.get_u16() as usize;
     dest.resize(len, 0);
     for _ in 0..len {
@@ -255,7 +256,6 @@ pub(crate) fn read_binary_data(dest: &mut Vec<u8>, src: &mut BytesMut) -> Result
     }
     Ok(())
 }
-
 
 #[derive(Debug)]
 pub struct MQTTCodec {}
@@ -266,19 +266,17 @@ impl Decoder for MQTTCodec {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         match decode_fixed_header(src) {
-            Ok(packet_header) => {
-                match packet_header.packet_type {
-                    PacketType::PingReq => Ok(Some(Packet::PingRequest(packet_header))),
-                    PacketType::PingResp => Ok(Some(Packet::PingResponse(packet_header))),
-                    PacketType::Connect => {
-                        let mut connect = Connect::default();
-                        connect.decode(src)?;
-                        Ok(Some(Packet::Connect(connect)))
-                    }
-                    PacketType::ConnAck => Ok(Some(Packet::ConnAck(packet_header))),
-                    _ => Err(MQTTCodecError::new("unsupported packet type"))
+            Ok(packet_header) => match packet_header.packet_type {
+                PacketType::PingReq => Ok(Some(Packet::PingRequest(packet_header))),
+                PacketType::PingResp => Ok(Some(Packet::PingResponse(packet_header))),
+                PacketType::Connect => {
+                    let mut connect = Connect::default();
+                    connect.decode(src)?;
+                    Ok(Some(Packet::Connect(connect)))
                 }
-            }
+                PacketType::ConnAck => Ok(Some(Packet::ConnAck(packet_header))),
+                _ => Err(MQTTCodecError::new("unsupported packet type")),
+            },
             Err(e) => Err(e),
         }
     }
@@ -375,10 +373,7 @@ fn decode_fixed_header(src: &mut BytesMut) -> Result<FixedHeader, MQTTCodecError
 
 fn encode_fixed_header(packet: Packet, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
     match packet {
-        | Packet::ConnAck(header)
-        | Packet::PingRequest(header)
-        | Packet::PingResponse(header) => {
-
+        Packet::ConnAck(header) | Packet::PingRequest(header) | Packet::PingResponse(header) => {
             dest.put_u8(header.packet_type as u8 | header.flags);
             dest.put_u8(0x_00);
             Ok(())

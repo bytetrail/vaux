@@ -1,8 +1,10 @@
-use crate::codec::{check_property, decode_variable_len_integer, encode_variable_len_integer, read_utf8_string, MQTTCodecError, PropertyType, read_binary_data};
+use crate::codec::{
+    check_property, decode_utf8_string, decode_variable_len_integer, encode_variable_len_integer,
+    decode_binary_data, MQTTCodecError, PropertyType,
+};
 use crate::{QoSLevel, WillMessage};
 use bytes::{Buf, BytesMut};
 use std::collections::{HashMap, HashSet};
-use tokio_util::codec::Decoder;
 
 const MQTT_PROTOCOL_U32: u32 = 0x4d515454;
 const MQTT_PROTOCOL_VERSION: u8 = 0x05;
@@ -19,8 +21,6 @@ const DEFAULT_RECEIVE_MAX: u16 = 0xffff;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Connect {
-    username: bool,
-    password: bool,
     clean_start: bool,
     keep_alive: u16,
     session_expiry_interval: Option<u32>,
@@ -33,6 +33,9 @@ pub struct Connect {
     auth_data: Option<Vec<u8>>,
     will_message: Option<WillMessage>,
     user_property: Option<HashMap<String, String>>,
+    client_id: String,
+    username: Option<String>,
+    password: Option<Vec<u8>>,
 }
 
 impl Connect {
@@ -56,29 +59,11 @@ impl Connect {
         }
         // connect flags
         let connect_flags = src.get_u8();
-        connect.username = if connect_flags & CONNECT_FLAG_USERNAME != 0 {
-            true
-        } else {
-            false
-        };
-        println!("Username {}", connect.username);
-        connect.password = if connect_flags & CONNECT_FLAG_PASSWORD != 0 {
-            true
-        } else {
-            false
-        };
-        println!("Passwer {}", connect.password);
-        connect.clean_start = if connect_flags & CONNECT_FLAG_CLEAN_START != 0 {
-            true
-        } else {
-            false
-        };
+        let username = connect_flags & CONNECT_FLAG_USERNAME != 0;
+        let password = connect_flags & CONNECT_FLAG_PASSWORD != 0;
+        connect.clean_start = connect_flags & CONNECT_FLAG_CLEAN_START != 0;
         if connect_flags & CONNECT_FLAG_WILL != 0 {
-            let will_retain = if connect_flags & CONNECT_FLAG_WILL_RETAIN != 0 {
-                true
-            } else {
-                false
-            };
+            let will_retain = connect_flags & CONNECT_FLAG_WILL_RETAIN != 0;
             let qos = connect_flags & CONNECT_FLAG_WILL_QOS >> CONNECT_FLAG_SHIFT;
             if let Ok(qos) = QoSLevel::try_from(qos) {
                 connect.will_message = Some(WillMessage::new(qos, will_retain));
@@ -87,8 +72,78 @@ impl Connect {
             }
         }
         connect.keep_alive = src.get_u16();
-        println!("Keep alive: {}", connect.keep_alive);
         connect.decode_properties(src)?;
+        connect.decode_payload(src, username, password)?;
+        Ok(())
+    }
+
+    fn decode_will_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        let prop_size = decode_variable_len_integer(src);
+        let read_until = src.remaining() - prop_size as usize;
+        let mut properties: HashSet<PropertyType> = HashSet::new();
+        let will_message = self.will_message.as_mut().unwrap();
+        while src.remaining() > read_until {
+            match PropertyType::try_from(src.get_u8()) {
+                Ok(property_type) => match property_type {
+                    PropertyType::WillDelay => {
+                        check_property(PropertyType::WillDelay, &mut properties)?;
+                        will_message.delay_interval = src.get_u32();
+                    }
+                    PropertyType::PayloadFormat => {
+                        check_property(PropertyType::PayloadFormat, &mut properties)?;
+                        match src.get_u8() {
+                            0 => will_message.payload_utf8 = false,
+                            1 => will_message.payload_utf8 = true,
+                            err => return Err(MQTTCodecError::new( &format!(
+                                "unexpected will message payload format value: {}",
+                               err
+                            )))
+                        }
+                    }
+                    PropertyType::MessageExpiry => {
+                        check_property(PropertyType::MessageExpiry, &mut properties)?;
+                        will_message.expiry_interval = Some(src.get_u32());
+                    }
+                    PropertyType::ContentType => {
+                        check_property(PropertyType::ContentType, &mut properties)?;
+                        will_message.content_type = Some(decode_utf8_string(src)?);
+                    }
+                    PropertyType::ResponseTopic => {
+                        check_property(PropertyType::ResponseTopic, &mut properties)?;
+                        will_message.response_topic = Some(decode_utf8_string(src)?);
+                        will_message.is_request = true;
+                    }
+                    PropertyType::CorrelationData => {
+                        check_property(PropertyType::CorrelationData, &mut properties)?;
+                        let mut dest = Vec::<u8>::new();
+                        decode_binary_data(&mut dest, src)?;
+                        will_message.correlation_data = Some(dest);
+                    }
+                    PropertyType::UserProperty => {
+                        if will_message.user_property == None {
+                            will_message.user_property = Some(HashMap::new());
+                        }
+                        let property_map =
+                            will_message.user_property.as_mut().unwrap();
+                        let key = decode_utf8_string(src)?;
+                        let value = decode_utf8_string(src)?;
+                        property_map.insert(key, value);
+                    }
+                    err => {
+                        return Err(MQTTCodecError::new(&format!(
+                            "unexpected will property id: {}",
+                            err
+                        )))
+                    }
+                },
+                Err(e) => {
+                    return Err(MQTTCodecError::new(&format!(
+                        "unknown property type: {:?}",
+                        e
+                    )))
+                }
+            };
+        }
         Ok(())
     }
 
@@ -96,7 +151,6 @@ impl Connect {
         let prop_size = decode_variable_len_integer(src);
         let read_until = src.remaining() - prop_size as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
-        let user_properties: HashMap<String, String> = HashMap::new();
         while src.remaining() > read_until {
             match PropertyType::try_from(src.get_u8()) {
                 Ok(property_type) => {
@@ -153,14 +207,14 @@ impl Connect {
                         }
                         PropertyType::AuthMethod => {
                             check_property(PropertyType::AuthMethod, &mut properties)?;
-                            let result = read_utf8_string(src)?;
+                            let result = decode_utf8_string(src)?;
                             self.auth_method = Some(result);
                         }
                         PropertyType::AuthData => {
                             if self.auth_method != None {
                                 check_property(PropertyType::AuthData, &mut properties)?;
                                 let mut dest = Vec::new();
-                                read_binary_data(&mut dest, src)?;
+                                decode_binary_data(&mut dest, src)?;
                                 self.auth_data = Some(dest);
                             } else {
                                 // MQTT protocol not specific that auth method must appear before
@@ -180,14 +234,13 @@ impl Connect {
                             // MQTT v5.0 specification indicates that a key may appear multiple times
                             // this implementation will overwrite existing values with duplicate
                             // keys
-                            let key = read_utf8_string(src)?;
-                            let value = read_utf8_string(src)?;
-                            println!("User KV Pair: {}:{}", key, value);
+                            let key = decode_utf8_string(src)?;
+                            let value = decode_utf8_string(src)?;
                             property_map.insert(key, value);
                         }
-                        _ => {
+                        val => {
                             return Err(MQTTCodecError::new(
-                                format!("unexpected property").as_str(),
+                                &format!("unexpected property type value: {}", val),
                             ))
                         }
                     }
@@ -202,13 +255,33 @@ impl Connect {
         }
         Ok(())
     }
+
+    fn decode_payload(&mut self, src: &mut BytesMut, username: bool, password: bool) -> Result<(), MQTTCodecError> {
+        if src.remaining() < 3 {
+            return Err(MQTTCodecError::new("missing client ID"));
+        }
+        self.client_id = decode_utf8_string(src)?;
+        if self.will_message != None {
+            self.decode_will_properties(src)?;
+            let will_message = self.will_message.as_mut().unwrap();
+            will_message.topic = decode_utf8_string(src)?;
+            decode_binary_data(&mut will_message.payload, src)?;
+        }
+        if username {
+            self.username = Some(decode_utf8_string(src)?);
+        }
+        if password {
+            let mut dest: Vec<u8> = Vec::new();
+            decode_binary_data(&mut dest, src)?;
+            self.password = Some(dest);
+        }
+        Ok(())
+    }
 }
 
 impl Default for Connect {
     fn default() -> Self {
         Connect {
-            username: false,
-            password: false,
             clean_start: false,
             keep_alive: 0,
             session_expiry_interval: None,
@@ -221,6 +294,9 @@ impl Default for Connect {
             auth_data: None,
             will_message: None,
             user_property: None,
+            client_id: "".to_string(),
+            username: None,
+            password: None,
         }
     }
 }

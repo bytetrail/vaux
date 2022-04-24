@@ -1,5 +1,7 @@
 mod codec;
 mod connect;
+
+use std::collections::HashMap;
 pub use crate::codec::{MQTTCodec, MQTTCodecError, PacketType};
 pub use crate::connect::Connect;
 
@@ -44,10 +46,10 @@ pub enum Packet {
     PingResponse(FixedHeader),
     Connect(Connect),
     ConnAck(FixedHeader),
-    Disconnect(FixedHeader)
+    Disconnect(FixedHeader),
 }
 
-
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 enum QoSLevel {
     AtMostOnce,
@@ -56,14 +58,6 @@ enum QoSLevel {
 }
 
 struct QoSParseError {}
-
-#[derive(Debug, Eq, PartialEq)]
-pub struct WillMessage {
-    qos: QoSLevel,
-    retain: bool,
-    topic: String,
-    message: Vec<u8>,
-}
 
 impl TryFrom<u8> for QoSLevel {
     type Error = QoSParseError;
@@ -78,13 +72,37 @@ impl TryFrom<u8> for QoSLevel {
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+pub struct WillMessage {
+    qos: QoSLevel,
+    retain: bool,
+    topic: String,
+    payload: Vec<u8>,
+    delay_interval: u32,
+    expiry_interval: Option<u32>,
+    payload_utf8: bool,
+    content_type: Option<String>,
+    response_topic: Option<String>,
+    is_request: bool,
+    correlation_data: Option<Vec<u8>>,
+    user_property: Option<HashMap<String, String>>,
+}
+
 impl WillMessage {
     fn new(qos: QoSLevel, retain: bool) -> Self {
         WillMessage {
             qos,
             retain,
             topic: "".to_string(),
-            message: Vec::new(),
+            payload: Vec::new(),
+            delay_interval: 0,
+            expiry_interval: None,
+            payload_utf8: false,
+            content_type: None,
+            response_topic: None,
+            is_request: false,
+            correlation_data: None,
+            user_property: None,
         }
     }
 }

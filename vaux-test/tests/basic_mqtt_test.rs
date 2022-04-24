@@ -2,8 +2,7 @@ use bytes::BytesMut;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder};
-use vaux_mqtt::{FixedHeader, MQTTCodec,
-Connect, Packet, PacketType};
+use vaux_mqtt::{Connect, FixedHeader, MQTTCodec, Packet, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_HOST: &'static str = "127.0.0.1";
@@ -16,13 +15,21 @@ const CONNACK_RESP_LEN: usize = 2;
 /// * Port: 1883
 fn test_basic_ping() {
     let fixed_header = FixedHeader::new(PacketType::PingResp);
-    test_basic(PacketType::PingReq, PING_RESP_LEN, Packet::PingResponse(fixed_header));
+    test_basic(
+        PacketType::PingReq,
+        PING_RESP_LEN,
+        Packet::PingResponse(fixed_header),
+    );
 }
 
 #[test]
 fn test_basic_connect() {
     let fixed_header = FixedHeader::new(PacketType::ConnAck);
-    test_basic(PacketType::Connect, CONNACK_RESP_LEN, Packet::ConnAck(fixed_header));
+    test_basic(
+        PacketType::Connect,
+        CONNACK_RESP_LEN,
+        Packet::ConnAck(fixed_header),
+    );
 }
 
 fn test_basic(request_type: PacketType, expected_len: usize, expected_response: Packet) {
@@ -32,14 +39,14 @@ fn test_basic(request_type: PacketType, expected_len: usize, expected_response: 
             let mut buffer = [0u8; 128];
             let header = FixedHeader::new(request_type);
             let request = match request_type {
-                PacketType::PingReq => {
-                    Packet::PingRequest(header)
-                }
+                PacketType::PingReq => Packet::PingRequest(header),
                 PacketType::Connect => {
                     let connect = Connect::default();
                     Packet::Connect(connect)
                 }
-                _ => { panic!()}
+                _ => {
+                    panic!()
+                }
             };
             let mut dest = BytesMut::new();
             let _result = codec.encode(request, &mut dest);
