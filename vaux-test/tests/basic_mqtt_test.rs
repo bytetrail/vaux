@@ -2,7 +2,7 @@ use bytes::BytesMut;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder};
-use vaux_mqtt::{Connect, FixedHeader, MQTTCodec, Packet, PacketType};
+use vaux_mqtt::{ConnAck, Connect, FixedHeader, MQTTCodec, Packet, PacketType, Reason};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_HOST: &'static str = "127.0.0.1";
@@ -16,7 +16,7 @@ const CONNACK_RESP_LEN: usize = 2;
 fn test_basic_ping() {
     let fixed_header = FixedHeader::new(PacketType::PingResp);
     test_basic(
-        PacketType::PingReq,
+        Packet::PingRequest(FixedHeader::new(PacketType::PingReq)),
         PING_RESP_LEN,
         Packet::PingResponse(fixed_header),
     );
@@ -25,32 +25,25 @@ fn test_basic_ping() {
 #[test]
 fn test_basic_connect() {
     let fixed_header = FixedHeader::new(PacketType::ConnAck);
+    let request = Connect::default();
+    let ack  = ConnAck::new(Reason::Success);
     test_basic(
-        PacketType::Connect,
+        Packet::Connect(request),
         CONNACK_RESP_LEN,
-        Packet::ConnAck(fixed_header),
+        Packet::ConnAck(ack)
     );
 }
 
-fn test_basic(request_type: PacketType, expected_len: usize, expected_response: Packet) {
+fn test_basic(request: Packet, expected_len: usize, expected_response: Packet) {
     let mut codec = MQTTCodec {};
     match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
         Ok(mut stream) => {
             let mut buffer = [0u8; 128];
-            let header = FixedHeader::new(request_type);
-            let request = match request_type {
-                PacketType::PingReq => Packet::PingRequest(header),
-                PacketType::Connect => {
-                    let connect = Connect::default();
-                    Packet::Connect(connect)
-                }
-                _ => {
-                    panic!()
-                }
-            };
             let mut dest = BytesMut::new();
-            let _result = codec.encode(request, &mut dest);
-
+            let result = codec.encode(request, &mut dest);
+            if let Err(e) = result {
+                assert!(false, "Failed to encode packet: {:?}", e);
+            }
             match stream.write_all(&dest.to_vec()) {
                 Ok(_) => match stream.read(&mut buffer) {
                     Ok(len) => {

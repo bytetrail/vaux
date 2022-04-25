@@ -1,9 +1,11 @@
-use futures::{SinkExt, StreamExt};
+use futures::{SinkExt, Stream, StreamExt};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
-use vaux_mqtt::{FixedHeader, MQTTCodec, MQTTCodecError, Packet, PacketType};
+use vaux_mqtt::{ConnAck, FixedHeader, MQTTCodec, MQTTCodecError, Packet, PacketType, Reason};
+use vaux_mqtt::Packet::PingResponse;
+use vaux_mqtt::PacketType::PingResp;
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
@@ -61,26 +63,51 @@ impl Broker {
     }
 
     async fn handle_client(stream: &mut TcpStream) -> Result<(), Box<dyn std::error::Error>> {
-        let mut frame = Framed::new(stream, MQTTCodec {});
-        let request = frame.next().await;
-        if let Some(request) = request {
-            match request {
-                Ok(request) => match request {
-                    Packet::PingRequest(_) => {
-                        let header = FixedHeader::new(PacketType::PingResp);
-                        frame.send(Packet::PingResponse(header)).await?;
+        let mut loop_count = 0;
+        let mut framed = Framed::new(stream, MQTTCodec {});
+        let packet = match framed.next().await {
+            Some(Ok(Packet::Connect(packet))) => {
+                let ack = ConnAck::new(Reason::Success);
+                framed.send(Packet::ConnAck(ack)).await?;
+                Some(packet)
+            },
+            Some(Ok(Packet::PingRequest(packet))) => {
+                let resp = PingResponse(FixedHeader::new(PacketType::PingResp));
+                framed.send(resp).await?;
+                None
+            }
+            _ => {
+                println!("connect not received");
+                return Err(Box::new(MQTTCodecError::new("connect packet not received")));
+            }
+        };
+        if let Some(connect) = packet {
+            loop {
+                println!("Frame {}", loop_count);
+                let request = framed.next().await;
+                if let Some(request) = request {
+                    match request {
+                        Ok(request) => match request {
+                            Packet::PingRequest(_) => {
+                                let header = FixedHeader::new(PacketType::PingResp);
+                                framed.send(Packet::PingResponse(header)).await?;
+                            }
+                            req => {
+                                println!("unsupported packet type {:?}", &req);
+                                return Err(Box::new(MQTTCodecError::new(
+                                    format!("unsupported packet type: {:?}", req).as_str(),
+                                )))
+                            }
+                        },
+                        Err(e) => {
+                            println!("error handling client {:?}", e);
+                            return Err(Box::new(e));
+                        }
                     }
-                    Packet::Connect(_) => {
-                        let header = FixedHeader::new(PacketType::ConnAck);
-                        frame.send(Packet::ConnAck(header)).await?;
-                    }
-                    _ => {
-                        return Err(Box::new(MQTTCodecError::new(
-                            format!("unsupported packet type: {:?}", request).as_str(),
-                        )))
-                    }
-                },
-                Err(e) => return Err(Box::new(e)),
+                } else {
+                    println!(" nothing ? ");
+                }
+                loop_count += 1;
             }
         }
         Ok(())
