@@ -554,18 +554,16 @@ mod test {
     #[test]
     fn test_encode_var_int() {
         let test = 128_u32;
-        let mut result = vec![0_u8; 4];
         let mut encoded: BytesMut = BytesMut::with_capacity(6);
         encode_variable_len_integer(test, &mut encoded);
-        assert_eq!(2, len);
-        assert_eq!(0x80, result[0]);
-        assert_eq!(0x01, result[1]);
+        assert_eq!(0x80, encoded[0]);
+        assert_eq!(0x01, encoded[1]);
         let test = 777;
+        let mut encoded: BytesMut = BytesMut::with_capacity(6);
         let mut result = vec![0_u8; 4];
         encode_variable_len_integer(test, &mut encoded);
-        assert_eq!(2, len);
-        assert_eq!(0x89, result[0]);
-        assert_eq!(0x06, result[1]);
+        assert_eq!(0x89, encoded[0]);
+        assert_eq!(0x06, encoded[1]);
     }
 
     #[test]
