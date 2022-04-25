@@ -22,7 +22,7 @@ pub(crate) trait Encode: Sized {
 }
 
 pub(crate) trait Decode {
-    fn decode(&mut self, dest: &mut BytesMut) -> Result<(), MQTTCodecError>;
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError>;
 }
 
 

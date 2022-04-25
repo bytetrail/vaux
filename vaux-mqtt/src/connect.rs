@@ -2,7 +2,7 @@ use crate::codec::{
     check_property, decode_utf8_string, decode_variable_len_integer, encode_variable_len_integer,
     decode_binary_data, MQTTCodecError, PropertyType,
 };
-use crate::{QoSLevel, WillMessage};
+use crate::{Decode, Encode, QoSLevel, WillMessage};
 use bytes::{Buf, BytesMut};
 use std::collections::{HashMap, HashSet};
 
@@ -276,6 +276,24 @@ impl Connect {
             self.password = Some(dest);
         }
         Ok(())
+    }
+}
+
+impl crate::Sized for Connect {
+    fn size(&self) -> u32 {
+        todo!()
+    }
+}
+
+impl Encode for Connect {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        todo!()
+    }
+}
+
+impl Decode for Connect {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        self.decode(src)
     }
 }
 

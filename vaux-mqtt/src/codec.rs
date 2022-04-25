@@ -7,7 +7,6 @@ use std::time::Duration;
 use tokio_util::codec::{Decoder, Encoder};
 
 
-
 /// MQTT property type. For more information on the specific property types,
 /// please see the
 /// [MQTT Specification](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901027).
@@ -269,11 +268,6 @@ impl Decoder for MQTTCodec {
     type Error = MQTTCodecError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        println!("decoding");
-        // while src.remaining() == 0 {
-        //     println!(".");
-        //     std::thread::sleep(Duration::from_millis(100));
-        // }
         match decode_fixed_header(src) {
             Ok(packet_header) => {
                 match packet_header {
@@ -322,6 +316,7 @@ impl Encoder<Packet> for MQTTCodec {
 
     fn encode(&mut self, packet: Packet, dest: &mut BytesMut) -> Result<(), Self::Error> {
         match packet {
+            Packet::Connect(c) => c.encode(dest),
             Packet::ConnAck(c) => c.encode(dest),
             Packet::PingRequest(header) | Packet::PingResponse(header) => {
                 dest.put_u8(header.packet_type as u8 | header.flags);
