@@ -3,17 +3,29 @@ mod connect;
 mod connack;
 
 use std::collections::HashMap;
+use bytes::{BufMut, BytesMut};
 pub use crate::codec::{MQTTCodec, MQTTCodecError, PacketType};
+use crate::codec::encode_variable_len_integer;
 pub use crate::connect::Connect;
-pub use crate::connack::ConnAck;
+pub use crate::connack::{Reason, ConnAck};
 
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
 pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
 
 
 pub(crate) trait Sized {
-    fn size(&self) -> usize;
+    fn size(&self) -> u32;
 }
+
+pub(crate) trait Encode: Sized {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError>;
+}
+
+pub(crate) trait Decode {
+    fn decode(&mut self, dest: &mut BytesMut) -> Result<(), MQTTCodecError>;
+}
+
+
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct FixedHeader {
@@ -47,14 +59,48 @@ impl FixedHeader {
     }
 }
 
+impl crate::Sized for FixedHeader {
+    fn size(&self) -> u32 { self.remaining }
+}
+
+impl Encode for FixedHeader {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        dest.put_u8(self.packet_type as u8 | self.flags);
+        encode_variable_len_integer(self.remaining, dest);
+        Ok(())
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 pub enum Packet {
     PingRequest(FixedHeader),
     PingResponse(FixedHeader),
     Connect(Connect),
-    ConnAck(FixedHeader),
+    ConnAck(ConnAck),
     Disconnect(FixedHeader),
 }
+
+impl crate::Sized for Packet {
+    fn size(&self) -> u32 {
+        match self {
+            Packet::ConnAck(c) => c.size(),
+            _ => 0
+        }
+    }
+}
+
+impl Encode for Packet {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        match self {
+            Packet::ConnAck(c) => c.encode(dest),
+            Packet::PingRequest(h) |
+            Packet::PingResponse(h) => h.encode(dest),
+            _ => Err(MQTTCodecError::new("unsupported packet type"))
+        }
+    }
+}
+
+
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
