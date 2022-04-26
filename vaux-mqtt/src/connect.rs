@@ -18,6 +18,23 @@ const CONNECT_FLAG_CLEAN_START: u8 = 0b_0000_0010;
 
 const CONNECT_FLAG_SHIFT: u8 = 0x03;
 const DEFAULT_RECEIVE_MAX: u16 = 0xffff;
+/// Default remaining size for connect packet
+const DEFAULT_CONNECT_REMAINING: u32 = 10;
+const PROP_SIZE_U32: u32 = 5;
+const PROP_SIZE_U16: u32 = 3;
+const PROP_SIZE_U8: u32 = 2;
+
+type UserProperty = HashMap<String, String>;
+
+impl crate::Sized for UserProperty {
+    fn size(&self) -> u32 {
+        let mut remaining: u32  = 0;
+        for (key, value) in self.iter() {
+            remaining += key.len() as u32 + 2 + value.len() as u32 + 3;
+        }
+        remaining
+    }
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Connect {
@@ -32,7 +49,7 @@ pub struct Connect {
     auth_method: Option<String>,
     auth_data: Option<Vec<u8>>,
     will_message: Option<WillMessage>,
-    user_property: Option<HashMap<String, String>>,
+    user_property: Option<UserProperty>,
     client_id: String,
     username: Option<String>,
     password: Option<Vec<u8>>,
@@ -281,7 +298,49 @@ impl Connect {
 
 impl crate::Sized for Connect {
     fn size(&self) -> u32 {
-        todo!()
+        let mut remaining = DEFAULT_CONNECT_REMAINING;
+        // property sizes, add variable len integer for property size
+        let mut property_remaining = 0_u32;
+        if self.session_expiry_interval != None {
+            property_remaining += PROP_SIZE_U32;
+        }
+        // protocol defaults to 65536 if not included
+        if self.receive_max != DEFAULT_RECEIVE_MAX {
+            property_remaining += PROP_SIZE_U16;
+        }
+        if self.max_packet_size != None {
+            property_remaining += PROP_SIZE_U32;
+        }
+        if self.topic_alias_max != None {
+            property_remaining += PROP_SIZE_U16;
+        }
+        // protocol defaults to false if not included
+        if self.req_resp_info {
+            property_remaining += PROP_SIZE_U8;
+        }
+        // protocol defaults to true if not included
+        if !self.problem_info {
+            property_remaining += PROP_SIZE_U8
+        }
+        if let Some(user_property) = self.user_property.as_ref() {
+            property_remaining += user_property.size();
+        }
+        if let Some(auth_method) = self.auth_method.as_ref() {
+            property_remaining += 3 + auth_method.len() as u32;
+        }
+        if let Some(auth_data) = self.auth_data.as_ref() {
+            property_remaining += 3 + auth_data.len() as u32;
+        }
+        // patch up property len
+        let len = match property_remaining {
+            0..=127 => 1,
+            128..=16383 => 2,
+            16384..=2097151 => 3,
+            _ => 4
+        };
+        remaining += len + property_remaining;
+        // calculate payload
+        remaining
     }
 }
 
@@ -317,4 +376,70 @@ impl Default for Connect {
             password: None,
         }
     }
+}
+
+#[cfg(test)]
+mod Test {
+    use crate::Sized;
+    use super::*;
+
+    const CONNECT_MIN_REMAINING: u32 = 11;
+    const PROP_ENCODE: u32 = 5;
+
+    #[test]
+    fn test_default_remaining() {
+        let connect = Connect::default();
+        let remaining = connect.size();
+        assert_eq!(CONNECT_MIN_REMAINING, remaining, "Expected {} remaining size", CONNECT_MIN_REMAINING);
+    }
+
+    #[test]
+    fn test_receive_max_remaining() {
+        let mut connect = Connect::default();
+        connect.receive_max = 1024;
+        let remaining = connect.size();
+        let expected = CONNECT_MIN_REMAINING + 3;
+        assert_eq!(expected, remaining, "[Receive Max] expected {} remaining size", expected);
+    }
+
+    #[test]
+    fn test_problem_info_remaining() {
+        let mut connect = Connect::default();
+        connect.problem_info = false;
+        let remaining = connect.size();
+        let expected = CONNECT_MIN_REMAINING + PROP_SIZE_U8;
+        assert_eq!(expected, remaining, "[Problem Info false] expected {} remaining size", expected);
+        connect.problem_info = true;
+        let remaining = connect.size();
+        assert_eq!(CONNECT_MIN_REMAINING, remaining, "[Problem Info true] {} remaining size", CONNECT_MIN_REMAINING);
+    }
+
+
+    #[test]
+    fn test_user_property_remaining() {
+        let mut connect = Connect::default();
+
+        let mut user_properties = UserProperty::new();
+        let key = "12335".to_string();
+        let value = "12345".to_string();
+        let expected = CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
+        user_properties.insert(key, value);
+        connect.user_property = Some(user_properties);
+        let remaining = connect.size();
+        assert_eq!(expected, remaining, "[Single Property] expected {} remaining size", expected);
+
+        let mut user_properties = UserProperty::new();
+        let key = "12335".to_string();
+        let value = "12345".to_string();
+        let mut expected = CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
+        user_properties.insert(key, value);
+        let key = "567890".to_string();
+        let value = "567890".to_string();
+        expected += key.len() as u32 + value.len() as u32 + PROP_ENCODE;
+        user_properties.insert(key, value);
+        connect.user_property = Some(user_properties);
+        let remaining = connect.size();
+        assert_eq!(expected, remaining, "[2 Properties] expected {} remaining size", expected);
+    }
+
 }
