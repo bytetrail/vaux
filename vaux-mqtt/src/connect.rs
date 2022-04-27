@@ -1,8 +1,5 @@
-use crate::codec::{
-    check_property, decode_utf8_string, decode_variable_len_integer, encode_variable_len_integer,
-    decode_binary_data, MQTTCodecError, PropertyType,
-};
-use crate::{Decode, Encode, QoSLevel, WillMessage};
+use crate::codec::{check_property, decode_utf8_string, decode_variable_len_integer, encode_variable_len_integer, decode_binary_data, MQTTCodecError, PropertyType, PROP_SIZE_U32, PROP_SIZE_U16, PROP_SIZE_U8};
+use crate::{Decode, Encode, QoSLevel, variable_byte_int_size, WillMessage};
 use bytes::{Buf, BytesMut};
 use std::collections::{HashMap, HashSet};
 
@@ -20,9 +17,7 @@ const CONNECT_FLAG_SHIFT: u8 = 0x03;
 const DEFAULT_RECEIVE_MAX: u16 = 0xffff;
 /// Default remaining size for connect packet
 const DEFAULT_CONNECT_REMAINING: u32 = 10;
-const PROP_SIZE_U32: u32 = 5;
-const PROP_SIZE_U16: u32 = 3;
-const PROP_SIZE_U8: u32 = 2;
+
 
 type UserProperty = HashMap<String, String>;
 
@@ -332,14 +327,22 @@ impl crate::Sized for Connect {
             property_remaining += 3 + auth_data.len() as u32;
         }
         // patch up property len
-        let len = match property_remaining {
-            0..=127 => 1,
-            128..=16383 => 2,
-            16384..=2097151 => 3,
-            _ => 4
-        };
+        let len = variable_byte_int_size(property_remaining);
         remaining += len + property_remaining;
         // calculate payload
+        remaining += 2 + self.client_id.len() as u32;
+        if let Some(will_message) = &self.will_message {
+            remaining += will_message.size();
+            remaining += will_message.topic.len() as u32 + 2;
+            remaining += will_message.payload.len() as u32 + 2;
+        }
+        if let Some(username) = &self.username {
+            remaining += username.len() as u32 + 2;
+        }
+        if let Some(password) = &self.password {
+            remaining += password.len() as u32 + 2;
+        }
+
         remaining
     }
 }
@@ -371,7 +374,7 @@ impl Default for Connect {
             auth_data: None,
             will_message: None,
             user_property: None,
-            client_id: "".to_string(),
+            client_id: "_".to_string(),
             username: None,
             password: None,
         }
@@ -379,18 +382,18 @@ impl Default for Connect {
 }
 
 #[cfg(test)]
-mod Test {
+mod test {
     use crate::Sized;
     use super::*;
 
-    const CONNECT_MIN_REMAINING: u32 = 11;
+    const CONNECT_MIN_REMAINING: u32 = 14;
     const PROP_ENCODE: u32 = 5;
 
     #[test]
     fn test_default_remaining() {
         let connect = Connect::default();
         let remaining = connect.size();
-        assert_eq!(CONNECT_MIN_REMAINING, remaining, "Expected {} remaining size", CONNECT_MIN_REMAINING);
+        assert_eq!(CONNECT_MIN_REMAINING, remaining, "[Default] expected {} remaining size", CONNECT_MIN_REMAINING);
     }
 
     #[test]
@@ -440,6 +443,16 @@ mod Test {
         connect.user_property = Some(user_properties);
         let remaining = connect.size();
         assert_eq!(expected, remaining, "[2 Properties] expected {} remaining size", expected);
+    }
+
+    /// Remaining size calculations for a connect packet with will message present.
+    #[test]
+    fn test_will_message_remaining() {
+        let mut connect = Connect::default();
+        let mut will_message = WillMessage::new(QoSLevel::AtLeastOnce, true);
+        connect.will_message = Some(will_message);
+        let remaining = connect.size();
+        assert_eq!(CONNECT_MIN_REMAINING + 5, remaining, "[Min Will Message] expected {}", CONNECT_MIN_REMAINING + 5);
     }
 
 }

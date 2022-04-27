@@ -5,13 +5,15 @@ mod connack;
 use std::collections::HashMap;
 use bytes::{BufMut, BytesMut};
 pub use crate::codec::{MQTTCodec, MQTTCodecError, PacketType};
-use crate::codec::encode_variable_len_integer;
+use crate::codec::{encode_variable_len_integer, PROP_SIZE_U32, PROP_SIZE_U8, variable_byte_int_size};
 pub use crate::connect::Connect;
 pub use crate::connack::{Reason, ConnAck};
 
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
 pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
 
+
+const DEFAULT_WILL_DELAY: u32 = 0;
 
 pub(crate) trait Sized {
     fn size(&self) -> u32;
@@ -157,6 +159,35 @@ impl WillMessage {
             correlation_data: None,
             user_property: None,
         }
+    }
+}
+
+impl crate::Sized for WillMessage {
+    fn size(&self) -> u32 {
+        let mut remaining = 0;
+        if self.delay_interval != DEFAULT_WILL_DELAY {
+            remaining += PROP_SIZE_U32;
+        }
+        if self.payload_utf8 {
+            remaining += PROP_SIZE_U8;
+        }
+        if self.expiry_interval != None {
+            remaining += PROP_SIZE_U32;
+        }
+        if let Some(content_type) = &self.content_type {
+            remaining += content_type.len() as u32 + 3;
+        }
+        if let Some(response_topic) = &self.response_topic {
+            remaining += response_topic.len() as u32 + 3;
+        }
+        if let Some(correlation_data) = &self.correlation_data {
+            remaining += correlation_data.len() as u32 + 3;
+        }
+        if let Some(user_property) = &self.user_property {
+            remaining += user_property.size();
+        }
+        remaining += variable_byte_int_size(remaining);
+        remaining
     }
 }
 
