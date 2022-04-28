@@ -27,7 +27,17 @@ pub(crate) trait Decode {
     fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError>;
 }
 
+type UserProperty = HashMap<String, String>;
 
+impl crate::Sized for UserProperty {
+    fn size(&self) -> u32 {
+        let mut remaining: u32  = 0;
+        for (key, value) in self.iter() {
+            remaining += key.len() as u32 + 2 + value.len() as u32 + 3;
+        }
+        remaining
+    }
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct FixedHeader {
@@ -105,6 +115,7 @@ impl Encode for Packet {
 
 
 #[allow(clippy::enum_variant_names)]
+#[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 enum QoSLevel {
     AtMostOnce,

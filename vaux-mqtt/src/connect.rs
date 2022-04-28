@@ -1,5 +1,5 @@
 use crate::codec::{check_property, decode_utf8_string, decode_variable_len_integer, encode_variable_len_integer, decode_binary_data, MQTTCodecError, PropertyType, PROP_SIZE_U32, PROP_SIZE_U16, PROP_SIZE_U8};
-use crate::{Decode, Encode, QoSLevel, variable_byte_int_size, WillMessage};
+use crate::{Decode, Encode, QoSLevel, UserProperty, variable_byte_int_size, WillMessage};
 use bytes::{Buf, BytesMut};
 use std::collections::{HashMap, HashSet};
 
@@ -19,17 +19,7 @@ const DEFAULT_RECEIVE_MAX: u16 = 0xffff;
 const DEFAULT_CONNECT_REMAINING: u32 = 10;
 
 
-type UserProperty = HashMap<String, String>;
 
-impl crate::Sized for UserProperty {
-    fn size(&self) -> u32 {
-        let mut remaining: u32  = 0;
-        for (key, value) in self.iter() {
-            remaining += key.len() as u32 + 2 + value.len() as u32 + 3;
-        }
-        remaining
-    }
-}
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Connect {
@@ -374,7 +364,7 @@ impl Default for Connect {
             auth_data: None,
             will_message: None,
             user_property: None,
-            client_id: "_".to_string(),
+            client_id: "".to_string(),
             username: None,
             password: None,
         }
@@ -383,10 +373,10 @@ impl Default for Connect {
 
 #[cfg(test)]
 mod test {
-    use crate::Sized;
+    use crate::{Sized, UserProperty};
     use super::*;
 
-    const CONNECT_MIN_REMAINING: u32 = 14;
+    const CONNECT_MIN_REMAINING: u32 = 13;
     const PROP_ENCODE: u32 = 5;
 
     #[test]

@@ -30,7 +30,6 @@ impl Default for Broker {
 }
 
 impl Broker {
-    #[allow(dead_code)]
     /// Creates a new broker with the configuration specified. This method will
     /// not be used until the command line interface is developed. Remove the
     /// dead_code override when complete

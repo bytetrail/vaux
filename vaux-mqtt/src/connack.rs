@@ -1,7 +1,9 @@
 use bytes::{BufMut, BytesMut};
-use crate::{Encode, Sized};
+use crate::{Encode, QoSLevel, Sized, UserProperty};
 use crate::{FixedHeader, MQTTCodecError, PacketType};
 use crate::codec::encode_variable_len_integer;
+
+const DEFAULT_RECV_MAX: u16 = 65535;
 
 #[repr(u8)]
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -35,6 +37,14 @@ pub enum Reason {
 pub struct ConnAck {
     session_present: bool,
     reason: Reason,
+    reason_str: Option<String>,
+    expiry_interval: Option<u32>,
+    receive_max: u16,
+    max_qos: QoSLevel,
+    max_packet_size: Option<u32>,
+    assigned_client_id: Option<String>,
+    topic_alias_max: Option<u16>,
+    user_properties: Option<UserProperty>,
 }
 
 impl ConnAck {
@@ -42,6 +52,14 @@ impl ConnAck {
         ConnAck {
             session_present: false,
             reason,
+            reason_str: None,
+            expiry_interval: None,
+            receive_max: DEFAULT_RECV_MAX,
+            max_qos: QoSLevel::AtLeastOnce,
+            max_packet_size: None,
+            assigned_client_id: None,
+            topic_alias_max: None,
+            user_properties: None,
         }
     }
 }
