@@ -6,6 +6,9 @@ use std::fmt::{Display, Formatter};
 use std::time::Duration;
 use tokio_util::codec::{Decoder, Encoder};
 
+pub(crate) const PROP_SIZE_U32: u32 = 5;
+pub(crate) const PROP_SIZE_U16: u32 = 3;
+pub(crate) const PROP_SIZE_U8: u32 = 2;
 
 /// MQTT property type. For more information on the specific property types,
 /// please see the
@@ -217,6 +220,16 @@ impl MQTTCodecError {
         MQTTCodecError {
             reason: reason.to_string(),
         }
+    }
+}
+
+/// Returns the length of an encoded MQTT variable length unsigned int
+pub(crate) fn variable_byte_int_size(value: u32) -> u32 {
+    match value {
+        0..=127 => 1,
+        128..=16383 => 2,
+        16384..=2097151 => 3,
+        _ => 4
     }
 }
 
