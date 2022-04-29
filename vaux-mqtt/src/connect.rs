@@ -332,7 +332,6 @@ impl crate::Sized for Connect {
         if let Some(password) = &self.password {
             remaining += password.len() as u32 + 2;
         }
-
         remaining
     }
 }
