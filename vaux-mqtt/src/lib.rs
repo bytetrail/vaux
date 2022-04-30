@@ -204,5 +204,4 @@ impl crate::Sized for WillMessage {
 
 #[cfg(test)]
 mod test {
-    use super::*;
 }
