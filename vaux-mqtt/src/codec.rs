@@ -3,7 +3,6 @@ use crate::{Encode, FixedHeader, Packet, PACKET_RESERVED_NONE};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
-use std::time::Duration;
 use tokio_util::codec::{Decoder, Encoder};
 
 pub(crate) const PROP_SIZE_U32: u32 = 5;

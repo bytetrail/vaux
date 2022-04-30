@@ -1,11 +1,10 @@
-use futures::{SinkExt, Stream, StreamExt};
+use futures::{SinkExt, StreamExt};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
 use vaux_mqtt::{ConnAck, FixedHeader, MQTTCodec, MQTTCodecError, Packet, PacketType, Reason};
 use vaux_mqtt::Packet::PingResponse;
-use vaux_mqtt::PacketType::PingResp;
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
@@ -70,7 +69,7 @@ impl Broker {
                 framed.send(Packet::ConnAck(ack)).await?;
                 Some(packet)
             },
-            Some(Ok(Packet::PingRequest(packet))) => {
+            Some(Ok(Packet::PingRequest(_packet))) => {
                 let resp = PingResponse(FixedHeader::new(PacketType::PingResp));
                 framed.send(resp).await?;
                 None
@@ -80,7 +79,7 @@ impl Broker {
                 return Err(Box::new(MQTTCodecError::new("connect packet not received")));
             }
         };
-        if let Some(connect) = packet {
+        if packet.is_some() {
             loop {
                 println!("Frame {}", loop_count);
                 let request = framed.next().await;

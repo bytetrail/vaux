@@ -1,4 +1,10 @@
-use crate::codec::{check_property, decode_utf8_string, decode_variable_len_integer, encode_variable_len_integer, decode_binary_data, MQTTCodecError, PropertyType, PROP_SIZE_U32, PROP_SIZE_U16, PROP_SIZE_U8};
+use crate::codec::{
+    check_property,
+    decode_utf8_string,
+    decode_variable_len_integer,
+    decode_binary_data,
+    MQTTCodecError,
+    PropertyType, PROP_SIZE_U32, PROP_SIZE_U16, PROP_SIZE_U8};
 use crate::{Decode, Encode, QoSLevel, UserProperty, variable_byte_int_size, WillMessage};
 use bytes::{Buf, BytesMut};
 use std::collections::{HashMap, HashSet};
@@ -17,9 +23,6 @@ const CONNECT_FLAG_SHIFT: u8 = 0x03;
 const DEFAULT_RECEIVE_MAX: u16 = 0xffff;
 /// Default remaining size for connect packet
 const DEFAULT_CONNECT_REMAINING: u32 = 10;
-
-
-
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Connect {
@@ -337,7 +340,7 @@ impl crate::Sized for Connect {
 }
 
 impl Encode for Connect {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn encode(&self, _dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
         todo!()
     }
 }

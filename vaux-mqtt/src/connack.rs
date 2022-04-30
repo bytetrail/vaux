@@ -2,7 +2,6 @@ use bytes::{BufMut, BytesMut};
 use crate::{Encode, PROP_SIZE_U32, PROP_SIZE_U8, QoSLevel, Sized, UserProperty};
 use crate::{FixedHeader, MQTTCodecError, PacketType};
 use crate::codec::{encode_variable_len_integer, PROP_SIZE_U16};
-use crate::codec::PropertyType::MaxQoS;
 
 const DEFAULT_RECV_MAX: u16 = 65535;
 
@@ -85,11 +84,10 @@ impl ConnAck {
 
 impl crate::Sized for ConnAck {
     fn size(&self) -> u32 {
-        let mut remaining = 0;
         // minimum size of ack flags and reason code, 0 byte property length
-        remaining = 3;
+        let mut remaining = 3;
         // properties
-        if !self.expiry_interval.is_none() {
+        if self.expiry_interval.is_some() {
             remaining += PROP_SIZE_U32;
         }
         if self.receive_max != DEFAULT_RECV_MAX {
@@ -101,13 +99,13 @@ impl crate::Sized for ConnAck {
         if !self.retain_avail {
             remaining += PROP_SIZE_U8;
         }
-        if !self.max_packet_size.is_none() {
+        if self.max_packet_size.is_some() {
             remaining += PROP_SIZE_U32;
         }
         if let Some(assigned_client_id) = &self.assigned_client_id {
             remaining += 3 + assigned_client_id.len() as u32;
         }
-        if !self.topic_alias_max.is_none() {
+        if self.topic_alias_max.is_some() {
             remaining += PROP_SIZE_U16;
         }
         if let Some(reason) = &self.reason_str {
@@ -125,7 +123,7 @@ impl crate::Sized for ConnAck {
         if !self.shared_sub_avail {
             remaining += PROP_SIZE_U8;
         }
-        if let Some(keep_alive)=self.server_keep_alive {
+        if self.server_keep_alive.is_some() {
             remaining += PROP_SIZE_U16;
         }
         if let Some(response_info) = &self.response_info {
@@ -144,7 +142,6 @@ impl crate::Sized for ConnAck {
 
 impl Encode for ConnAck {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        let cursor_pos = dest.position();
         let mut header = FixedHeader::new(PacketType::ConnAck);
         header.set_remaining(self.size());
         header.encode(dest);
@@ -183,12 +180,4 @@ mod test {
         assert_eq!(0, dest[4]);
     }
 
-    #[test]
-    fn test_encode_expiry_interval() {
-        let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
-        connack.expiry_interval = Some(1000);
-        assert!(connack.encode(&mut dest).is_ok());
-        assert_eq!(EXPECTED_MIN_CONNACK_LEN+5, dest.len());
-    }
 }
