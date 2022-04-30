@@ -441,7 +441,7 @@ mod test {
     #[test]
     fn test_will_message_remaining() {
         let mut connect = Connect::default();
-        let mut will_message = WillMessage::new(QoSLevel::AtLeastOnce, true);
+        let will_message = WillMessage::new(QoSLevel::AtLeastOnce, true);
         connect.will_message = Some(will_message);
         let remaining = connect.size();
         assert_eq!(CONNECT_MIN_REMAINING + 5, remaining, "[Min Will Message] expected {}", CONNECT_MIN_REMAINING + 5);

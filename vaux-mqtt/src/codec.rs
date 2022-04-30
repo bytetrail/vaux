@@ -286,26 +286,21 @@ impl Decoder for MQTTCodec {
                     Some(packet_header) => {
                         match packet_header.packet_type {
                             PacketType::PingReq => {
-                                println!("ping!");
                                 Ok(Some(Packet::PingRequest(packet_header)))
                             },
                             PacketType::PingResp => {
-                                println!("pong!");
                                 Ok(Some(Packet::PingResponse(packet_header)))
                             },
                             PacketType::Connect => {
-                                println!("**** connect ****");
                                 let mut connect = Connect::default();
                                 connect.decode(src)?;
                                 Ok(Some(Packet::Connect(connect)))
                             }
                             PacketType::Publish => {
-                                println!("**** publish ****");
                                 Ok(None)
                             }
                             //PacketType::ConnAck => Ok(Some(Packet::ConnAck(packet_header))),
                             _ => {
-                                println!("oops, I do not understand what you are trying to say");
                                 Err(MQTTCodecError::new("unsupported packet type"))
                             },
                         }
@@ -380,7 +375,7 @@ fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQTTCo
     }
     for idx in 1..=3 {
         if src[idx] & 0x80 != 0x00 {
-            // insufficient bytes left to read remaming
+            // insufficient bytes left to read remaining
             if src.remaining() != 1 {
                 return Ok(None)
             }
@@ -567,7 +562,6 @@ mod test {
         assert_eq!(0x01, encoded[1]);
         let test = 777;
         let mut encoded: BytesMut = BytesMut::with_capacity(6);
-        let mut result = vec![0_u8; 4];
         encode_variable_len_integer(test, &mut encoded);
         assert_eq!(0x89, encoded[0]);
         assert_eq!(0x06, encoded[1]);

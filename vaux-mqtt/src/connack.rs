@@ -86,6 +86,7 @@ impl crate::Sized for ConnAck {
     fn size(&self) -> u32 {
         // minimum size of ack flags and reason code, 0 byte property length
         let mut remaining = 3;
+        println!("Remaining {}", remaining);
         // properties
         if self.expiry_interval.is_some() {
             remaining += PROP_SIZE_U32;
@@ -109,7 +110,9 @@ impl crate::Sized for ConnAck {
             remaining += PROP_SIZE_U16;
         }
         if let Some(reason) = &self.reason_str {
-            remaining += 2 + reason.len() as u32;
+            remaining += 3 + reason.len() as u32;
+            println!("Remaining w/reason {}", remaining);
+
         }
         if let Some(user_properties) = &self.user_properties {
             remaining += user_properties.size();
@@ -122,6 +125,7 @@ impl crate::Sized for ConnAck {
         }
         if !self.shared_sub_avail {
             remaining += PROP_SIZE_U8;
+            println!("Remaining w/shared sub {}", remaining);
         }
         if self.server_keep_alive.is_some() {
             remaining += PROP_SIZE_U16;
@@ -134,6 +138,7 @@ impl crate::Sized for ConnAck {
         }
         if let Some(auth_data) = &self.auth_data {
             remaining += 3 + auth_data.len() as u32;
+            println!("Remaining w/auth data {}", remaining);
         }
 
         remaining
@@ -180,4 +185,15 @@ mod test {
         assert_eq!(0, dest[4]);
     }
 
+    #[test]
+    fn test_complex_remaining() {
+        let reason = "Malformed Packet".to_string();
+        let auth_data = vec![0, 1, 2, 3, 4, 5];
+        let expected_len = (reason.len() + auth_data.len() + 11) as u32;
+        let mut connack = ConnAck::new(Reason::MalformedPacket);
+        connack.reason_str = Some(reason);
+        connack.shared_sub_avail = false;
+        connack.auth_data = Some(auth_data);
+        assert_eq!(expected_len, connack.size());
+    }
 }
