@@ -5,7 +5,7 @@ mod connack;
 use std::collections::HashMap;
 use bytes::{BufMut, BytesMut};
 pub use crate::codec::{MQTTCodec, MQTTCodecError, PacketType};
-use crate::codec::{encode_variable_len_integer, PROP_SIZE_U32, PROP_SIZE_U8, variable_byte_int_size};
+use crate::codec::{encode_utf8_string, encode_variable_len_integer, PROP_SIZE_U32, PROP_SIZE_U8, PropertyType, variable_byte_int_size};
 pub use crate::connect::Connect;
 pub use crate::connack::{Reason, ConnAck};
 
@@ -15,11 +15,13 @@ pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
 
 const DEFAULT_WILL_DELAY: u32 = 0;
 
-pub(crate) trait Sized {
+pub(crate) trait Remaining {
     fn size(&self) -> u32;
+    fn property_remaining(&self) -> Option<u32>;
+    fn payload_remaining(&self) -> Option<u32>;
 }
 
-pub(crate) trait Encode: Sized {
+pub(crate) trait Encode: Remaining {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError>;
 }
 
@@ -27,15 +29,34 @@ pub(crate) trait Decode {
     fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError>;
 }
 
-type UserProperty = HashMap<String, String>;
+type UserPropertyMap = HashMap<String, String>;
 
-impl crate::Sized for UserProperty {
+impl crate::Remaining for UserPropertyMap {
     fn size(&self) -> u32 {
         let mut remaining: u32  = 0;
         for (key, value) in self.iter() {
             remaining += key.len() as u32 + 2 + value.len() as u32 + 3;
         }
         remaining
+    }
+
+    fn property_remaining(&self) -> Option<u32> {
+        None
+    }
+
+    fn payload_remaining(&self) -> Option<u32> {
+        None
+    }
+}
+
+impl Encode for UserPropertyMap {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        for (k, v) in self.iter() {
+            dest.put_u8(PropertyType::UserProperty as u8);
+            encode_utf8_string(k, dest)?;
+            encode_utf8_string(v, dest)?;
+        }
+        Ok(())
     }
 }
 
@@ -71,8 +92,16 @@ impl FixedHeader {
     }
 }
 
-impl crate::Sized for FixedHeader {
+impl crate::Remaining for FixedHeader {
     fn size(&self) -> u32 { self.remaining }
+
+    fn property_remaining(&self) -> Option<u32> {
+        None
+    }
+
+    fn payload_remaining(&self) -> Option<u32> {
+        None
+    }
 }
 
 impl Encode for FixedHeader {
@@ -91,28 +120,6 @@ pub enum Packet {
     ConnAck(ConnAck),
     Disconnect(FixedHeader),
 }
-
-impl crate::Sized for Packet {
-    fn size(&self) -> u32 {
-        match self {
-            Packet::ConnAck(c) => c.size(),
-            _ => 0
-        }
-    }
-}
-
-impl Encode for Packet {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        match self {
-            Packet::ConnAck(c) => c.encode(dest),
-            Packet::PingRequest(h) |
-            Packet::PingResponse(h) => h.encode(dest),
-            _ => Err(MQTTCodecError::new("unsupported packet type"))
-        }
-    }
-}
-
-
 
 #[allow(clippy::enum_variant_names)]
 #[repr(u8)]
@@ -173,7 +180,7 @@ impl WillMessage {
     }
 }
 
-impl crate::Sized for WillMessage {
+impl WillMessage {
     fn size(&self) -> u32 {
         let mut remaining = 0;
         if self.delay_interval != DEFAULT_WILL_DELAY {

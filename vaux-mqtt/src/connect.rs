@@ -5,7 +5,7 @@ use crate::codec::{
     decode_binary_data,
     MQTTCodecError,
     PropertyType, PROP_SIZE_U32, PROP_SIZE_U16, PROP_SIZE_U8};
-use crate::{Decode, Encode, QoSLevel, UserProperty, variable_byte_int_size, WillMessage};
+use crate::{Decode, Encode, QoSLevel, UserPropertyMap, variable_byte_int_size, WillMessage};
 use bytes::{Buf, BytesMut};
 use std::collections::{HashMap, HashSet};
 
@@ -37,7 +37,7 @@ pub struct Connect {
     auth_method: Option<String>,
     auth_data: Option<Vec<u8>>,
     will_message: Option<WillMessage>,
-    user_property: Option<UserProperty>,
+    user_property: Option<UserPropertyMap>,
     client_id: String,
     username: Option<String>,
     password: Option<Vec<u8>>,
@@ -284,7 +284,7 @@ impl Connect {
     }
 }
 
-impl crate::Sized for Connect {
+impl crate::Remaining for Connect {
     fn size(&self) -> u32 {
         let mut remaining = DEFAULT_CONNECT_REMAINING;
         // property sizes, add variable len integer for property size
@@ -323,7 +323,16 @@ impl crate::Sized for Connect {
         let len = variable_byte_int_size(property_remaining);
         remaining += len + property_remaining;
         // calculate payload
-        remaining += 2 + self.client_id.len() as u32;
+        remaining += self.payload_remaining().unwrap();
+        remaining
+    }
+
+    fn property_remaining(&self) -> Option<u32> {
+        None
+    }
+
+    fn payload_remaining(&self) -> Option<u32> {
+        let mut remaining = 2 + self.client_id.len() as u32;
         if let Some(will_message) = &self.will_message {
             remaining += will_message.size();
             remaining += will_message.topic.len() as u32 + 2;
@@ -335,7 +344,7 @@ impl crate::Sized for Connect {
         if let Some(password) = &self.password {
             remaining += password.len() as u32 + 2;
         }
-        remaining
+        Some(remaining)
     }
 }
 
@@ -375,7 +384,7 @@ impl Default for Connect {
 
 #[cfg(test)]
 mod test {
-    use crate::{Sized, UserProperty};
+    use crate::{Remaining, UserPropertyMap};
     use super::*;
 
     const CONNECT_MIN_REMAINING: u32 = 13;
@@ -414,7 +423,7 @@ mod test {
     fn test_user_property_remaining() {
         let mut connect = Connect::default();
 
-        let mut user_properties = UserProperty::new();
+        let mut user_properties = UserPropertyMap::new();
         let key = "12335".to_string();
         let value = "12345".to_string();
         let expected = CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
@@ -423,7 +432,7 @@ mod test {
         let remaining = connect.size();
         assert_eq!(expected, remaining, "[Single Property] expected {} remaining size", expected);
 
-        let mut user_properties = UserProperty::new();
+        let mut user_properties = UserPropertyMap::new();
         let key = "12335".to_string();
         let value = "12345".to_string();
         let mut expected = CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
