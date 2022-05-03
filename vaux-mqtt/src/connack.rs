@@ -115,6 +115,7 @@ impl crate::Remaining for ConnAck {
         if let Some(response_info) = &self.response_info {
             remaining += 3 + response_info.len() as u32;
         }
+        remaining += self.server_ref.as_ref().map_or(0, |r| 3 + r.len() as u32 );
         if let Some(auth_method) = &self.auth_method {
             remaining += 3 + auth_method.len() as u32;
         }
@@ -174,13 +175,42 @@ impl Encode for ConnAck {
             dest.put_u8(PropertyType::Reason as u8);
             encode_utf8_string(reason, dest)?;
         }
+        if let Some(user_properties) = &self.user_properties {
+            user_properties.encode(dest)?;
+        }
+        if !self.wildcard_sub_avail {
+            dest.put_u8(PropertyType::WildcardSubAvail as u8);
+            dest.put_u8(0);
+        }
+        if !self.sub_id_avail {
+            dest.put_u8(PropertyType::SubIdAvail as u8);
+            dest.put_u8(0);
+        }
+        if !self.shared_sub_avail {
+            dest.put_u8(PropertyType::ShardSubAvail as u8);
+            dest.put_u8(0);
+        }
+        if let Some(keep_alive) = self.server_keep_alive {
+            dest.put_u8(PropertyType::KeepAlive as u8);
+            dest.put_u16(keep_alive);
+        }
+        if let Some(response) = &self.response_info {
+            dest.put_u8(PropertyType::RespInfo as u8);
+            encode_utf8_string(response, dest)?;
+        }
+        if let Some(server_ref) = &self.server_ref {
+            dest.put_u8(PropertyType::ServerRef as u8);
+            encode_utf8_string(server_ref, dest)?;
+        }
+        if let Some(auth_method) = &self.auth_method {
+            dest.put_u8(PropertyType::AuthMethod as u8);
+            encode_utf8_string(auth_method, dest)?;
+        }
         if let Some(auth_data) = &self.auth_data {
             dest.put_u8(PropertyType::AuthData as u8);
             encode_binary_data(auth_data, dest)?;
         }
-        if let Some(user_properties) = &self.user_properties {
-            user_properties.encode(dest)?;
-        }
+
         Ok(())
     }
 }
@@ -315,18 +345,6 @@ mod test {
     }
 
     #[test]
-    fn test_auth_data() {
-        const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + 43;
-        const EXPECTED_PROP_LEN: u32 = 43;
-        let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
-        let auth_data = vec![0_u8; 40];
-        connack.auth_data = Some(auth_data);
-        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
-        PropertyType::AuthData);
-    }
-
-    #[test]
     fn test_reason_string() {
         let reason = "01234567890123456789".to_string();
         let expected_len = EXPECTED_MIN_CONNACK_LEN as u32 + 3 + reason.len() as u32;
@@ -355,6 +373,104 @@ mod test {
         connack.user_properties = Some(properties);
         test_property(connack, &mut dest, expected_len, expected_prop_len,
                       PropertyType::UserProperty);
+    }
+
+    #[test]
+    fn test_wildcard_sub_avail() {
+        const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + PROP_SIZE_U8;
+        const EXPECTED_PROP_LEN: u32 = PROP_SIZE_U8;
+        let mut dest = BytesMut::new();
+        let mut connack = ConnAck::new(Reason::Success);
+        connack.wildcard_sub_avail = false;
+        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
+                      PropertyType::WildcardSubAvail);
+        assert_eq!(0x00, dest[6]);
+    }
+
+    #[test]
+    fn test_sub_id_avail() {
+        let mut connack = ConnAck::new(Reason::Success);
+        connack.sub_id_avail = false;
+        test_bool_property(connack, PropertyType::SubIdAvail, false);
+    }
+
+    #[test]
+    fn test_shared_sub_avail() {
+        let mut connack = ConnAck::new(Reason::Success);
+        connack.shared_sub_avail = false;
+        test_bool_property(connack, PropertyType::ShardSubAvail, false);
+    }
+
+    #[test]
+    fn test_server_keep_alive() {
+        const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + PROP_SIZE_U16;
+        const EXPECTED_PROP_LEN: u32 = PROP_SIZE_U16;
+        let mut dest = BytesMut::new();
+        let mut connack = ConnAck::new(Reason::Success);
+        connack.server_keep_alive = Some(128);
+        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
+                      PropertyType::KeepAlive);
+        assert_eq!(0x80, dest[7]);
+    }
+
+    #[test]
+    fn test_response_info() {
+        let response_info = "topic/client/596892ea-5524-4b32-a624-3d9a322a6b52".to_string();
+        let expected_prop_len = response_info.len() as u32 + 3;
+        let expected_len = EXPECTED_MIN_CONNACK_LEN as u32 + expected_prop_len;
+        let mut dest = BytesMut::new();
+        let mut connack = ConnAck::new(Reason::Success);
+        connack.response_info = Some(response_info.clone());
+        test_property(connack, &mut dest, expected_len, expected_prop_len,
+                      PropertyType::RespInfo);
+        assert_eq!(response_info.len() as u8, dest[7]);
+    }
+
+    #[test]
+    fn test_server_ref() {
+        let server_ref = "another.server.com:1883".to_string();
+        let expected_prop_len = server_ref.len() as u32 + 3;
+        let expected_len = EXPECTED_MIN_CONNACK_LEN as u32 + expected_prop_len;
+        let mut dest = BytesMut::new();
+        let mut connack = ConnAck::new(Reason::Success);
+        connack.server_ref = Some(server_ref.clone());
+        test_property(connack, &mut dest, expected_len, expected_prop_len,
+                      PropertyType::ServerRef);
+        assert_eq!(server_ref.len() as u8, dest[7]);
+    }
+
+    #[test]
+    fn test_auth_method() {
+        let auth_method = "Authentication Method String".to_string();
+        let expected_prop_len = auth_method.len() as u32 + 3;
+        let expected_len = EXPECTED_MIN_CONNACK_LEN as u32 + expected_prop_len;
+        let mut dest = BytesMut::new();
+        let mut connack = ConnAck::new(Reason::Success);
+        connack.auth_method = Some(auth_method.clone());
+        test_property(connack, &mut dest, expected_len, expected_prop_len,
+                      PropertyType::AuthMethod);
+        assert_eq!(auth_method.len() as u8, dest[7]);
+    }
+
+    #[test]
+    fn test_auth_data() {
+        const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + 43;
+        const EXPECTED_PROP_LEN: u32 = 43;
+        let mut dest = BytesMut::new();
+        let mut connack = ConnAck::new(Reason::Success);
+        let auth_data = vec![0_u8; 40];
+        connack.auth_data = Some(auth_data);
+        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
+                      PropertyType::AuthData);
+    }
+
+    fn test_bool_property(connack: ConnAck, property: PropertyType, expected: bool) {
+        const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + PROP_SIZE_U8;
+        const EXPECTED_PROP_LEN: u32 = PROP_SIZE_U8;
+        let mut dest = BytesMut::new();
+        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
+                      property);
+        assert_eq!(expected as u8, dest[6]);
     }
 
     fn test_property(connack: ConnAck,
