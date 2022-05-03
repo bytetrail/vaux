@@ -52,7 +52,7 @@ pub enum PropertyType {
     CorrelationData = 0x09,
     SubscriptionId = 0x0b,
     SessionExpiry = 0x11,
-    ClientId = 0x12,
+    AssignedClientId = 0x12,
     KeepAlive = 0x13,
     AuthMethod = 0x15,
     AuthData = 0x16,
@@ -84,7 +84,7 @@ impl Display for PropertyType {
             PropertyType::CorrelationData => write!(f, "\"Correlation Data\""),
             PropertyType::SubscriptionId => write!(f, "\"Subscription Identifier\""),
             PropertyType::SessionExpiry => write!(f, "\"Session Expiry Interval\""),
-            PropertyType::ClientId => write!(f, "\"Assigned Client Identifier\""),
+            PropertyType::AssignedClientId => write!(f, "\"Assigned Client Identifier\""),
             PropertyType::KeepAlive => write!(f, "\"Server Keep Alive\""),
             PropertyType::AuthMethod => write!(f, "\"Authentication Method\""),
             PropertyType::AuthData => write!(f, "\"Authentication Data\""),
@@ -120,7 +120,7 @@ impl TryFrom<u8> for PropertyType {
             0x09 => Ok(PropertyType::CorrelationData),
             0x0b => Ok(PropertyType::SubscriptionId),
             0x11 => Ok(PropertyType::SessionExpiry),
-            0x12 => Ok(PropertyType::ClientId),
+            0x12 => Ok(PropertyType::AssignedClientId),
             0x13 => Ok(PropertyType::KeepAlive),
             0x15 => Ok(PropertyType::AuthMethod),
             0x16 => Ok(PropertyType::AuthData),
@@ -245,6 +245,16 @@ pub(crate) fn check_property(
     Ok(())
 }
 
+pub(crate) fn encode_utf8_string(src: &str, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    let len = src.len();
+    if len > u16::MAX as usize{
+        return Err(MQTTCodecError::new("string exceeds max length"));
+    }
+    dest.put_u16(src.len() as u16);
+    dest.put(src.as_bytes());
+    Ok(())
+}
+
 pub(crate) fn decode_utf8_string(src: &mut BytesMut) -> Result<String, MQTTCodecError> {
     let len = src.get_u16();
     if src.remaining() < len as usize {
@@ -269,6 +279,16 @@ pub(crate) fn decode_binary_data(
     for _ in 0..len {
         dest.push(src.get_u8());
     }
+    Ok(())
+}
+
+pub(crate) fn encode_binary_data(src: &[u8], dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    let len = src.len();
+    if len > u16::MAX as usize{
+        return Err(MQTTCodecError::new("binary data exceeds max length"));
+    }
+    dest.put_u16(len as u16);
+    dest.put(src);
     Ok(())
 }
 
@@ -331,7 +351,7 @@ impl Encoder<Packet> for MQTTCodec {
                 Ok(())
             }
             _ => return Err(MQTTCodecError::new("unsupported packet type"))
-        };
+        }?;
         Ok(())
     }
 }
