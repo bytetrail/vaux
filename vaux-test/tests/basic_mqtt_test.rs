@@ -26,11 +26,11 @@ fn test_basic_ping() {
 fn test_basic_connect() {
     let fixed_header = FixedHeader::new(PacketType::ConnAck);
     let request = Connect::default();
-    let ack  = ConnAck::new(Reason::Success);
+    let ack = ConnAck::default();
     test_basic(
         Packet::Connect(request),
         CONNACK_RESP_LEN,
-        Packet::ConnAck(ack)
+        Packet::ConnAck(ack),
     );
 }
 

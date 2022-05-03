@@ -3,8 +3,8 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
-use vaux_mqtt::{ConnAck, FixedHeader, MQTTCodec, MQTTCodecError, Packet, PacketType, Reason};
 use vaux_mqtt::Packet::PingResponse;
+use vaux_mqtt::{ConnAck, FixedHeader, MQTTCodec, MQTTCodecError, Packet, PacketType, Reason};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
@@ -65,10 +65,10 @@ impl Broker {
         let mut framed = Framed::new(stream, MQTTCodec {});
         let packet = match framed.next().await {
             Some(Ok(Packet::Connect(packet))) => {
-                let ack = ConnAck::new(Reason::Success);
+                let ack = ConnAck::default();
                 framed.send(Packet::ConnAck(ack)).await?;
                 Some(packet)
-            },
+            }
             Some(Ok(Packet::PingRequest(_packet))) => {
                 let resp = PingResponse(FixedHeader::new(PacketType::PingResp));
                 framed.send(resp).await?;
@@ -94,7 +94,7 @@ impl Broker {
                                 println!("unsupported packet type {:?}", &req);
                                 return Err(Box::new(MQTTCodecError::new(
                                     format!("unsupported packet type: {:?}", req).as_str(),
-                                )))
+                                )));
                             }
                         },
                         Err(e) => {

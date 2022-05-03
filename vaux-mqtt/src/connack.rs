@@ -1,7 +1,13 @@
-use bytes::{BufMut, BytesMut};
-use crate::{Encode, PROP_SIZE_U32, PROP_SIZE_U8, QoSLevel, Remaining, UserPropertyMap, variable_byte_int_size};
+use crate::codec::{
+    encode_binary_data, encode_utf8_string, encode_variable_len_integer, PropertyType,
+    PROP_SIZE_U16,
+};
+use crate::{
+    variable_byte_int_size, Decode, Encode, QoSLevel, Remaining, UserPropertyMap, PROP_SIZE_U32,
+    PROP_SIZE_U8,
+};
 use crate::{FixedHeader, MQTTCodecError, PacketType};
-use crate::codec::{encode_binary_data, encode_utf8_string, encode_variable_len_integer, PROP_SIZE_U16, PropertyType};
+use bytes::{BufMut, BytesMut};
 
 const DEFAULT_RECV_MAX: u16 = 65535;
 const DEFAULT_TOPIC_ALIAS_MAX: u16 = 0;
@@ -31,9 +37,8 @@ pub enum Reason {
     QoSNotSupported,
     UseDiffServer,
     ServerMoved,
-    ConnRateExceeded = 0x9f
+    ConnRateExceeded = 0x9f,
 }
-
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct ConnAck {
@@ -55,14 +60,14 @@ pub struct ConnAck {
     response_info: Option<String>,
     server_ref: Option<String>,
     auth_method: Option<String>,
-    auth_data: Option<Vec<u8>>
+    auth_data: Option<Vec<u8>>,
 }
 
-impl ConnAck {
-    pub fn new(reason: Reason) -> Self {
+impl Default for ConnAck {
+    fn default() -> Self {
         ConnAck {
             session_present: false,
-            reason,
+            reason: Reason::Success,
             reason_str: None,
             expiry_interval: None,
             receive_max: DEFAULT_RECV_MAX,
@@ -91,13 +96,33 @@ impl crate::Remaining for ConnAck {
     }
 
     fn property_remaining(&self) -> Option<u32> {
-        let mut remaining = if self.expiry_interval.is_some() { PROP_SIZE_U32 } else { 0 }
-            + if self.receive_max != DEFAULT_RECV_MAX { PROP_SIZE_U16 } else { 0 }
-            + if self.max_qos != QoSLevel::ExactlyOnce {PROP_SIZE_U8} else { 0 }
-            + if !self.retain_avail {PROP_SIZE_U8} else {0}
-            + if self.max_packet_size.is_some() { PROP_SIZE_U32 } else {0}
-            + self.assigned_client_id.as_ref().map_or(0, |id| 3 + id.len() as u32)
-            + if self.topic_alias_max != DEFAULT_TOPIC_ALIAS_MAX { PROP_SIZE_U16} else {0};
+        let mut remaining = if self.expiry_interval.is_some() {
+            PROP_SIZE_U32
+        } else {
+            0
+        } + if self.receive_max != DEFAULT_RECV_MAX {
+            PROP_SIZE_U16
+        } else {
+            0
+        } + if self.max_qos != QoSLevel::ExactlyOnce {
+            PROP_SIZE_U8
+        } else {
+            0
+        } + if !self.retain_avail { PROP_SIZE_U8 } else { 0 }
+            + if self.max_packet_size.is_some() {
+                PROP_SIZE_U32
+            } else {
+                0
+            }
+            + self
+                .assigned_client_id
+                .as_ref()
+                .map_or(0, |id| 3 + id.len() as u32)
+            + if self.topic_alias_max != DEFAULT_TOPIC_ALIAS_MAX {
+                PROP_SIZE_U16
+            } else {
+                0
+            };
         remaining += self.reason_str.as_ref().map_or(0, |r| 3 + r.len() as u32);
         remaining += self.user_properties.as_ref().map_or(0, |p| p.size());
         if !self.wildcard_sub_avail {
@@ -115,7 +140,7 @@ impl crate::Remaining for ConnAck {
         if let Some(response_info) = &self.response_info {
             remaining += 3 + response_info.len() as u32;
         }
-        remaining += self.server_ref.as_ref().map_or(0, |r| 3 + r.len() as u32 );
+        remaining += self.server_ref.as_ref().map_or(0, |r| 3 + r.len() as u32);
         if let Some(auth_method) = &self.auth_method {
             remaining += 3 + auth_method.len() as u32;
         }
@@ -131,11 +156,21 @@ impl crate::Remaining for ConnAck {
     }
 }
 
+impl Decode for ConnAck {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        todo!()
+    }
+}
+
 impl Encode for ConnAck {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
         let mut header = FixedHeader::new(PacketType::ConnAck);
         let prop_remaining = self.property_remaining().unwrap();
-        header.set_remaining(VARIABLE_HEADER_LEN + prop_remaining + variable_byte_int_size(prop_remaining + VARIABLE_HEADER_LEN));
+        header.set_remaining(
+            VARIABLE_HEADER_LEN
+                + prop_remaining
+                + variable_byte_int_size(prop_remaining + VARIABLE_HEADER_LEN),
+        );
         header.encode(dest)?;
         let connack_flag: u8 = if self.session_present { 0x01 } else { 0x00 };
         dest.put_u8(connack_flag);
@@ -217,10 +252,10 @@ impl Encode for ConnAck {
 
 #[cfg(test)]
 mod test {
-    use bytes::BytesMut;
-    use crate::{Encode, UserPropertyMap};
-    use crate::codec::PropertyType;
     use super::*;
+    use crate::codec::PropertyType;
+    use crate::{Encode, UserPropertyMap};
+    use bytes::BytesMut;
 
     /// Minimum length CONNACK return
     /// Byte 1 = packet type + flags
@@ -233,7 +268,7 @@ mod test {
     #[test]
     fn test_simple_encode() {
         let mut dest = BytesMut::new();
-        let connack = ConnAck::new(Reason::Success);
+        let connack = ConnAck::default();
         assert!(connack.encode(&mut dest).is_ok());
         assert_eq!(EXPECTED_MIN_CONNACK_LEN, dest.len());
         assert_eq!(PacketType::ConnAck, PacketType::from(dest[0]));
@@ -248,7 +283,8 @@ mod test {
         let reason = "Malformed Packet".to_string();
         let auth_data = vec![0, 1, 2, 3, 4, 5];
         let expected_len = (reason.len() + auth_data.len() + 11) as u32;
-        let mut connack = ConnAck::new(Reason::MalformedPacket);
+        let mut connack = ConnAck::default();
+        connack.reason = Reason::MalformedPacket;
         connack.reason_str = Some(reason);
         connack.shared_sub_avail = false;
         connack.auth_data = Some(auth_data);
@@ -260,10 +296,15 @@ mod test {
         const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + 5;
         const EXPECTED_PROP_LEN: u32 = 5;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.expiry_interval = Some(257);
-        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
-                      PropertyType::SessionExpiry);
+        test_property(
+            connack,
+            &mut dest,
+            EXPECTED_LEN,
+            EXPECTED_PROP_LEN,
+            PropertyType::SessionExpiry,
+        );
         // 0x00000101 in bytes 6-9
         assert_eq!(1, dest[8]);
         assert_eq!(1, dest[9]);
@@ -274,10 +315,15 @@ mod test {
         const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + 3;
         const EXPECTED_PROP_LEN: u32 = 3;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.receive_max = 257;
-        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
-                      PropertyType::RecvMax);
+        test_property(
+            connack,
+            &mut dest,
+            EXPECTED_LEN,
+            EXPECTED_PROP_LEN,
+            PropertyType::RecvMax,
+        );
         assert_eq!(1, dest[6]);
         assert_eq!(1, dest[7]);
     }
@@ -287,10 +333,15 @@ mod test {
         const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + 2;
         const EXPECTED_PROP_LEN: u32 = 2;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.max_qos = QoSLevel::AtLeastOnce;
-        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
-                      PropertyType::MaxQoS);
+        test_property(
+            connack,
+            &mut dest,
+            EXPECTED_LEN,
+            EXPECTED_PROP_LEN,
+            PropertyType::MaxQoS,
+        );
         assert_eq!(QoSLevel::AtLeastOnce as u8, dest[6]);
     }
 
@@ -299,10 +350,15 @@ mod test {
         const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + 2;
         const EXPECTED_PROP_LEN: u32 = 2;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.retain_avail = false;
-        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
-                      PropertyType::RetainAvail);
+        test_property(
+            connack,
+            &mut dest,
+            EXPECTED_LEN,
+            EXPECTED_PROP_LEN,
+            PropertyType::RetainAvail,
+        );
         assert_eq!(0x00, dest[6]);
     }
 
@@ -310,22 +366,33 @@ mod test {
     fn test_max_packet_size() {
         const EXPECTED_LEN: usize = EXPECTED_MIN_CONNACK_LEN + 5;
         const EXPECTED_PROP_LEN: u32 = 5;
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.max_packet_size = Some(100);
         let mut dest = BytesMut::new();
-        test_property(connack, &mut dest, EXPECTED_LEN as u32, EXPECTED_PROP_LEN,
-                      PropertyType::MaxPacketSize);
+        test_property(
+            connack,
+            &mut dest,
+            EXPECTED_LEN as u32,
+            EXPECTED_PROP_LEN,
+            PropertyType::MaxPacketSize,
+        );
     }
 
     #[test]
     fn test_assigned_client_id() {
         const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + 43;
         const EXPECTED_PROP_LEN: u32 = 43;
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         let assigned_client_id = format!("{:*^1$}", "", 40);
         connack.assigned_client_id = Some(assigned_client_id);
         let mut dest = BytesMut::new();
-        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN, PropertyType::AssignedClientId);
+        test_property(
+            connack,
+            &mut dest,
+            EXPECTED_LEN,
+            EXPECTED_PROP_LEN,
+            PropertyType::AssignedClientId,
+        );
         assert_eq!(40, dest[7]);
         for ch in &dest[8..48] {
             assert_eq!(0x2a, *ch);
@@ -337,10 +404,15 @@ mod test {
         const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + PROP_SIZE_U16;
         const EXPECTED_PROP_LEN: u32 = PROP_SIZE_U16;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.topic_alias_max = 128;
-        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
-                      PropertyType::TopicAliasMax);
+        test_property(
+            connack,
+            &mut dest,
+            EXPECTED_LEN,
+            EXPECTED_PROP_LEN,
+            PropertyType::TopicAliasMax,
+        );
         assert_eq!(0x80, dest[7]);
     }
 
@@ -350,10 +422,16 @@ mod test {
         let expected_len = EXPECTED_MIN_CONNACK_LEN as u32 + 3 + reason.len() as u32;
         let expected_prop_len = 3 + reason.len() as u32;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Banned);
+        let mut connack = ConnAck::default();
+        connack.reason = Reason::Banned;
         connack.reason_str = Some(reason);
-        test_property(connack, &mut dest, expected_len, expected_prop_len,
-                      PropertyType::Reason);
+        test_property(
+            connack,
+            &mut dest,
+            expected_len,
+            expected_prop_len,
+            PropertyType::Reason,
+        );
         assert_eq!(0x14, dest[7]);
     }
 
@@ -369,10 +447,15 @@ mod test {
         let expected_len = EXPECTED_MIN_CONNACK_LEN as u32 + prop_len as u32;
         let expected_prop_len = prop_len as u32;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.user_properties = Some(properties);
-        test_property(connack, &mut dest, expected_len, expected_prop_len,
-                      PropertyType::UserProperty);
+        test_property(
+            connack,
+            &mut dest,
+            expected_len,
+            expected_prop_len,
+            PropertyType::UserProperty,
+        );
     }
 
     #[test]
@@ -380,23 +463,28 @@ mod test {
         const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + PROP_SIZE_U8;
         const EXPECTED_PROP_LEN: u32 = PROP_SIZE_U8;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.wildcard_sub_avail = false;
-        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
-                      PropertyType::WildcardSubAvail);
+        test_property(
+            connack,
+            &mut dest,
+            EXPECTED_LEN,
+            EXPECTED_PROP_LEN,
+            PropertyType::WildcardSubAvail,
+        );
         assert_eq!(0x00, dest[6]);
     }
 
     #[test]
     fn test_sub_id_avail() {
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.sub_id_avail = false;
         test_bool_property(connack, PropertyType::SubIdAvail, false);
     }
 
     #[test]
     fn test_shared_sub_avail() {
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.shared_sub_avail = false;
         test_bool_property(connack, PropertyType::ShardSubAvail, false);
     }
@@ -406,10 +494,15 @@ mod test {
         const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + PROP_SIZE_U16;
         const EXPECTED_PROP_LEN: u32 = PROP_SIZE_U16;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.server_keep_alive = Some(128);
-        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
-                      PropertyType::KeepAlive);
+        test_property(
+            connack,
+            &mut dest,
+            EXPECTED_LEN,
+            EXPECTED_PROP_LEN,
+            PropertyType::KeepAlive,
+        );
         assert_eq!(0x80, dest[7]);
     }
 
@@ -419,10 +512,15 @@ mod test {
         let expected_prop_len = response_info.len() as u32 + 3;
         let expected_len = EXPECTED_MIN_CONNACK_LEN as u32 + expected_prop_len;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.response_info = Some(response_info.clone());
-        test_property(connack, &mut dest, expected_len, expected_prop_len,
-                      PropertyType::RespInfo);
+        test_property(
+            connack,
+            &mut dest,
+            expected_len,
+            expected_prop_len,
+            PropertyType::RespInfo,
+        );
         assert_eq!(response_info.len() as u8, dest[7]);
     }
 
@@ -432,10 +530,15 @@ mod test {
         let expected_prop_len = server_ref.len() as u32 + 3;
         let expected_len = EXPECTED_MIN_CONNACK_LEN as u32 + expected_prop_len;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.server_ref = Some(server_ref.clone());
-        test_property(connack, &mut dest, expected_len, expected_prop_len,
-                      PropertyType::ServerRef);
+        test_property(
+            connack,
+            &mut dest,
+            expected_len,
+            expected_prop_len,
+            PropertyType::ServerRef,
+        );
         assert_eq!(server_ref.len() as u8, dest[7]);
     }
 
@@ -445,10 +548,15 @@ mod test {
         let expected_prop_len = auth_method.len() as u32 + 3;
         let expected_len = EXPECTED_MIN_CONNACK_LEN as u32 + expected_prop_len;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         connack.auth_method = Some(auth_method.clone());
-        test_property(connack, &mut dest, expected_len, expected_prop_len,
-                      PropertyType::AuthMethod);
+        test_property(
+            connack,
+            &mut dest,
+            expected_len,
+            expected_prop_len,
+            PropertyType::AuthMethod,
+        );
         assert_eq!(auth_method.len() as u8, dest[7]);
     }
 
@@ -457,27 +565,39 @@ mod test {
         const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + 43;
         const EXPECTED_PROP_LEN: u32 = 43;
         let mut dest = BytesMut::new();
-        let mut connack = ConnAck::new(Reason::Success);
+        let mut connack = ConnAck::default();
         let auth_data = vec![0_u8; 40];
         connack.auth_data = Some(auth_data);
-        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
-                      PropertyType::AuthData);
+        test_property(
+            connack,
+            &mut dest,
+            EXPECTED_LEN,
+            EXPECTED_PROP_LEN,
+            PropertyType::AuthData,
+        );
     }
 
     fn test_bool_property(connack: ConnAck, property: PropertyType, expected: bool) {
         const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + PROP_SIZE_U8;
         const EXPECTED_PROP_LEN: u32 = PROP_SIZE_U8;
         let mut dest = BytesMut::new();
-        test_property(connack, &mut dest, EXPECTED_LEN, EXPECTED_PROP_LEN,
-                      property);
+        test_property(
+            connack,
+            &mut dest,
+            EXPECTED_LEN,
+            EXPECTED_PROP_LEN,
+            property,
+        );
         assert_eq!(expected as u8, dest[6]);
     }
 
-    fn test_property(connack: ConnAck,
-                     dest: &mut BytesMut,
-                     expected_len: u32,
-                     expected_prop_len: u32,
-                     property: PropertyType) {
+    fn test_property(
+        connack: ConnAck,
+        dest: &mut BytesMut,
+        expected_len: u32,
+        expected_prop_len: u32,
+        property: PropertyType,
+    ) {
         let result = connack.encode(dest);
         assert!(result.is_ok());
         assert_eq!(expected_len, dest.len() as u32);

@@ -1,17 +1,19 @@
 mod codec;
-mod connect;
 mod connack;
+mod connect;
 
-use std::collections::HashMap;
-use bytes::{BufMut, BytesMut};
+use crate::codec::{
+    encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, PropertyType,
+    PROP_SIZE_U32, PROP_SIZE_U8,
+};
 pub use crate::codec::{MQTTCodec, MQTTCodecError, PacketType};
-use crate::codec::{encode_utf8_string, encode_variable_len_integer, PROP_SIZE_U32, PROP_SIZE_U8, PropertyType, variable_byte_int_size};
+pub use crate::connack::{ConnAck, Reason};
 pub use crate::connect::Connect;
-pub use crate::connack::{Reason, ConnAck};
+use bytes::{BufMut, BytesMut};
+use std::collections::HashMap;
 
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
 pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
-
 
 const DEFAULT_WILL_DELAY: u32 = 0;
 
@@ -33,7 +35,7 @@ type UserPropertyMap = HashMap<String, String>;
 
 impl crate::Remaining for UserPropertyMap {
     fn size(&self) -> u32 {
-        let mut remaining: u32  = 0;
+        let mut remaining: u32 = 0;
         for (key, value) in self.iter() {
             remaining += key.len() as u32 + 2 + value.len() as u32 + 3;
         }
@@ -93,7 +95,9 @@ impl FixedHeader {
 }
 
 impl crate::Remaining for FixedHeader {
-    fn size(&self) -> u32 { self.remaining }
+    fn size(&self) -> u32 {
+        self.remaining
+    }
 
     fn property_remaining(&self) -> Option<u32> {
         None
@@ -210,5 +214,4 @@ impl WillMessage {
 }
 
 #[cfg(test)]
-mod test {
-}
+mod test {}

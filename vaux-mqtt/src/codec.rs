@@ -228,7 +228,7 @@ pub(crate) fn variable_byte_int_size(value: u32) -> u32 {
         0..=127 => 1,
         128..=16383 => 2,
         16384..=2097151 => 3,
-        _ => 4
+        _ => 4,
     }
 }
 
@@ -247,7 +247,7 @@ pub(crate) fn check_property(
 
 pub(crate) fn encode_utf8_string(src: &str, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
     let len = src.len();
-    if len > u16::MAX as usize{
+    if len > u16::MAX as usize {
         return Err(MQTTCodecError::new("string exceeds max length"));
     }
     dest.put_u16(src.len() as u16);
@@ -284,7 +284,7 @@ pub(crate) fn decode_binary_data(
 
 pub(crate) fn encode_binary_data(src: &[u8], dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
     let len = src.len();
-    if len > u16::MAX as usize{
+    if len > u16::MAX as usize {
         return Err(MQTTCodecError::new("binary data exceeds max length"));
     }
     dest.put_u16(len as u16);
@@ -305,35 +305,25 @@ impl Decoder for MQTTCodec {
                 match packet_header {
                     Some(packet_header) => {
                         match packet_header.packet_type {
-                            PacketType::PingReq => {
-                                Ok(Some(Packet::PingRequest(packet_header)))
-                            },
-                            PacketType::PingResp => {
-                                Ok(Some(Packet::PingResponse(packet_header)))
-                            },
+                            PacketType::PingReq => Ok(Some(Packet::PingRequest(packet_header))),
+                            PacketType::PingResp => Ok(Some(Packet::PingResponse(packet_header))),
                             PacketType::Connect => {
                                 let mut connect = Connect::default();
                                 connect.decode(src)?;
                                 Ok(Some(Packet::Connect(connect)))
                             }
-                            PacketType::Publish => {
-                                Ok(None)
-                            }
+                            PacketType::Publish => Ok(None),
                             //PacketType::ConnAck => Ok(Some(Packet::ConnAck(packet_header))),
-                            _ => {
-                                Err(MQTTCodecError::new("unsupported packet type"))
-                            },
+                            _ => Err(MQTTCodecError::new("unsupported packet type")),
                         }
-                    },
-                    None => {
-                        Ok(None)
                     }
+                    None => Ok(None),
                 }
             }
             Err(e) => {
                 println!("Error: {:?}", e);
                 Err(e)
-            },
+            }
         }
     }
 }
@@ -350,7 +340,7 @@ impl Encoder<Packet> for MQTTCodec {
                 dest.put_u8(0x_00);
                 Ok(())
             }
-            _ => return Err(MQTTCodecError::new("unsupported packet type"))
+            _ => return Err(MQTTCodecError::new("unsupported packet type")),
         }?;
         Ok(())
     }
@@ -397,7 +387,7 @@ fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQTTCo
         if src[idx] & 0x80 != 0x00 {
             // insufficient bytes left to read remaining
             if src.remaining() != 1 {
-                return Ok(None)
+                return Ok(None);
             }
         } else {
             break;
@@ -445,18 +435,15 @@ fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQTTCo
                 flags,
                 remaining,
             }))
-        },
-        PacketType::Publish => {
-            Ok(Some(FixedHeader {
-                packet_type,
-                flags,
-                remaining,
-            }))
-        },
+        }
+        PacketType::Publish => Ok(Some(FixedHeader {
+            packet_type,
+            flags,
+            remaining,
+        })),
         _ => Err(MQTTCodecError::new("unexpected packet type ")),
     }
 }
-
 
 #[cfg(test)]
 mod test {
