@@ -9,12 +9,25 @@
 Vaux, pronounced vôks, is an MQTT v5.0 broker built using Rust. 
 
 # Roadmap
-Last Update: April 4, 2022
+Last Update: May 4, 2022
 
-## Protocol and Broker
-The current development effort is focused on the basic MQTT broker and codec 
-with test client. 
+### Basic Session Management
+Complete implementation of connect and acknowlegement packets with session creation.
+This will include end-to-end testing for client <-> server session establishment 
+and disconnect scenarios.
 
+### Publish
+Add publication support and basic message management.
 
+### Subscription Management
+Add subscribe packet support and basic subscription management
 
+### TLS
+Add TLS support. Update the command line and configuration to support running 
+with TLS. TLS will be the default startup mode.
 
+### Basic Authentication
+Simple username password authentication. 
+
+### Extend Session Management
+Support advanced session management scenarios.
