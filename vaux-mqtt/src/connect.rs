@@ -119,9 +119,7 @@ impl Connect {
                     }
                     PropertyType::CorrelationData => {
                         check_property(PropertyType::CorrelationData, &mut properties)?;
-                        let mut dest = Vec::<u8>::new();
-                        decode_binary_data(&mut dest, src)?;
-                        will_message.correlation_data = Some(dest);
+                        will_message.correlation_data = Some(decode_binary_data(src)?);
                     }
                     PropertyType::UserProperty => {
                         if will_message.user_property == None {
@@ -157,26 +155,22 @@ impl Connect {
         while src.remaining() > read_until {
             match PropertyType::try_from(src.get_u8()) {
                 Ok(property_type) => {
-                    match property_type {
-                        PropertyType::SessionExpiry => {
-                            check_property(PropertyType::SessionExpiry, &mut properties)?;
-                            self.session_expiry_interval = Some(src.get_u32());
-                        }
-                        PropertyType::RecvMax => {
-                            check_property(PropertyType::SessionExpiry, &mut properties)?;
-                            self.receive_max = src.get_u16();
-                        }
-                        PropertyType::MaxPacketSize => {
-                            check_property(PropertyType::SessionExpiry, &mut properties)?;
-                            self.max_packet_size = Some(src.get_u32());
-                        }
-                        PropertyType::TopicAliasMax => {
-                            check_property(PropertyType::SessionExpiry, &mut properties)?;
-                            self.topic_alias_max = Some(src.get_u16());
-                        }
-                        PropertyType::ReqRespInfo => {
-                            check_property(PropertyType::ReqRespInfo, &mut properties)?;
-                            match src.get_u8() {
+                    if property_type != PropertyType::UserProperty {
+                        check_property(property_type, &mut properties)?;
+                        match property_type {
+                            PropertyType::SessionExpiry => {
+                                self.session_expiry_interval = Some(src.get_u32());
+                            }
+                            PropertyType::RecvMax => {
+                                self.receive_max = src.get_u16();
+                            }
+                            PropertyType::MaxPacketSize => {
+                                self.max_packet_size = Some(src.get_u32());
+                            }
+                            PropertyType::TopicAliasMax => {
+                                self.topic_alias_max = Some(src.get_u16());
+                            }
+                            PropertyType::ReqRespInfo => match src.get_u8() {
                                 0 => self.req_resp_info = false,
                                 1 => self.req_resp_info = true,
                                 v => {
@@ -189,11 +183,8 @@ impl Connect {
                                         .as_str(),
                                     ))
                                 }
-                            }
-                        }
-                        PropertyType::RespInfo => {
-                            check_property(PropertyType::RespInfo, &mut properties)?;
-                            match src.get_u8() {
+                            },
+                            PropertyType::RespInfo => match src.get_u8() {
                                 0 => self.problem_info = false,
                                 1 => self.problem_info = true,
                                 v => {
@@ -206,47 +197,42 @@ impl Connect {
                                         .as_str(),
                                     ))
                                 }
+                            },
+                            PropertyType::AuthMethod => {
+                                let result = decode_utf8_string(src)?;
+                                self.auth_method = Some(result);
                             }
-                        }
-                        PropertyType::AuthMethod => {
-                            check_property(PropertyType::AuthMethod, &mut properties)?;
-                            let result = decode_utf8_string(src)?;
-                            self.auth_method = Some(result);
-                        }
-                        PropertyType::AuthData => {
-                            if self.auth_method != None {
-                                check_property(PropertyType::AuthData, &mut properties)?;
-                                let mut dest = Vec::new();
-                                decode_binary_data(&mut dest, src)?;
-                                self.auth_data = Some(dest);
-                            } else {
-                                // MQTT protocol not specific that auth method must appear before
-                                // auth data. This implementation imposes order and may be incorrect
+                            PropertyType::AuthData => {
+                                if self.auth_method != None {
+                                    self.auth_data = Some(decode_binary_data(src)?);
+                                } else {
+                                    // MQTT protocol not specific that auth method must appear before
+                                    // auth data. This implementation imposes order and may be incorrect
+                                    return Err(MQTTCodecError::new(&format!(
+                                        "Property: {} provided without providing {}",
+                                        PropertyType::AuthData,
+                                        PropertyType::AuthMethod
+                                    )));
+                                }
+                            }
+                            val => {
                                 return Err(MQTTCodecError::new(&format!(
-                                    "Property: {} provided without providing {}",
-                                    PropertyType::AuthData,
-                                    PropertyType::AuthMethod
-                                )));
+                                    "unexpected property type value: {}",
+                                    val
+                                )))
                             }
                         }
-                        PropertyType::UserProperty => {
-                            if self.user_property == None {
-                                self.user_property = Some(HashMap::new());
-                            }
-                            let property_map = self.user_property.as_mut().unwrap();
-                            // MQTT v5.0 specification indicates that a key may appear multiple times
-                            // this implementation will overwrite existing values with duplicate
-                            // keys
-                            let key = decode_utf8_string(src)?;
-                            let value = decode_utf8_string(src)?;
-                            property_map.insert(key, value);
+                    } else {
+                        if self.user_property == None {
+                            self.user_property = Some(HashMap::new());
                         }
-                        val => {
-                            return Err(MQTTCodecError::new(&format!(
-                                "unexpected property type value: {}",
-                                val
-                            )))
-                        }
+                        let property_map = self.user_property.as_mut().unwrap();
+                        // MQTT v5.0 specification indicates that a key may appear multiple times
+                        // this implementation will overwrite existing values with duplicate
+                        // keys
+                        let key = decode_utf8_string(src)?;
+                        let value = decode_utf8_string(src)?;
+                        property_map.insert(key, value);
                     }
                 }
                 Err(_) => return Err(MQTTCodecError::new("invalid property type")),
@@ -274,15 +260,13 @@ impl Connect {
             self.decode_will_properties(src)?;
             let will_message = self.will_message.as_mut().unwrap();
             will_message.topic = decode_utf8_string(src)?;
-            decode_binary_data(&mut will_message.payload, src)?;
+            will_message.payload = decode_binary_data(src)?;
         }
         if username {
             self.username = Some(decode_utf8_string(src)?);
         }
         if password {
-            let mut dest: Vec<u8> = Vec::new();
-            decode_binary_data(&mut dest, src)?;
-            self.password = Some(dest);
+            self.password = Some(decode_binary_data(src)?);
         }
         Ok(())
     }
