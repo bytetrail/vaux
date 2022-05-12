@@ -1,5 +1,5 @@
 use crate::connect::Connect;
-use crate::{Encode, FixedHeader, Packet, PACKET_RESERVED_NONE, QoSParseError};
+use crate::{Encode, FixedHeader, Packet, QoSParseError, PACKET_RESERVED_NONE};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -295,7 +295,7 @@ impl TryFrom<u8> for Reason {
             0xa0 => Ok(Reason::MaxConnectTime),
             0xa1 => Ok(Reason::SubIdUnsupported),
             0xa2 => Ok(Reason::WildcardSubUnsupported),
-            value => Err(MQTTCodecError::new(&format!("Invalid reason: {}", value)))
+            value => Err(MQTTCodecError::new(&format!("Invalid reason: {}", value))),
         }
     }
 }
@@ -385,10 +385,8 @@ pub(crate) fn decode_utf8_string(src: &mut BytesMut) -> Result<String, MQTTCodec
     }
 }
 
-pub(crate) fn decode_binary_data(
-    src: &mut BytesMut,
-) -> Result<Vec<u8>, MQTTCodecError> {
-    let mut dest= Vec::new();
+pub(crate) fn decode_binary_data(src: &mut BytesMut) -> Result<Vec<u8>, MQTTCodecError> {
+    let mut dest = Vec::new();
     let len = src.get_u16() as usize;
     dest.resize(len, 0);
     for _ in 0..len {
