@@ -1,5 +1,5 @@
 use crate::connect::Connect;
-use crate::{Encode, FixedHeader, Packet, PACKET_RESERVED_NONE};
+use crate::{Encode, FixedHeader, Packet, QoSParseError, PACKET_RESERVED_NONE};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -193,6 +193,113 @@ impl Display for PacketType {
     }
 }
 
+#[repr(u8)]
+#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+pub enum Reason {
+    Success,
+    GrantedQoS1,
+    GrantedQoS2,
+    DisconnectWillMsg = 0x04,
+    NoSubscribers = 0x10,
+    NoSubscriptionExisted,
+    ContinueAuth = 0x18,
+    Reauthenticate,
+    UnspecifiedErr = 0x80,
+    MalformedPacket,
+    ProtocolErr,
+    ImplementationErr,
+    UnsupportedProtocolVersion,
+    InvalidClientId,
+    AuthenticationErr,
+    Unauthorized,
+    ServerUnavailable,
+    ServerBusy,
+    Banned,
+    ServerShutdown,
+    AuthMethodErr,
+    KeepAliveTimeout,
+    SessionTakeOver,
+    InvalidTopicFilter,
+    InvalidTopicName,
+    PacketIdInUse,
+    PacketIdNotFound,
+    ReceiveMaxExceeded,
+    InvalidTopicAlias,
+    PacketTooLarge,
+    MessageRate,
+    QuotaExceeded,
+    AdminAction,
+    PayloadFormatErr,
+    RetainUnsupported,
+    QoSUnsupported,
+    UseDiffServer,
+    ServerMoved,
+    SharedSubUnsupported,
+    ConnRateExceeded,
+    MaxConnectTime,
+    SubIdUnsupported,
+    WildcardSubUnsupported,
+}
+
+#[allow(non_upper_case_globals)]
+impl Reason {
+    pub const NormalDisconnect: Reason = Reason::Success;
+    pub const GrantedQos0: Reason = Reason::Success;
+}
+
+impl TryFrom<u8> for Reason {
+    type Error = MQTTCodecError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(Reason::Success),
+            0x01 => Ok(Reason::GrantedQoS1),
+            0x02 => Ok(Reason::GrantedQoS2),
+            0x04 => Ok(Reason::DisconnectWillMsg),
+            0x10 => Ok(Reason::NoSubscribers),
+            0x11 => Ok(Reason::NoSubscriptionExisted),
+            0x18 => Ok(Reason::ContinueAuth),
+            0x19 => Ok(Reason::Reauthenticate),
+            0x80 => Ok(Reason::UnspecifiedErr),
+            0x81 => Ok(Reason::MalformedPacket),
+            0x82 => Ok(Reason::ProtocolErr),
+            0x83 => Ok(Reason::ImplementationErr),
+            0x84 => Ok(Reason::UnsupportedProtocolVersion),
+            0x85 => Ok(Reason::InvalidClientId),
+            0x86 => Ok(Reason::AuthenticationErr),
+            0x87 => Ok(Reason::Unauthorized),
+            0x88 => Ok(Reason::ServerUnavailable),
+            0x89 => Ok(Reason::ServerBusy),
+            0x8a => Ok(Reason::Banned),
+            0x8b => Ok(Reason::ServerShutdown),
+            0x8c => Ok(Reason::AuthMethodErr),
+            0x8d => Ok(Reason::KeepAliveTimeout),
+            0x8e => Ok(Reason::SessionTakeOver),
+            0x8f => Ok(Reason::InvalidTopicFilter),
+            0x90 => Ok(Reason::InvalidTopicName),
+            0x91 => Ok(Reason::PacketIdInUse),
+            0x92 => Ok(Reason::PacketIdNotFound),
+            0x93 => Ok(Reason::ReceiveMaxExceeded),
+            0x94 => Ok(Reason::InvalidTopicAlias),
+            0x95 => Ok(Reason::PacketTooLarge),
+            0x96 => Ok(Reason::MessageRate),
+            0x97 => Ok(Reason::QuotaExceeded),
+            0x98 => Ok(Reason::AdminAction),
+            0x99 => Ok(Reason::PayloadFormatErr),
+            0x9a => Ok(Reason::RetainUnsupported),
+            0x9b => Ok(Reason::QoSUnsupported),
+            0x9c => Ok(Reason::UseDiffServer),
+            0x9d => Ok(Reason::ServerMoved),
+            0x9e => Ok(Reason::SharedSubUnsupported),
+            0x9f => Ok(Reason::ConnRateExceeded),
+            0xa0 => Ok(Reason::MaxConnectTime),
+            0xa1 => Ok(Reason::SubIdUnsupported),
+            0xa2 => Ok(Reason::WildcardSubUnsupported),
+            value => Err(MQTTCodecError::new(&format!("Invalid reason: {}", value))),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct MQTTCodecError {
     reason: String,
@@ -201,6 +308,14 @@ pub struct MQTTCodecError {
 impl Display for MQTTCodecError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "MQTT codec error: {}", self.reason)
+    }
+}
+
+impl From<QoSParseError> for MQTTCodecError {
+    fn from(err: QoSParseError) -> Self {
+        MQTTCodecError {
+            reason: "invalid QOS level".to_string(),
+        }
     }
 }
 
@@ -270,16 +385,14 @@ pub(crate) fn decode_utf8_string(src: &mut BytesMut) -> Result<String, MQTTCodec
     }
 }
 
-pub(crate) fn decode_binary_data(
-    dest: &mut Vec<u8>,
-    src: &mut BytesMut,
-) -> Result<(), MQTTCodecError> {
+pub(crate) fn decode_binary_data(src: &mut BytesMut) -> Result<Vec<u8>, MQTTCodecError> {
+    let mut dest = Vec::new();
     let len = src.get_u16() as usize;
     dest.resize(len, 0);
     for _ in 0..len {
         dest.push(src.get_u8());
     }
-    Ok(())
+    Ok(dest)
 }
 
 pub(crate) fn encode_binary_data(src: &[u8], dest: &mut BytesMut) -> Result<(), MQTTCodecError> {

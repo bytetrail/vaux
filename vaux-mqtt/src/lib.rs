@@ -6,8 +6,8 @@ use crate::codec::{
     encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, PropertyType,
     PROP_SIZE_U32, PROP_SIZE_U8,
 };
-pub use crate::codec::{MQTTCodec, MQTTCodecError, PacketType};
-pub use crate::connack::{ConnAck, Reason};
+pub use crate::codec::{MQTTCodec, MQTTCodecError, PacketType, Reason};
+pub use crate::connack::ConnAck;
 pub use crate::connect::Connect;
 use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;
