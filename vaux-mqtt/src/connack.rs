@@ -20,18 +20,18 @@ pub struct ConnAck {
     session_present: bool,
     reason: Reason,
     reason_str: Option<String>,
-    expiry_interval: Option<u32>,
+    pub expiry_interval: Option<u32>,
     receive_max: u16,
     max_qos: QoSLevel,
     retain_avail: bool,
     max_packet_size: Option<u32>,
-    assigned_client_id: Option<String>,
+    pub assigned_client_id: Option<String>,
     topic_alias_max: u16,
     user_properties: Option<UserPropertyMap>,
     wildcard_sub_avail: bool,
     sub_id_avail: bool,
     shared_sub_avail: bool,
-    server_keep_alive: Option<u16>,
+    pub server_keep_alive: Option<u16>,
     response_info: Option<String>,
     server_ref: Option<String>,
     auth_method: Option<String>,
@@ -39,6 +39,7 @@ pub struct ConnAck {
 }
 
 impl ConnAck {
+
     fn decode_prop_bool(src: &mut BytesMut) -> Result<bool, MQTTCodecError> {
         match src.get_u8() {
             0 => Ok(false),
@@ -188,7 +189,7 @@ impl crate::Remaining for ConnAck {
             + self
                 .assigned_client_id
                 .as_ref()
-                .map_or(0, |id| 3 + id.len() as u32)
+                .map_or(0, |i| 3 + i.len() as u32)
             + if self.topic_alias_max != DEFAULT_TOPIC_ALIAS_MAX {
                 PROP_SIZE_U16
             } else {
@@ -208,16 +209,13 @@ impl crate::Remaining for ConnAck {
         if self.server_keep_alive.is_some() {
             remaining += PROP_SIZE_U16;
         }
-        if let Some(response_info) = &self.response_info {
-            remaining += 3 + response_info.len() as u32;
-        }
-        remaining += self.server_ref.as_ref().map_or(0, |r| 3 + r.len() as u32);
-        if let Some(auth_method) = &self.auth_method {
-            remaining += 3 + auth_method.len() as u32;
-        }
-        if let Some(auth_data) = &self.auth_data {
-            remaining += 3 + auth_data.len() as u32;
-        }
+        remaining += self
+            .response_info
+            .as_ref()
+            .map_or(0, |r| 3 + r.len() as u32)
+            + self.server_ref.as_ref().map_or(0, |r| 3 + r.len() as u32)
+            + self.auth_method.as_ref().map_or(0, |a| 3 + a.len() as u32)
+            + self.auth_data.as_ref().map_or(0, |a| 3 + a.len() as u32);
         Some(remaining)
     }
 
@@ -321,7 +319,6 @@ impl Encode for ConnAck {
             dest.put_u8(PropertyType::AuthData as u8);
             encode_binary_data(auth_data, dest)?;
         }
-
         Ok(())
     }
 }

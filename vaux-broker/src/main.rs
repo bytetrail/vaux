@@ -1,6 +1,11 @@
 mod broker;
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use broker::Broker;
+use crate::broker::session::{Session};
+
 
 #[tokio::main]
 async fn main() {
@@ -14,5 +19,7 @@ async fn main() {
     println!("\nCTRL-C to exit\n");
 
     let mut broker = Broker::default();
-    let _ = broker.run().await;
+    // TODO initialize from storage for long lived sessions
+    let session_pool: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>> = Arc::new(RwLock::new(HashMap::new()));
+    let _ = broker.run(session_pool).await;
 }
