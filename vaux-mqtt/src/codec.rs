@@ -492,14 +492,13 @@ pub(crate) fn decode_variable_len_integer(src: &mut BytesMut) -> u32 {
 }
 
 fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQTTCodecError> {
-    println!("decode_fixed_header()");
     if src.remaining() < 2 {
         return Ok(None);
     }
     for idx in 1..=3 {
         if src[idx] & 0x80 != 0x00 {
             // insufficient bytes left to read remaining
-            if src.remaining() != 1 {
+            if src.remaining() < 1 {
                 return Ok(None);
             }
         } else {

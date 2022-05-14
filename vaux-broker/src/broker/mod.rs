@@ -1,13 +1,24 @@
+pub(crate) mod session;
+
+use std::collections::HashMap;
+use crate::broker::session::{Session};
 use futures::{SinkExt, StreamExt};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
+use std::sync::{Arc};
+use std::time::{Duration, Instant};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
 use tokio_util::codec::Framed;
+use uuid::Uuid;
 use vaux_mqtt::Packet::PingResponse;
 use vaux_mqtt::{ConnAck, FixedHeader, MQTTCodec, MQTTCodecError, Packet, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
+const DEFAULT_MAX_KEEP_ALIVE: u64 = 60; // 60 seconds
+const WAIT_IDLE_TIME: u64 = 50; // 50 milliseconds wait idle time
+const KEEP_ALIVE_FACTOR: f32 = 1.5_f32;
 
 #[derive(Debug, Clone)]
 pub struct Broker {
@@ -33,17 +44,20 @@ impl Broker {
     /// not be used until the command line interface is developed. Remove the
     /// dead_code override when complete
     pub fn new(listen_addr: SocketAddr) -> Self {
-        Broker { listen_addr }
+        Broker { listen_addr,
+        }
     }
 
-    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&mut self, session_pool: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>>)
+    -> Result<(), Box<dyn std::error::Error>> {
         match TcpListener::bind(self.listen_addr).await {
             Ok(listener) => {
                 println!("broker accepting request on {:?}", self.listen_addr);
                 loop {
+                    let session_pool = session_pool.clone();
                     let (mut socket, _) = listener.accept().await?;
                     tokio::spawn(async move {
-                        match Broker::handle_client(&mut socket).await {
+                        match Broker::handle_client(&mut socket, session_pool).await {
                             Ok(_) => {}
                             Err(e) => {
                                 // TODO unhandled error in client handler should result in disconnect
@@ -60,30 +74,58 @@ impl Broker {
         }
     }
 
-    async fn handle_client(stream: &mut TcpStream) -> Result<(), Box<dyn std::error::Error>> {
-        let mut loop_count = 0;
+    async fn handle_client(stream: &mut TcpStream, session_pool: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>>) -> Result<(), Box<dyn std::error::Error>> {
+        let session_id: String;
         let mut framed = Framed::new(stream, MQTTCodec {});
-        let packet = match framed.next().await {
+        let idle = Duration::from_millis(WAIT_IDLE_TIME);
+        let session = match framed.next().await {
             Some(Ok(Packet::Connect(packet))) => {
-                let ack = ConnAck::default();
+                let mut active_session: Option<Arc<RwLock<Session>>> = None;
+                let mut ack = ConnAck::default();
+                // handle the client id
+                if packet.client_id.len() == 0 {
+                    session_id = Uuid::new_v4().to_string();
+                    ack.assigned_client_id = Some(session_id.clone());
+                } else {
+                    session_id = packet.client_id;
+                }
+                if let Some(session) = session_pool.read().await.get(&session_id) {
+                    active_session = Some(session.clone());
+                }
+                let mut session = Session::new(session_id.clone(), Duration::from_secs(DEFAULT_MAX_KEEP_ALIVE));
+                if let Some(expiry) = packet.session_expiry_interval {
+                    session.expiry = Duration::from_secs(expiry as u64);
+                }
+                if packet.clean_start || active_session.is_none(){
+                    let session = Arc::new(RwLock::new(session));
+                    session_pool.write().await.insert(session_id.clone(), session.clone());
+                    active_session = Some(session);
+                }
+                if packet.keep_alive > DEFAULT_MAX_KEEP_ALIVE as u16 {
+                    ack.server_keep_alive = Some(DEFAULT_MAX_KEEP_ALIVE as u16);
+                } else {
+                    active_session.as_ref().unwrap().write().await.set_max_keep_alive_secs(packet.keep_alive as u64);
+                }
                 framed.send(Packet::ConnAck(ack)).await?;
-                Some(packet)
+                active_session
             }
             Some(Ok(Packet::PingRequest(_packet))) => {
+                // allow clients without connected session to ping
                 let resp = PingResponse(FixedHeader::new(PacketType::PingResp));
                 framed.send(resp).await?;
                 None
             }
             _ => {
-                println!("connect not received");
                 return Err(Box::new(MQTTCodecError::new("connect packet not received")));
             }
         };
-        if packet.is_some() {
+        if let Some(session) = session{
+            let keep_alive = Duration::from_secs((session.read().await.max_keep_alive_secs() as f32 * KEEP_ALIVE_FACTOR) as u64);
+            let mut last_activity = Instant::now();
             loop {
-                println!("Frame {}", loop_count);
                 let request = framed.next().await;
                 if let Some(request) = request {
+                    last_activity = Instant::now();
                     match request {
                         Ok(request) => match request {
                             Packet::PingRequest(_) => {
@@ -101,12 +143,15 @@ impl Broker {
                             println!("error handling client {:?}", e);
                             return Err(Box::new(e));
                         }
-                    }
-                } else {
-                    println!(" nothing ? ");
+                    } // match request
+                } // if let Some(request ...
+                std::thread::sleep(idle);
+                if last_activity.elapsed() > keep_alive {
+                    // immediate disconnect
+                    // TODO review specification for normal disconnect packet
+                    break;
                 }
-                loop_count += 1;
-            }
+            } // loop
         }
         Ok(())
     }

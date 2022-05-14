@@ -23,9 +23,9 @@ const DEFAULT_CONNECT_REMAINING: u32 = 10;
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Connect {
-    clean_start: bool,
-    keep_alive: u16,
-    session_expiry_interval: Option<u32>,
+    pub clean_start: bool,
+    pub keep_alive: u16,
+    pub session_expiry_interval: Option<u32>,
     receive_max: u16,
     max_packet_size: Option<u32>,
     topic_alias_max: Option<u16>,
@@ -35,14 +35,13 @@ pub struct Connect {
     auth_data: Option<Vec<u8>>,
     will_message: Option<WillMessage>,
     user_property: Option<UserPropertyMap>,
-    client_id: String,
+    pub client_id: String,
     username: Option<String>,
     password: Option<Vec<u8>>,
 }
 
 impl Connect {
     pub(crate) fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        let mut connect = Connect::default();
         let len = src.get_u16();
         if len != 0x04 {
             return Err(MQTTCodecError::new(
@@ -63,19 +62,19 @@ impl Connect {
         let connect_flags = src.get_u8();
         let username = connect_flags & CONNECT_FLAG_USERNAME != 0;
         let password = connect_flags & CONNECT_FLAG_PASSWORD != 0;
-        connect.clean_start = connect_flags & CONNECT_FLAG_CLEAN_START != 0;
+        self.clean_start = connect_flags & CONNECT_FLAG_CLEAN_START != 0;
         if connect_flags & CONNECT_FLAG_WILL != 0 {
             let will_retain = connect_flags & CONNECT_FLAG_WILL_RETAIN != 0;
             let qos = connect_flags & CONNECT_FLAG_WILL_QOS >> CONNECT_FLAG_SHIFT;
             if let Ok(qos) = QoSLevel::try_from(qos) {
-                connect.will_message = Some(WillMessage::new(qos, will_retain));
+                self.will_message = Some(WillMessage::new(qos, will_retain));
             } else {
                 return Err(MQTTCodecError::new("invalid Will QoS level"));
             }
         }
-        connect.keep_alive = src.get_u16();
-        connect.decode_properties(src)?;
-        connect.decode_payload(src, username, password)?;
+        self.keep_alive = src.get_u16();
+        self.decode_properties(src)?;
+        self.decode_payload(src, username, password)?;
         Ok(())
     }
 
