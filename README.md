@@ -6,18 +6,35 @@
 ![Logo](images/vaux-logo.svg) 
 
 
-Vaux, pronounced vôks, is an MQTT v5.0 broker built using Rust. 
+Vaux, pronounced vôks, is an MQTT v5.0 broker built using Rust. Vaux is designed
+to be a secure, reliable, and performant MQTT broker able to run on a range of 
+computing platforms from a Raspberry PI to a server class compute environment in
+public cloud infrastructure.
+
+
+## Usage
+```
+
+USAGE:
+vaux-broker [OPTIONS]
+
+OPTIONS:
+-a, --max-active-sessions <MAX_ACTIVE_SESSIONS>    
+-h, --listen-addr <LISTEN_ADDR>                    Listen address (default is "127.0.0.1")s
+--help                                         Print help information
+-p, --port <PORT>                                  
+-s, --max-sessions <MAX_SESSIONS>                  Maximum number of sessions active/in-use
+-V, --version                                      Print version information
+
+```
 
 # Roadmap
-Last Update: May 4, 2022
+Last Update: May 15, 2022
 
 ### Basic Session Management
-Complete implementation of connect and acknowlegement packets with session creation.
+Complete implementation of connect and acknowledgement packets with session creation.
 This will include end-to-end testing for client <-> server session establishment 
 and disconnect scenarios.
-
-### Command Line Interface
-Basic command line interface for broker options.
 
 ### Session Persistence
 Serialization and deserialization of sessions to persistent store. Startup deserialization

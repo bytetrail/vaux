@@ -11,9 +11,15 @@ use tokio::sync::RwLock;
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about=None)]
 struct Args {
+    #[clap(short='h', long)]
+    /// Listen address (default is "127.0.0.1")s
+    listen_addr: Option<String>,
     #[clap(short, long)]
     port: Option<u16>,
+    #[clap(short='s', long)]
+    /// Maximum number of sessions active/in-use
     max_sessions: Option<u32>,
+    #[clap(short='a', long)]
     max_active_sessions: Option<u32>,
 }
 
