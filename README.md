@@ -11,8 +11,50 @@ to be a secure, reliable, and performant MQTT broker able to run on a range of
 computing platforms from a Raspberry PI to a server class compute environment in
 public cloud infrastructure.
 
+MQTT v3 is on the roadmap; however, is not initially supported.
 
-## Usage
+## Performance and Optimization
+Initial versions of the modules and client and server are being built using safe 
+Rust without specific runtime optimizations in place. Future performance testing 
+on both resource constrained and server class platforms will drive optimization 
+efforts.
+
+# Workspace
+Vaux workspace consists of 4 projects:
+
+| Project     | Description                                               |
+|-------------|-----------------------------------------------------------|
+| vaux-broker | A broker library and broker application                   |
+| vaux-mqtt   | The MQTT codec library.                                   |
+| vaux-client | MQTT client library using vaux-mqtt for embedded devices. |
+| vaux-test   | A client test driver for end-to-end integration tests.    |
+
+## vaux-mqtt
+This library supports basic MQTT v5.0 control packet encoding and decoding. 
+The library is developed with full encoding and decoding support for all MQTT
+v5.0 control packets.
+
+Future versions of the library may include default features for client and 
+server encoding and decoding support. A library optimized for only 
+the encoding or decoding necessary in a client or server implementation will be 
+supported. The library would be compiled without CONNACK encoding support, for
+example, when a client library is required.
+
+### _Future_
+This library currently makes use of many of the Rust standard
+library features ```Vec```, ``` HashSet```, ```String```, ```format!``` macro, etc. making it
+unsuited for a resource constrained embedded device. Future development will include
+a version of the codec that may be used with in an MQTT client library that supports
+embedded devices. See _vaux-embedded_
+
+## vaux-client
+_Future_ : MQTT v5 client library using the vaux-mqtt codec. This is currently a 
+placeholder project. 
+
+## vaux-broker
+A complete implementation of an MQTT v5 broker. See roadmap below.
+
+### Usage
 ```
 
 USAGE:
@@ -28,7 +70,7 @@ OPTIONS:
 
 ```
 
-# Roadmap
+# vaux-broker Roadmap
 Last Update: May 15, 2022
 
 ### Basic Session Management
@@ -55,3 +97,6 @@ Simple username password authentication.
 
 ### Extend Session Management
 Support advanced session management scenarios.
+
+### MQTT v3
+Add support for MQTT v3 protocol in MQTT codec, client, and broker. 

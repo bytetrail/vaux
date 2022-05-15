@@ -12,6 +12,7 @@ pub use crate::connect::Connect;
 use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;
 
+
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
 pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
 
