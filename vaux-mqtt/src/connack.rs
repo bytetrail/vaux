@@ -84,7 +84,9 @@ impl ConnAck {
             PropertyType::MaxQoS => self.max_qos = QoSLevel::try_from(src.get_u8())?,
             PropertyType::RetainAvail => self.retain_avail = decode_prop_bool(src)?,
             PropertyType::MaxPacketSize => self.max_packet_size = Some(src.get_u32()),
-            PropertyType::AssignedClientId => self.assigned_client_id = Some(decode_utf8_string(src)?),
+            PropertyType::AssignedClientId => {
+                self.assigned_client_id = Some(decode_utf8_string(src)?)
+            }
             PropertyType::TopicAliasMax => self.topic_alias_max = src.get_u16(),
             PropertyType::Reason => self.reason_str = Some(decode_utf8_string(src)?),
             PropertyType::WildcardSubAvail => self.wildcard_sub_avail = decode_prop_bool(src)?,

@@ -14,8 +14,8 @@ use uuid::Uuid;
 use vaux_mqtt::Packet::PingResponse;
 use vaux_mqtt::{ConnAck, FixedHeader, MQTTCodec, MQTTCodecError, Packet, PacketType};
 
-const DEFAULT_PORT: u16 = 1883;
-const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
+pub const DEFAULT_PORT: u16 = 1883;
+pub const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
 const DEFAULT_MAX_KEEP_ALIVE: u64 = 60; // 60 seconds
 const WAIT_IDLE_TIME: u64 = 50; // 50 milliseconds wait idle time
 const KEEP_ALIVE_FACTOR: f32 = 1.5_f32;

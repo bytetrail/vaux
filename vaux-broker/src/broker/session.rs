@@ -85,7 +85,13 @@ mod test {
     #[test]
     fn test_session_manager_new() {
         let mgr = SessionManager::new(100, 50);
-        assert_eq!(Duration::from_secs(DEFAULT_SESSION_SCAN_PERIOD), mgr.scan_period);
-        assert_eq!(Duration::from_secs(DEFAULT_SESSION_EXPIRY_INTERVAL), mgr.default_expiry);
+        assert_eq!(
+            Duration::from_secs(DEFAULT_SESSION_SCAN_PERIOD),
+            mgr.scan_period
+        );
+        assert_eq!(
+            Duration::from_secs(DEFAULT_SESSION_EXPIRY_INTERVAL),
+            mgr.default_expiry
+        );
     }
 }
