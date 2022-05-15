@@ -16,6 +16,13 @@ Complete implementation of connect and acknowlegement packets with session creat
 This will include end-to-end testing for client <-> server session establishment 
 and disconnect scenarios.
 
+### Command Line Interface
+Basic command line interface for broker options.
+
+### Session Persistence
+Serialization and deserialization of sessions to persistent store. Startup deserialization
+and evaluation of sessions.
+
 ### Publish
 Add publication support and basic message management.
 
