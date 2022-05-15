@@ -2,7 +2,7 @@ use bytes::BytesMut;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder};
-use vaux_mqtt::{ConnAck, Connect, FixedHeader, MQTTCodec, Packet, PacketType, Reason};
+use vaux_mqtt::{ConnAck, Connect, FixedHeader, MQTTCodec, Packet, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_HOST: &'static str = "127.0.0.1";
@@ -24,7 +24,6 @@ fn test_basic_ping() {
 
 #[test]
 fn test_basic_connect() {
-    let fixed_header = FixedHeader::new(PacketType::ConnAck);
     let request = Connect::default();
     let ack = ConnAck::default();
     test_basic(

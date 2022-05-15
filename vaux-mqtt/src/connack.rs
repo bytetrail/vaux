@@ -1,7 +1,7 @@
 use crate::codec::{
-    check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
-    encode_binary_data, encode_utf8_string, encode_variable_len_integer, PropertyType, Reason,
-    PROP_SIZE_U16,
+    check_property, decode_binary_data, decode_prop_bool, decode_utf8_string,
+    decode_variable_len_integer, encode_binary_data, encode_utf8_string,
+    encode_variable_len_integer, PropertyType, Reason, PROP_SIZE_U16,
 };
 use crate::{
     variable_byte_int_size, Decode, Encode, QoSLevel, Remaining, UserPropertyMap, PROP_SIZE_U32,
@@ -39,19 +39,7 @@ pub struct ConnAck {
 }
 
 impl ConnAck {
-
-    fn decode_prop_bool(src: &mut BytesMut) -> Result<bool, MQTTCodecError> {
-        match src.get_u8() {
-            0 => Ok(false),
-            1 => Ok(true),
-            value => Err(MQTTCodecError::new(&format!(
-                "invalid property value: {}",
-                value
-            ))),
-        }
-    }
-
-    fn decode_property(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
         let prop_size = decode_variable_len_integer(src);
         let read_until = src.remaining() - prop_size as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
@@ -60,56 +48,7 @@ impl ConnAck {
                 Ok(property_type) => {
                     if property_type != PropertyType::UserProperty {
                         check_property(property_type, &mut properties)?;
-                        match property_type {
-                            PropertyType::SessionExpiry => {
-                                self.expiry_interval = Some(src.get_u32())
-                            }
-                            PropertyType::RecvMax => self.receive_max = src.get_u16(),
-                            PropertyType::MaxQoS => {
-                                self.max_qos = QoSLevel::try_from(src.get_u8())?
-                            }
-                            PropertyType::RetainAvail => {
-                                self.retain_avail = ConnAck::decode_prop_bool(src)?
-                            }
-                            PropertyType::MaxPacketSize => {
-                                self.max_packet_size = Some(src.get_u32())
-                            }
-                            PropertyType::AssignedClientId => {
-                                self.assigned_client_id = Some(decode_utf8_string(src)?)
-                            }
-                            PropertyType::TopicAliasMax => self.topic_alias_max = src.get_u16(),
-                            PropertyType::Reason => {
-                                self.reason_str = Some(decode_utf8_string(src)?)
-                            }
-                            PropertyType::WildcardSubAvail => {
-                                self.wildcard_sub_avail = ConnAck::decode_prop_bool(src)?
-                            }
-                            PropertyType::SubIdAvail => {
-                                self.sub_id_avail = ConnAck::decode_prop_bool(src)?
-                            }
-                            PropertyType::ShardSubAvail => {
-                                self.shared_sub_avail = ConnAck::decode_prop_bool(src)?
-                            }
-                            PropertyType::KeepAlive => self.server_keep_alive = Some(src.get_u16()),
-                            PropertyType::RespInfo => {
-                                self.response_info = Some(decode_utf8_string(src)?)
-                            }
-                            PropertyType::ServerRef => {
-                                self.server_ref = Some(decode_utf8_string(src)?)
-                            }
-                            PropertyType::AuthMethod => {
-                                self.auth_method = Some(decode_utf8_string(src)?)
-                            }
-                            PropertyType::AuthData => {
-                                self.auth_data = Some(decode_binary_data(src)?)
-                            }
-                            prop => {
-                                return Err(MQTTCodecError::new(&format!(
-                                    "unexpected property type value: {}",
-                                    prop
-                                )))
-                            }
-                        }
+                        self.decode_property(property_type, src)?;
                     } else {
                         if self.user_properties == None {
                             self.user_properties = Some(HashMap::new());
@@ -129,6 +68,38 @@ impl ConnAck {
                 return Err(MQTTCodecError::new(
                     "property size does not match expected length",
                 ));
+            }
+        }
+        Ok(())
+    }
+
+    fn decode_property(
+        &mut self,
+        property_type: PropertyType,
+        src: &mut BytesMut,
+    ) -> Result<(), MQTTCodecError> {
+        match property_type {
+            PropertyType::SessionExpiry => self.expiry_interval = Some(src.get_u32()),
+            PropertyType::RecvMax => self.receive_max = src.get_u16(),
+            PropertyType::MaxQoS => self.max_qos = QoSLevel::try_from(src.get_u8())?,
+            PropertyType::RetainAvail => self.retain_avail = decode_prop_bool(src)?,
+            PropertyType::MaxPacketSize => self.max_packet_size = Some(src.get_u32()),
+            PropertyType::AssignedClientId => self.assigned_client_id = Some(decode_utf8_string(src)?),
+            PropertyType::TopicAliasMax => self.topic_alias_max = src.get_u16(),
+            PropertyType::Reason => self.reason_str = Some(decode_utf8_string(src)?),
+            PropertyType::WildcardSubAvail => self.wildcard_sub_avail = decode_prop_bool(src)?,
+            PropertyType::SubIdAvail => self.sub_id_avail = decode_prop_bool(src)?,
+            PropertyType::ShardSubAvail => self.shared_sub_avail = decode_prop_bool(src)?,
+            PropertyType::KeepAlive => self.server_keep_alive = Some(src.get_u16()),
+            PropertyType::RespInfo => self.response_info = Some(decode_utf8_string(src)?),
+            PropertyType::ServerRef => self.server_ref = Some(decode_utf8_string(src)?),
+            PropertyType::AuthMethod => self.auth_method = Some(decode_utf8_string(src)?),
+            PropertyType::AuthData => self.auth_data = Some(decode_binary_data(src)?),
+            prop => {
+                return Err(MQTTCodecError::new(&format!(
+                    "unexpected property type value: {}",
+                    prop
+                )))
             }
         }
         Ok(())
@@ -231,7 +202,7 @@ impl Decode for ConnAck {
         if let Ok(reason) = src.get_u8().try_into() {
             self.reason = reason;
         }
-        self.decode_property(src)?;
+        self.decode_properties(src)?;
         Ok(())
     }
 }
@@ -388,7 +359,8 @@ mod test {
         let mut connack = ConnAck::default();
         let mut buf = BytesMut::from(&encoded[..]);
         buf.advance(2);
-        connack.decode(&mut buf);
+        let result = connack.decode(&mut buf);
+        assert!(result.is_ok());
         assert!(connack.expiry_interval.is_some());
         assert_eq!(EXPECTED_SESSION_EXPIRY, connack.expiry_interval.unwrap());
     }
@@ -427,7 +399,8 @@ mod test {
         let mut connack = ConnAck::default();
         let mut buf = BytesMut::from(&encoded[..]);
         buf.advance(2);
-        connack.decode(&mut buf);
+        let result = connack.decode(&mut buf);
+        assert!(result.is_ok());
         assert_eq!(EXPECTED_RECEIVE_MAX, connack.receive_max);
     }
 
@@ -535,7 +508,8 @@ mod test {
         let mut connack = ConnAck::default();
         let mut buf = BytesMut::from(&encoded[..]);
         buf.advance(2);
-        connack.decode(&mut buf);
+        let result = connack.decode(&mut buf);
+        assert!(result.is_ok());
         assert_eq!(EXPECTED_TOPIC_ALIAS_MAX, connack.topic_alias_max);
     }
 
@@ -567,7 +541,8 @@ mod test {
         assert!(connack.encode(&mut buf).is_ok());
         let mut connack = ConnAck::default();
         buf.advance(2);
-        connack.decode(&mut buf);
+        let result = connack.decode(&mut buf);
+        assert!(result.is_ok());
         assert!(connack.reason_str.is_some());
         assert_eq!(reason.len(), connack.reason_str.unwrap().len());
     }
@@ -603,11 +578,13 @@ mod test {
         let mut connack = ConnAck::default();
         connack.user_properties = Some(properties);
         let mut buf = BytesMut::new();
-        connack.encode(&mut buf);
+        let result = connack.encode(&mut buf);
+        assert!(result.is_ok());
         // decode - advance past fixed header
         buf.advance(2);
         let mut connack = ConnAck::default();
-        connack.decode(&mut buf);
+        let result = connack.decode(&mut buf);
+        assert!(result.is_ok());
         assert!(connack.user_properties.is_some());
         let props = connack.user_properties.unwrap();
         assert!(props.contains_key("broker_id"));

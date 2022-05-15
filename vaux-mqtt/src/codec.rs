@@ -312,7 +312,7 @@ impl Display for MQTTCodecError {
 }
 
 impl From<QoSParseError> for MQTTCodecError {
-    fn from(err: QoSParseError) -> Self {
+    fn from(_: QoSParseError) -> Self {
         MQTTCodecError {
             reason: "invalid QOS level".to_string(),
         }
@@ -360,6 +360,17 @@ pub(crate) fn check_property(
     Ok(())
 }
 
+pub(crate) fn decode_prop_bool(src: &mut BytesMut) -> Result<bool, MQTTCodecError> {
+    match src.get_u8() {
+        0 => Ok(false),
+        1 => Ok(true),
+        value => Err(MQTTCodecError::new(&format!(
+            "invalid property value: {}",
+            value
+        ))),
+    }
+}
+
 pub(crate) fn encode_utf8_string(src: &str, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
     let len = src.len();
     if len > u16::MAX as usize {
@@ -403,6 +414,38 @@ pub(crate) fn encode_binary_data(src: &[u8], dest: &mut BytesMut) -> Result<(), 
     dest.put_u16(len as u16);
     dest.put(src);
     Ok(())
+}
+
+pub(crate) fn encode_variable_len_integer(val: u32, dest: &mut BytesMut) {
+    let mut encode = true;
+    let mut input_val = val;
+    while encode {
+        let mut next_byte = (input_val % 0x80) as u8;
+        input_val >>= 7;
+        if input_val > 0 {
+            next_byte |= 0x80;
+        } else {
+            encode = false;
+        }
+        dest.put_u8(next_byte);
+    }
+}
+
+pub(crate) fn decode_variable_len_integer(src: &mut BytesMut) -> u32 {
+    let mut result = 0_u32;
+    let mut shift = 0;
+    let mut next_byte = src.get_u8();
+    let mut decode = true;
+    while decode {
+        result += ((next_byte & 0x7f) as u32) << shift;
+        shift += 7;
+        if next_byte & 0x80 == 0 {
+            decode = false;
+        } else {
+            next_byte = src.get_u8();
+        }
+    }
+    result
 }
 
 #[derive(Debug)]
@@ -457,38 +500,6 @@ impl Encoder<Packet> for MQTTCodec {
         }?;
         Ok(())
     }
-}
-
-pub(crate) fn encode_variable_len_integer(val: u32, dest: &mut BytesMut) {
-    let mut encode = true;
-    let mut input_val = val;
-    while encode {
-        let mut next_byte = (input_val % 0x80) as u8;
-        input_val >>= 7;
-        if input_val > 0 {
-            next_byte |= 0x80;
-        } else {
-            encode = false;
-        }
-        dest.put_u8(next_byte);
-    }
-}
-
-pub(crate) fn decode_variable_len_integer(src: &mut BytesMut) -> u32 {
-    let mut result = 0_u32;
-    let mut shift = 0;
-    let mut next_byte = src.get_u8();
-    let mut decode = true;
-    while decode {
-        result += ((next_byte & 0x7f) as u32) << shift;
-        shift += 7;
-        if next_byte & 0x80 == 0 {
-            decode = false;
-        } else {
-            next_byte = src.get_u8();
-        }
-    }
-    result
 }
 
 fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQTTCodecError> {

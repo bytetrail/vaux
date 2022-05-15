@@ -70,4 +70,22 @@ impl SessionManager {
     }
 }
 
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::time::Duration;
 
+    #[test]
+    fn test_new_with_expiry() {
+        let session = Session::new_with_expiry("test_01".to_string(), 60, 600);
+        assert_eq!(Duration::from_secs(600), session.expiry);
+        assert_eq!(Duration::from_secs(60), session.max_keep_alive);
+    }
+
+    #[test]
+    fn test_session_manager_new() {
+        let mgr = SessionManager::new(100, 50);
+        assert_eq!(Duration::from_secs(DEFAULT_SESSION_SCAN_PERIOD), mgr.scan_period);
+        assert_eq!(Duration::from_secs(DEFAULT_SESSION_EXPIRY_INTERVAL), mgr.default_expiry);
+    }
+}

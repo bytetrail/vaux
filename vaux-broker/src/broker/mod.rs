@@ -1,11 +1,11 @@
 pub(crate) mod session;
 
-use std::collections::HashMap;
-use crate::broker::session::{Session};
+use crate::broker::session::Session;
 use futures::{SinkExt, StreamExt};
+use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
-use std::sync::{Arc};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
@@ -44,12 +44,13 @@ impl Broker {
     /// not be used until the command line interface is developed. Remove the
     /// dead_code override when complete
     pub fn new(listen_addr: SocketAddr) -> Self {
-        Broker { listen_addr,
-        }
+        Broker { listen_addr }
     }
 
-    pub async fn run(&mut self, session_pool: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>>)
-    -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(
+        &mut self,
+        session_pool: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         match TcpListener::bind(self.listen_addr).await {
             Ok(listener) => {
                 println!("broker accepting request on {:?}", self.listen_addr);
@@ -74,7 +75,10 @@ impl Broker {
         }
     }
 
-    async fn handle_client(stream: &mut TcpStream, session_pool: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>>) -> Result<(), Box<dyn std::error::Error>> {
+    async fn handle_client(
+        stream: &mut TcpStream,
+        session_pool: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let session_id: String;
         let mut framed = Framed::new(stream, MQTTCodec {});
         let idle = Duration::from_millis(WAIT_IDLE_TIME);
@@ -92,19 +96,30 @@ impl Broker {
                 if let Some(session) = session_pool.read().await.get(&session_id) {
                     active_session = Some(session.clone());
                 }
-                let mut session = Session::new(session_id.clone(), Duration::from_secs(DEFAULT_MAX_KEEP_ALIVE));
+                let mut session = Session::new(
+                    session_id.clone(),
+                    Duration::from_secs(DEFAULT_MAX_KEEP_ALIVE),
+                );
                 if let Some(expiry) = packet.session_expiry_interval {
                     session.expiry = Duration::from_secs(expiry as u64);
                 }
-                if packet.clean_start || active_session.is_none(){
+                if packet.clean_start || active_session.is_none() {
                     let session = Arc::new(RwLock::new(session));
-                    session_pool.write().await.insert(session_id.clone(), session.clone());
+                    session_pool
+                        .write()
+                        .await
+                        .insert(session_id.clone(), session.clone());
                     active_session = Some(session);
                 }
                 if packet.keep_alive > DEFAULT_MAX_KEEP_ALIVE as u16 {
                     ack.server_keep_alive = Some(DEFAULT_MAX_KEEP_ALIVE as u16);
                 } else {
-                    active_session.as_ref().unwrap().write().await.set_max_keep_alive_secs(packet.keep_alive as u64);
+                    active_session
+                        .as_ref()
+                        .unwrap()
+                        .write()
+                        .await
+                        .set_max_keep_alive_secs(packet.keep_alive as u64);
                 }
                 framed.send(Packet::ConnAck(ack)).await?;
                 active_session
@@ -119,8 +134,10 @@ impl Broker {
                 return Err(Box::new(MQTTCodecError::new("connect packet not received")));
             }
         };
-        if let Some(session) = session{
-            let keep_alive = Duration::from_secs((session.read().await.max_keep_alive_secs() as f32 * KEEP_ALIVE_FACTOR) as u64);
+        if let Some(session) = session {
+            let keep_alive = Duration::from_secs(
+                (session.read().await.max_keep_alive_secs() as f32 * KEEP_ALIVE_FACTOR) as u64,
+            );
             let mut last_activity = Instant::now();
             loop {
                 let request = framed.next().await;
