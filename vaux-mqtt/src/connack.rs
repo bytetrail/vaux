@@ -302,6 +302,7 @@ mod test {
     use crate::codec::PropertyType;
     use crate::{Encode, UserPropertyMap};
     use bytes::BytesMut;
+    use crate::PropertyType::MaxQoS;
 
     /// Minimum length CONNACK return
     /// Byte 1 = packet type + flags
@@ -407,7 +408,7 @@ mod test {
     }
 
     #[test]
-    fn test_max_qos() {
+    fn test_encode_max_qos() {
         const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + 2;
         const EXPECTED_PROP_LEN: u32 = 2;
         let mut dest = BytesMut::new();
@@ -421,6 +422,26 @@ mod test {
             PropertyType::MaxQoS,
         );
         assert_eq!(QoSLevel::AtLeastOnce as u8, dest[6]);
+    }
+
+    #[test]
+    fn test_decode_max_qos() {
+        const EXPECTED_MAX_QOS: QoSLevel = QoSLevel::ExactlyOnce;
+        let encoded = [
+            PacketType::ConnAck as u8,
+            0x05,
+            0x00,
+            0x00,
+            0x02,
+            PropertyType::MaxQoS as u8,
+            QoSLevel::ExactlyOnce as u8,
+        ];
+        let mut connack = ConnAck::default();
+        let mut buf = BytesMut::from(&encoded[..]);
+        buf.advance(2);
+        let result = connack.decode(&mut buf);
+        assert!(result.is_ok());
+        assert_eq!(EXPECTED_MAX_QOS, connack.max_qos);
     }
 
     #[test]

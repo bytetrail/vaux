@@ -193,6 +193,9 @@ impl Display for PacketType {
     }
 }
 
+/// Reason code is a 1 byte unsigned value that indicates the result of a control
+/// packet request. For more information on reason codes see the MQTT Specification,
+/// <https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901031>
 #[repr(u8)]
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Reason {
