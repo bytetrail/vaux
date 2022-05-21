@@ -616,19 +616,9 @@ mod test {
 
     #[test]
     fn test_wildcard_sub_avail() {
-        const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + PROP_SIZE_U8;
-        const EXPECTED_PROP_LEN: u32 = PROP_SIZE_U8;
-        let mut dest = BytesMut::new();
         let mut connack = ConnAck::default();
         connack.wildcard_sub_avail = false;
-        test_property(
-            connack,
-            &mut dest,
-            EXPECTED_LEN,
-            EXPECTED_PROP_LEN,
-            PropertyType::WildcardSubAvail,
-        );
-        assert_eq!(0x00, dest[6]);
+        test_bool_property(connack, PropertyType::WildcardSubAvail, false);
     }
 
     #[test]
@@ -646,7 +636,7 @@ mod test {
     }
 
     #[test]
-    fn test_server_keep_alive() {
+    fn test_encode_server_keep_alive() {
         const EXPECTED_LEN: u32 = EXPECTED_MIN_CONNACK_LEN as u32 + PROP_SIZE_U16;
         const EXPECTED_PROP_LEN: u32 = PROP_SIZE_U16;
         let mut dest = BytesMut::new();

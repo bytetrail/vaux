@@ -1,5 +1,5 @@
 use crate::connect::Connect;
-use crate::{Encode, FixedHeader, Packet, QoSParseError, PACKET_RESERVED_NONE};
+use crate::{Encode, FixedHeader, Packet, PACKET_RESERVED_NONE};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -311,14 +311,6 @@ pub struct MQTTCodecError {
 impl Display for MQTTCodecError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "MQTT codec error: {}", self.reason)
-    }
-}
-
-impl From<QoSParseError> for MQTTCodecError {
-    fn from(_: QoSParseError) -> Self {
-        MQTTCodecError {
-            reason: "invalid QOS level".to_string(),
-        }
     }
 }
 
