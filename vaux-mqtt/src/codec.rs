@@ -146,6 +146,7 @@ impl TryFrom<u8> for PropertyType {
 }
 
 /// MQTT Control Packet Type
+/// #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum PacketType {
     Connect = 0x10,

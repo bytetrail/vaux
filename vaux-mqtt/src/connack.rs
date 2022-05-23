@@ -216,7 +216,7 @@ impl Encode for ConnAck {
         header.set_remaining(
             VARIABLE_HEADER_LEN
                 + prop_remaining
-                + variable_byte_int_size(prop_remaining + VARIABLE_HEADER_LEN),
+                + variable_byte_int_size(prop_remaining),
         );
         header.encode(dest)?;
         let connack_flag: u8 = if self.session_present { 0x01 } else { 0x00 };

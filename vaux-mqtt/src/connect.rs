@@ -2,8 +2,8 @@ use crate::codec::{
     check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
     MQTTCodecError, PropertyType, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
 };
-use crate::{variable_byte_int_size, Decode, Encode, QoSLevel, UserPropertyMap, WillMessage};
-use bytes::{Buf, BytesMut};
+use crate::{variable_byte_int_size, Decode, Encode, QoSLevel, UserPropertyMap, WillMessage, FixedHeader, PacketType, Remaining};
+use bytes::{Buf, BufMut, BytesMut};
 use std::collections::{HashMap, HashSet};
 
 const MQTT_PROTOCOL_U32: u32 = 0x4d515454;
@@ -41,6 +41,28 @@ pub struct Connect {
 }
 
 impl Connect {
+
+    fn encode_flags(&self, dest: &mut BytesMut) {
+        let mut flags = 0_u8;
+        if self.clean_start {
+            flags |= CONNECT_FLAG_CLEAN_START;
+        }
+        if self.username.is_some() {
+            flags |= CONNECT_FLAG_USERNAME;
+        }
+        if self.password.is_some() {
+            flags != CONNECT_FLAG_PASSWORD;
+        }
+        if let Some(will) = &self.will_message {
+            flags |= CONNECT_FLAG_WILL;
+            if will.retain {
+                flags |= CONNECT_FLAG_WILL_RETAIN
+            }
+            flags |= (will.qos as u8 ) << CONNECT_FLAG_SHIFT;
+        }
+        dest.put_u8(flags);
+    }
+
     pub(crate) fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
         let len = src.get_u16();
         if len != 0x04 {
@@ -273,9 +295,13 @@ impl Connect {
 
 impl crate::Remaining for Connect {
     fn size(&self) -> u32 {
-        let mut remaining = DEFAULT_CONNECT_REMAINING;
-        // property sizes, add variable len integer for property size
-        let mut property_remaining = 0_u32;
+        let property_remaining = self.property_remaining().unwrap();
+        let len = variable_byte_int_size(property_remaining);
+        DEFAULT_CONNECT_REMAINING + len + property_remaining + self.payload_remaining().unwrap()
+    }
+
+    fn property_remaining(&self) -> Option<u32> {
+        let mut property_remaining = 0;
         if self.session_expiry_interval != None {
             property_remaining += PROP_SIZE_U32;
         }
@@ -306,16 +332,7 @@ impl crate::Remaining for Connect {
         if let Some(auth_data) = self.auth_data.as_ref() {
             property_remaining += 3 + auth_data.len() as u32;
         }
-        // patch up property len
-        let len = variable_byte_int_size(property_remaining);
-        remaining += len + property_remaining;
-        // calculate payload
-        remaining += self.payload_remaining().unwrap();
-        remaining
-    }
-
-    fn property_remaining(&self) -> Option<u32> {
-        None
+        Some(property_remaining)
     }
 
     fn payload_remaining(&self) -> Option<u32> {
@@ -336,8 +353,21 @@ impl crate::Remaining for Connect {
 }
 
 impl Encode for Connect {
-    fn encode(&self, _dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        todo!()
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        let mut header = FixedHeader::new(PacketType::Connect);
+        let prop_remaining = self.property_remaining().unwrap();
+        let payload_remaining = self.payload_remaining().unwrap();
+        header.set_remaining(
+                DEFAULT_CONNECT_REMAINING
+                + prop_remaining + payload_remaining
+                + variable_byte_int_size(prop_remaining)
+        );
+        header.encode(dest)?;
+        dest.put_u32(MQTT_PROTOCOL_U32);
+        dest.put_u8(MQTT_PROTOCOL_VERSION);
+        self.encode_flags(dest);
+
+        Ok(())
     }
 }
 
