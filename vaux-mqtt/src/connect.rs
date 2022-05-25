@@ -292,6 +292,7 @@ impl Encode for Connect {
         dest.put_u32(MQTT_PROTOCOL_U32);
         dest.put_u8(MQTT_PROTOCOL_VERSION);
         self.encode_flags(dest);
+        dest.put_u16(self.keep_alive);
 
         Ok(())
     }
@@ -364,6 +365,16 @@ mod test {
         assert!(qos_result.is_ok());
         let qos = qos_result.unwrap();
         assert_eq!(QoSLevel::AtLeastOnce, qos);
+    }
+
+    #[test]
+    fn test_encode_keep_alive() {
+        let mut connect= Connect::default();
+        connect.keep_alive = 0xcafe;
+        let mut dest = BytesMut::new();
+        let result = connect.encode(&mut dest);
+        assert!(result.is_ok());
+        assert_eq!(0xcafe, ((dest[8] as u16) << 8) + dest[9] as u16);
     }
 
     #[test]
@@ -460,4 +471,20 @@ mod test {
             CONNECT_MIN_REMAINING + 5
         );
     }
+
+    fn test_property (
+        connect: Connect,
+        dest: &mut BytesMut,
+        expected_len: u32,
+        expected_prop_len: u32,
+        property: PropertyType,
+    ) {
+        let result = connect.encode(dest);
+        assert!(result.is_ok());
+        assert_eq!(expected_len, dest.len() as u32);
+        assert_eq!(expected_prop_len, connect.property_remaining().unwrap());
+        assert_eq!(expected_prop_len as u8, dest[11]);
+        assert_eq!(property as u8, dest[12]);
+    }
+
 }
