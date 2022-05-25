@@ -1,5 +1,7 @@
-use std::collections::HashMap;
-use crate::{PROP_SIZE_U32, PROP_SIZE_U8, QoSLevel, Remaining};
+use std::collections::{HashMap, HashSet};
+use bytes::{Buf, BytesMut};
+use crate::{Decode, Encode, MQTTCodecError, PROP_SIZE_U32, PROP_SIZE_U8, PropertyType, QoSLevel, Remaining};
+use crate::codec::{check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer};
 
 const DEFAULT_WILL_DELAY: u32 = 0;
 
@@ -47,8 +49,95 @@ impl WillMessage {
     }
 }
 
-impl WillMessage {
-    pub fn size(&self) -> u32 {
+impl Decode for WillMessage {
+    /// Implementation of decode for will message. The will message decode does
+    /// not attempt to decode the flags QOS and Retain as these are present in the
+    /// CONNECT flags variable length header prior to the will message properties
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        let prop_size = decode_variable_len_integer(src);
+        let read_until = src.remaining() - prop_size as usize;
+        let mut properties: HashSet<PropertyType> = HashSet::new();
+        while src.remaining() > read_until {
+            match PropertyType::try_from(src.get_u8()) {
+                Ok(property_type) => match property_type {
+                    PropertyType::WillDelay => {
+                        check_property(PropertyType::WillDelay, &mut properties)?;
+                        self.delay_interval = src.get_u32();
+                    }
+                    PropertyType::PayloadFormat => {
+                        check_property(PropertyType::PayloadFormat, &mut properties)?;
+                        match src.get_u8() {
+                            0 => self.payload_utf8 = false,
+                            1 => self.payload_utf8 = true,
+                            err => {
+                                return Err(MQTTCodecError::new(&format!(
+                                    "unexpected will message payload format value: {}",
+                                    err
+                                )))
+                            }
+                        }
+                    }
+                    PropertyType::MessageExpiry => {
+                        check_property(PropertyType::MessageExpiry, &mut properties)?;
+                        self.expiry_interval = Some(src.get_u32());
+                    }
+                    PropertyType::ContentType => {
+                        check_property(PropertyType::ContentType, &mut properties)?;
+                        self.content_type = Some(decode_utf8_string(src)?);
+                    }
+                    PropertyType::ResponseTopic => {
+                        check_property(PropertyType::ResponseTopic, &mut properties)?;
+                        self.response_topic = Some(decode_utf8_string(src)?);
+                        self.is_request = true;
+                    }
+                    PropertyType::CorrelationData => {
+                        check_property(PropertyType::CorrelationData, &mut properties)?;
+                        self.correlation_data = Some(decode_binary_data(src)?);
+                    }
+                    PropertyType::UserProperty => {
+                        if self.user_property == None {
+                            self.user_property = Some(HashMap::new());
+                        }
+                        let property_map = self.user_property.as_mut().unwrap();
+                        let key = decode_utf8_string(src)?;
+                        let value = decode_utf8_string(src)?;
+                        property_map.insert(key, value);
+                    }
+                    err => {
+                        return Err(MQTTCodecError::new(&format!(
+                            "unexpected will property id: {}",
+                            err
+                        )))
+                    }
+                },
+                Err(e) => {
+                    return Err(MQTTCodecError::new(&format!(
+                        "unknown property type: {:?}",
+                        e
+                    )))
+                }
+            };
+        }
+        self.topic =  decode_utf8_string(src)?;
+        self.payload = decode_binary_data(src)?;
+        Ok(())
+    }
+}
+
+
+impl Encode for WillMessage {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        todo!()
+    }
+}
+
+
+impl Remaining for WillMessage {
+    fn size(&self) -> u32 {
+        self.property_remaining().unwrap() + self.payload_remaining().unwrap()
+    }
+
+    fn property_remaining(&self) -> Option<u32> {
         let mut remaining = 0;
         if self.delay_interval != DEFAULT_WILL_DELAY {
             remaining += PROP_SIZE_U32;
@@ -72,6 +161,10 @@ impl WillMessage {
             remaining += user_property.size();
         }
         remaining += crate::variable_byte_int_size(remaining);
-        remaining
+        Some(remaining)
+    }
+
+    fn payload_remaining(&self) -> Option<u32> {
+        Some((self.topic.len() + 2 + self.payload.len()+2) as u32)
     }
 }
