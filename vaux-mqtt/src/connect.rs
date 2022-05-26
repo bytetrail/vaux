@@ -2,7 +2,7 @@ use crate::codec::{
     check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
     MQTTCodecError, PropertyType, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
 };
-use crate::{variable_byte_int_size, Decode, Encode, QoSLevel, UserPropertyMap, WillMessage, FixedHeader, PacketType, Remaining};
+use crate::{variable_byte_int_size, Decode, Encode, QoSLevel, UserPropertyMap, WillMessage, FixedHeader, PacketType, Remaining, encode_variable_len_integer};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::{HashMap, HashSet};
 
@@ -41,6 +41,15 @@ pub struct Connect {
 }
 
 impl Connect {
+
+    fn receive_max(&self) -> u16 {
+        self.receive_max
+    }
+
+    fn set_receive_max(&mut self, receive_max: u16)  {
+        assert_ne!(0, receive_max);
+        self.receive_max = receive_max;
+    }
 
     fn encode_flags(&self, dest: &mut BytesMut) {
         let mut flags = 0_u8;
@@ -293,7 +302,31 @@ impl Encode for Connect {
         dest.put_u8(MQTT_PROTOCOL_VERSION);
         self.encode_flags(dest);
         dest.put_u16(self.keep_alive);
-
+        encode_variable_len_integer(prop_remaining, dest);
+        if let Some(expiry) = self.session_expiry_interval {
+            dest.put_u8(PropertyType::SessionExpiry as u8);
+            dest.put_u32(expiry);
+        }
+        if self.receive_max != DEFAULT_RECEIVE_MAX {
+            dest.put_u8(PropertyType::RecvMax as u8);
+            dest.put_u16(self.receive_max);
+        }
+        if let Some(max_packet_size) = self.max_packet_size {
+            dest.put_u8(PropertyType::MaxPacketSize as u8);
+            dest.put_u32(max_packet_size);
+        }
+        if let Some(topic_alias_max) = self.topic_alias_max {
+            dest.put_u8(PropertyType::TopicAliasMax as u8);
+            dest.put_u16(topic_alias_max);
+        }
+        if self.req_resp_info {
+            dest.put_u8(PropertyType::ReqRespInfo as u8);
+            dest.put_u8(1);
+        }
+        if !self.problem_info {
+            dest.put_u8(PropertyType::ReqProblemInfo as u8);
+            dest.put_u8(1);
+        }
         Ok(())
     }
 }
@@ -375,6 +408,38 @@ mod test {
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
         assert_eq!(0xcafe, ((dest[8] as u16) << 8) + dest[9] as u16);
+    }
+
+    #[test]
+    fn test_encode_session_expiry() {
+        let mut connect= Connect::default();
+        connect.session_expiry_interval = Some(0xcafe);
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 16, 5, PropertyType::SessionExpiry);
+    }
+
+    #[test]
+    fn test_encode_receive_max() {
+        let mut connect= Connect::default();
+        connect.receive_max = 0xcafe;
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 14, 3, PropertyType::RecvMax);
+    }
+
+    #[test]
+    fn test_encode_max_packet_size() {
+        let mut connect= Connect::default();
+        connect.max_packet_size = Some(0xcafe);
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 16, 5, PropertyType::MaxPacketSize);
+    }
+
+    #[test]
+    fn test_encode_topic_alias_max() {
+        let mut connect= Connect::default();
+        connect.topic_alias_max = Some(0xcafe);
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 14, 3, PropertyType::TopicAliasMax);
     }
 
     #[test]
@@ -481,10 +546,10 @@ mod test {
     ) {
         let result = connect.encode(dest);
         assert!(result.is_ok());
-        assert_eq!(expected_len, dest.len() as u32);
-        assert_eq!(expected_prop_len, connect.property_remaining().unwrap());
-        assert_eq!(expected_prop_len as u8, dest[11]);
-        assert_eq!(property as u8, dest[12]);
+        assert_eq!(expected_len, dest.len() as u32, "Packet Size");
+        assert_eq!(expected_prop_len, connect.property_remaining().unwrap(), "Encoded Property Length");
+        assert_eq!(expected_prop_len as u8, dest[10], "Property Length");
+        assert_eq!(property as u8, dest[11], "Property Type");
     }
 
 }
