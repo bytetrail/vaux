@@ -1,8 +1,5 @@
-use crate::codec::{
-    check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
-    MQTTCodecError, PropertyType, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
-};
-use crate::{variable_byte_int_size, Decode, Encode, QoSLevel, UserPropertyMap, WillMessage, FixedHeader, PacketType, Remaining, encode_variable_len_integer};
+use crate::codec::{check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer, MQTTCodecError, PropertyType, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8, encode_binary_data};
+use crate::{variable_byte_int_size, Decode, Encode, QoSLevel, UserPropertyMap, WillMessage, FixedHeader, PacketType, Remaining, encode_variable_len_integer, encode_utf8_string};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::{HashMap, HashSet};
 
@@ -326,6 +323,17 @@ impl Encode for Connect {
         if !self.problem_info {
             dest.put_u8(PropertyType::ReqProblemInfo as u8);
             dest.put_u8(1);
+        }
+        if let Some(user_properties) = &self.user_property {
+            user_properties.encode(dest);
+        }
+        if let Some(auth_method) = &self.auth_method {
+            dest.put_u8(PropertyType::AuthMethod as u8);
+            encode_utf8_string(auth_method, dest)?;
+        }
+        if let Some(auth_data) = &self.auth_data {
+            dest.put_u8(PropertyType::AuthData as u8);
+            encode_binary_data(auth_data, dest)?;
         }
         Ok(())
     }
