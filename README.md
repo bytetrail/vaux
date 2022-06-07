@@ -3,8 +3,7 @@
 ![Clippy](https://github.com/bytetrail/vaux/actions/workflows/rust-clippy.yaml/badge.svg)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
-![Logo](images/vaux-logo.svg) 
-
+![Logo](images/vaux-logo-2.svg) 
 
 Vaux, pronounced vôks, is an MQTT v5.0 broker built using Rust. Vaux is designed
 to be a secure, reliable, and performant MQTT broker able to run on a range of 

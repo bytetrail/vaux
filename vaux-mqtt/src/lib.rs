@@ -130,9 +130,9 @@ pub enum Packet {
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum QoSLevel {
-    AtMostOnce,
-    AtLeastOnce,
-    ExactlyOnce,
+    AtMostOnce = 0,
+    AtLeastOnce = 1,
+    ExactlyOnce = 2,
 }
 
 impl TryFrom<u8> for QoSLevel {

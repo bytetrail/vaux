@@ -1,8 +1,5 @@
-use crate::codec::{
-    check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
-    MQTTCodecError, PropertyType, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
-};
-use crate::{variable_byte_int_size, Decode, Encode, QoSLevel, UserPropertyMap, WillMessage, FixedHeader, PacketType, Remaining};
+use crate::codec::{check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer, MQTTCodecError, PropertyType, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8, encode_binary_data};
+use crate::{variable_byte_int_size, Decode, Encode, QoSLevel, UserPropertyMap, WillMessage, FixedHeader, PacketType, Remaining, encode_variable_len_integer, encode_utf8_string};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::{HashMap, HashSet};
 
@@ -42,6 +39,15 @@ pub struct Connect {
 
 impl Connect {
 
+    fn receive_max(&self) -> u16 {
+        self.receive_max
+    }
+
+    fn set_receive_max(&mut self, receive_max: u16)  {
+        assert_ne!(0, receive_max);
+        self.receive_max = receive_max;
+    }
+
     fn encode_flags(&self, dest: &mut BytesMut) {
         let mut flags = 0_u8;
         if self.clean_start {
@@ -51,7 +57,7 @@ impl Connect {
             flags |= CONNECT_FLAG_USERNAME;
         }
         if self.password.is_some() {
-            flags != CONNECT_FLAG_PASSWORD;
+            flags |= CONNECT_FLAG_PASSWORD;
         }
         if let Some(will) = &self.will_message {
             flags |= CONNECT_FLAG_WILL;
@@ -97,75 +103,6 @@ impl Connect {
         self.keep_alive = src.get_u16();
         self.decode_properties(src)?;
         self.decode_payload(src, username, password)?;
-        Ok(())
-    }
-
-    fn decode_will_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        let prop_size = decode_variable_len_integer(src);
-        let read_until = src.remaining() - prop_size as usize;
-        let mut properties: HashSet<PropertyType> = HashSet::new();
-        let will_message = self.will_message.as_mut().unwrap();
-        while src.remaining() > read_until {
-            match PropertyType::try_from(src.get_u8()) {
-                Ok(property_type) => match property_type {
-                    PropertyType::WillDelay => {
-                        check_property(PropertyType::WillDelay, &mut properties)?;
-                        will_message.delay_interval = src.get_u32();
-                    }
-                    PropertyType::PayloadFormat => {
-                        check_property(PropertyType::PayloadFormat, &mut properties)?;
-                        match src.get_u8() {
-                            0 => will_message.payload_utf8 = false,
-                            1 => will_message.payload_utf8 = true,
-                            err => {
-                                return Err(MQTTCodecError::new(&format!(
-                                    "unexpected will message payload format value: {}",
-                                    err
-                                )))
-                            }
-                        }
-                    }
-                    PropertyType::MessageExpiry => {
-                        check_property(PropertyType::MessageExpiry, &mut properties)?;
-                        will_message.expiry_interval = Some(src.get_u32());
-                    }
-                    PropertyType::ContentType => {
-                        check_property(PropertyType::ContentType, &mut properties)?;
-                        will_message.content_type = Some(decode_utf8_string(src)?);
-                    }
-                    PropertyType::ResponseTopic => {
-                        check_property(PropertyType::ResponseTopic, &mut properties)?;
-                        will_message.response_topic = Some(decode_utf8_string(src)?);
-                        will_message.is_request = true;
-                    }
-                    PropertyType::CorrelationData => {
-                        check_property(PropertyType::CorrelationData, &mut properties)?;
-                        will_message.correlation_data = Some(decode_binary_data(src)?);
-                    }
-                    PropertyType::UserProperty => {
-                        if will_message.user_property == None {
-                            will_message.user_property = Some(HashMap::new());
-                        }
-                        let property_map = will_message.user_property.as_mut().unwrap();
-                        let key = decode_utf8_string(src)?;
-                        let value = decode_utf8_string(src)?;
-                        property_map.insert(key, value);
-                    }
-                    err => {
-                        return Err(MQTTCodecError::new(&format!(
-                            "unexpected will property id: {}",
-                            err
-                        )))
-                    }
-                },
-                Err(e) => {
-                    return Err(MQTTCodecError::new(&format!(
-                        "unknown property type: {:?}",
-                        e
-                    )))
-                }
-            };
-        }
         Ok(())
     }
 
@@ -278,10 +215,8 @@ impl Connect {
         }
         self.client_id = decode_utf8_string(src)?;
         if self.will_message != None {
-            self.decode_will_properties(src)?;
             let will_message = self.will_message.as_mut().unwrap();
-            will_message.topic = decode_utf8_string(src)?;
-            will_message.payload = decode_binary_data(src)?;
+            will_message.decode(src)?;
         }
         if username {
             self.username = Some(decode_utf8_string(src)?);
@@ -339,8 +274,6 @@ impl crate::Remaining for Connect {
         let mut remaining = 2 + self.client_id.len() as u32;
         if let Some(will_message) = &self.will_message {
             remaining += will_message.size();
-            remaining += will_message.topic.len() as u32 + 2;
-            remaining += will_message.payload.len() as u32 + 2;
         }
         if let Some(username) = &self.username {
             remaining += username.len() as u32 + 2;
@@ -366,7 +299,55 @@ impl Encode for Connect {
         dest.put_u32(MQTT_PROTOCOL_U32);
         dest.put_u8(MQTT_PROTOCOL_VERSION);
         self.encode_flags(dest);
-
+        dest.put_u16(self.keep_alive);
+        encode_variable_len_integer(prop_remaining, dest);
+        if let Some(expiry) = self.session_expiry_interval {
+            dest.put_u8(PropertyType::SessionExpiry as u8);
+            dest.put_u32(expiry);
+        }
+        if self.receive_max != DEFAULT_RECEIVE_MAX {
+            dest.put_u8(PropertyType::RecvMax as u8);
+            dest.put_u16(self.receive_max);
+        }
+        if let Some(max_packet_size) = self.max_packet_size {
+            dest.put_u8(PropertyType::MaxPacketSize as u8);
+            dest.put_u32(max_packet_size);
+        }
+        if let Some(topic_alias_max) = self.topic_alias_max {
+            dest.put_u8(PropertyType::TopicAliasMax as u8);
+            dest.put_u16(topic_alias_max);
+        }
+        if self.req_resp_info {
+            dest.put_u8(PropertyType::ReqRespInfo as u8);
+            dest.put_u8(1);
+        }
+        if !self.problem_info {
+            dest.put_u8(PropertyType::ReqProblemInfo as u8);
+            dest.put_u8(1);
+        }
+        if let Some(user_properties) = &self.user_property {
+            user_properties.encode(dest)?;
+        }
+        if let Some(auth_method) = &self.auth_method {
+            dest.put_u8(PropertyType::AuthMethod as u8);
+            encode_utf8_string(auth_method, dest)?;
+        }
+        if let Some(auth_data) = &self.auth_data {
+            dest.put_u8(PropertyType::AuthData as u8);
+            encode_binary_data(auth_data, dest)?;
+        }
+        // payload
+        encode_utf8_string(&self.client_id, dest)?;
+        // connect payload
+        if let Some(will_message) = &self.will_message {
+            will_message.encode(dest)?;
+        }
+        if let Some(username) = &self.username {
+            encode_utf8_string(username, dest)?;
+        }
+        if let Some(password) = &self.password {
+            encode_binary_data(password, dest)?;
+        }
         Ok(())
     }
 }
@@ -406,6 +387,133 @@ mod test {
 
     const CONNECT_MIN_REMAINING: u32 = 13;
     const PROP_ENCODE: u32 = 5;
+
+    #[test]
+    fn test_encode_flags() {
+        let mut connect= Connect::default();
+        connect.clean_start = true;
+        let mut dest = BytesMut::new();
+        let result = connect.encode(&mut dest);
+        assert!(result.is_ok());
+        assert_eq!(dest[7], CONNECT_FLAG_CLEAN_START);
+        let mut dest = BytesMut::new();
+        let password = vec![1,2,3,4,5];
+        connect.password = Some(password);
+        let result = connect.encode(&mut dest);
+        assert!(result.is_ok());
+        assert_eq!(dest[7], CONNECT_FLAG_CLEAN_START | CONNECT_FLAG_PASSWORD);
+    }
+
+    #[test]
+    fn test_encode_will() {
+        let mut connect= Connect::default();
+        let will = WillMessage::new(QoSLevel::AtLeastOnce, true);
+        connect.will_message = Some(will);
+        let mut dest = BytesMut::new();
+        let result = connect.encode(&mut dest);
+        assert!(result.is_ok());
+        assert!(dest[7] & CONNECT_FLAG_WILL > 0);
+        assert!(dest[7] & CONNECT_FLAG_WILL_RETAIN > 0);
+        let qos_bits = (dest[7] & CONNECT_FLAG_WILL_QOS) >> CONNECT_FLAG_SHIFT;
+        let qos_result = QoSLevel::try_from(qos_bits);
+        assert!(qos_result.is_ok());
+        let qos = qos_result.unwrap();
+        assert_eq!(QoSLevel::AtLeastOnce, qos);
+    }
+
+    #[test]
+    fn test_encode_keep_alive() {
+        let mut connect= Connect::default();
+        connect.keep_alive = 0xcafe;
+        let mut dest = BytesMut::new();
+        let result = connect.encode(&mut dest);
+        assert!(result.is_ok());
+        assert_eq!(0xcafe, ((dest[8] as u16) << 8) + dest[9] as u16);
+    }
+
+    #[test]
+    fn test_encode_session_expiry() {
+        let mut connect= Connect::default();
+        connect.session_expiry_interval = Some(0xcafe);
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 5, PropertyType::SessionExpiry);
+    }
+
+    #[test]
+    fn test_encode_receive_max() {
+        let mut connect= Connect::default();
+        connect.receive_max = 0xcafe;
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 3, PropertyType::RecvMax);
+    }
+
+    #[test]
+    fn test_encode_max_packet_size() {
+        let mut connect= Connect::default();
+        connect.max_packet_size = Some(0xcafe);
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 5, PropertyType::MaxPacketSize);
+    }
+
+    #[test]
+    fn test_encode_topic_alias_max() {
+        let mut connect= Connect::default();
+        connect.topic_alias_max = Some(0xcafe);
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 3, PropertyType::TopicAliasMax);
+    }
+
+    #[test]
+    fn test_encode_req_resp_info() {
+        let mut connect= Connect::default();
+        connect.req_resp_info = true;
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 2, PropertyType::ReqRespInfo);
+    }
+
+    #[test]
+    fn test_encode_req_problem_info() {
+        let mut connect= Connect::default();
+        connect.problem_info = false;
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 2, PropertyType::ReqProblemInfo);
+    }
+
+    #[test]
+    fn test_encode_auth_method() {
+        let mut connect= Connect::default();
+        connect.auth_method = Some("Authenticate".to_string());
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 15, PropertyType::AuthMethod);
+    }
+
+    #[test]
+    fn test_encode_auth_data() {
+        let mut connect= Connect::default();
+        connect.auth_data = Some(vec![0,1,2,3,4,5]);
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 9, PropertyType::AuthData);
+    }
+
+    #[test]
+    fn test_encode_client_id() {
+        let mut connect= Connect::default();
+        connect.client_id = "123-456-789".to_string();
+        let mut dest = BytesMut::new();
+        let result = connect.encode(&mut dest);
+        assert!(result.is_ok());
+        assert_eq!(24, dest.len() as u32, "Packet Size");
+        assert_eq!('1', dest[13] as char)
+    }
+
+    #[test]
+    fn test_encode_() {
+        let mut connect= Connect::default();
+        connect.client_id = "123-456-789".to_string();
+        let mut dest = BytesMut::new();
+        let result = connect.encode(&mut dest);        
+        assert!(result.is_ok());
+    }
 
     #[test]
     fn test_default_remaining() {
@@ -501,4 +609,20 @@ mod test {
             CONNECT_MIN_REMAINING + 5
         );
     }
+
+    fn test_property (
+        connect: Connect,
+        dest: &mut BytesMut,
+        expected_prop_len: u32,
+        property: PropertyType,
+    ) {
+        let expected_len = 13 + expected_prop_len;
+        let result = connect.encode(dest);
+        assert!(result.is_ok());
+        assert_eq!(expected_len, dest.len() as u32, "Packet Size");
+        assert_eq!(expected_prop_len, connect.property_remaining().unwrap(), "Encoded Property Length");
+        assert_eq!(expected_prop_len as u8, dest[10], "Property Length");
+        assert_eq!(property as u8, dest[11], "Property Type");
+    }
+
 }

@@ -737,7 +737,7 @@ mod test {
         assert_eq!(expected as u8, dest[6]);
     }
 
-    fn test_property(
+    fn test_property (
         connack: ConnAck,
         dest: &mut BytesMut,
         expected_len: u32,
