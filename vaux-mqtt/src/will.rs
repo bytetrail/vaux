@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
-use bytes::{Buf, BytesMut};
-use crate::{Decode, Encode, MQTTCodecError, PROP_SIZE_U32, PROP_SIZE_U8, PropertyType, QoSLevel, Remaining};
-use crate::codec::{check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer};
+use bytes::{Buf, BufMut, BytesMut};
+use crate::{Decode, Encode, encode_utf8_string, encode_variable_len_integer, MQTTCodecError, PROP_SIZE_U32, PROP_SIZE_U8, PropertyType, QoSLevel, Remaining};
+use crate::codec::{check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer, encode_binary_data};
 
 const DEFAULT_WILL_DELAY: u32 = 0;
 
@@ -127,7 +127,38 @@ impl Decode for WillMessage {
 
 impl Encode for WillMessage {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        todo!()
+        let property_length = self.property_remaining().unwrap();
+        encode_variable_len_integer(property_length, dest);
+        if self.delay_interval != 0 {
+            dest.put_u8(PropertyType::WillDelay as u8);
+            dest.put_u32(self.delay_interval);
+        }
+        if self.payload_utf8 {
+            dest.put_u8(PropertyType::PayloadFormat as u8);
+            dest.put_u8(1);
+        }
+        if let Some(expiry) = self.expiry_interval {
+            dest.put_u8(PropertyType::MessageExpiry as u8);
+            dest.put_u32(expiry);
+        }
+        if let Some(content_type) = &self.content_type {
+            dest.put_u8(PropertyType::ContentType as u8);
+            encode_utf8_string(content_type, dest)?;
+        }
+        if let Some(response_topic) = &self.response_topic {
+            dest.put_u8(PropertyType::ResponseTopic as u8);
+            encode_utf8_string(response_topic, dest)?;
+        }
+        if let Some(correlation_data) = &self.correlation_data {
+            dest.put_u8(PropertyType::CorrelationData as u8);
+            encode_binary_data(correlation_data, dest)?;
+        }
+        if let Some(user_properties) = &self.user_property {
+            user_properties.encode(dest);
+        }
+        encode_utf8_string(&self.topic, dest)?;
+        encode_binary_data(&self.payload, dest)?;
+        Ok(())
     }
 }
 

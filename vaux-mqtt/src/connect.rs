@@ -105,6 +105,7 @@ impl Connect {
         self.decode_payload(src, username, password)?;
         Ok(())
     }
+
     fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
         let prop_size = decode_variable_len_integer(src);
         let read_until = src.remaining() - prop_size as usize;
@@ -325,7 +326,7 @@ impl Encode for Connect {
             dest.put_u8(1);
         }
         if let Some(user_properties) = &self.user_property {
-            user_properties.encode(dest);
+            user_properties.encode(dest)?;
         }
         if let Some(auth_method) = &self.auth_method {
             dest.put_u8(PropertyType::AuthMethod as u8);
@@ -334,6 +335,18 @@ impl Encode for Connect {
         if let Some(auth_data) = &self.auth_data {
             dest.put_u8(PropertyType::AuthData as u8);
             encode_binary_data(auth_data, dest)?;
+        }
+        // payload
+        encode_utf8_string(&self.client_id, dest)?;
+        // connect payload
+        if let Some(will_message) = &self.will_message {
+            will_message.encode(dest)?;
+        }
+        if let Some(username) = &self.username {
+            encode_utf8_string(username, dest)?;
+        }
+        if let Some(password) = &self.password {
+            encode_binary_data(password, dest)?;
         }
         Ok(())
     }
@@ -423,7 +436,7 @@ mod test {
         let mut connect= Connect::default();
         connect.session_expiry_interval = Some(0xcafe);
         let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 16, 5, PropertyType::SessionExpiry);
+        test_property(connect, &mut dest, 5, PropertyType::SessionExpiry);
     }
 
     #[test]
@@ -431,7 +444,7 @@ mod test {
         let mut connect= Connect::default();
         connect.receive_max = 0xcafe;
         let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 14, 3, PropertyType::RecvMax);
+        test_property(connect, &mut dest, 3, PropertyType::RecvMax);
     }
 
     #[test]
@@ -439,7 +452,7 @@ mod test {
         let mut connect= Connect::default();
         connect.max_packet_size = Some(0xcafe);
         let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 16, 5, PropertyType::MaxPacketSize);
+        test_property(connect, &mut dest, 5, PropertyType::MaxPacketSize);
     }
 
     #[test]
@@ -447,7 +460,59 @@ mod test {
         let mut connect= Connect::default();
         connect.topic_alias_max = Some(0xcafe);
         let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 14, 3, PropertyType::TopicAliasMax);
+        test_property(connect, &mut dest, 3, PropertyType::TopicAliasMax);
+    }
+
+    #[test]
+    fn test_encode_req_resp_info() {
+        let mut connect= Connect::default();
+        connect.req_resp_info = true;
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 2, PropertyType::ReqRespInfo);
+    }
+
+    #[test]
+    fn test_encode_req_problem_info() {
+        let mut connect= Connect::default();
+        connect.problem_info = false;
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 2, PropertyType::ReqProblemInfo);
+    }
+
+    #[test]
+    fn test_encode_auth_method() {
+        let mut connect= Connect::default();
+        connect.auth_method = Some("Authenticate".to_string());
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 15, PropertyType::AuthMethod);
+    }
+
+    #[test]
+    fn test_encode_auth_data() {
+        let mut connect= Connect::default();
+        connect.auth_data = Some(vec![0,1,2,3,4,5]);
+        let mut dest = BytesMut::new();
+        test_property(connect, &mut dest, 9, PropertyType::AuthData);
+    }
+
+    #[test]
+    fn test_encode_client_id() {
+        let mut connect= Connect::default();
+        connect.client_id = "123-456-789".to_string();
+        let mut dest = BytesMut::new();
+        let result = connect.encode(&mut dest);
+        assert!(result.is_ok());
+        assert_eq!(24, dest.len() as u32, "Packet Size");
+        assert_eq!('1', dest[13] as char)
+    }
+
+    #[test]
+    fn test_encode_() {
+        let mut connect= Connect::default();
+        connect.client_id = "123-456-789".to_string();
+        let mut dest = BytesMut::new();
+        let result = connect.encode(&mut dest);        
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -548,10 +613,10 @@ mod test {
     fn test_property (
         connect: Connect,
         dest: &mut BytesMut,
-        expected_len: u32,
         expected_prop_len: u32,
         property: PropertyType,
     ) {
+        let expected_len = 13 + expected_prop_len;
         let result = connect.encode(dest);
         assert!(result.is_ok());
         assert_eq!(expected_len, dest.len() as u32, "Packet Size");
