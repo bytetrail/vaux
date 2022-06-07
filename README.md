@@ -61,8 +61,8 @@ vaux-broker [OPTIONS]
 
 OPTIONS:
 -a, --max-active-sessions <MAX_ACTIVE_SESSIONS>    
--h, --listen-addr <LISTEN_ADDR>                    Listen address (default is "127.0.0.1")s
---help                                         Print help information
+-h,  --help                                        Print help information
+-l,  --listen-addr <LISTEN_ADDR>                   Listen address (default is "127.0.0.1")
 -p, --port <PORT>                                  
 -s, --max-sessions <MAX_SESSIONS>                  Maximum number of sessions active/in-use
 -V, --version                                      Print version information
