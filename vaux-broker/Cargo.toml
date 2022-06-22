@@ -5,7 +5,12 @@ edition = "2021"
 authors = ["ByteTrail, LLC"]
 description = "MQTT Broker"
 
+[features]
+sqlite = ["dep:sqlite"]
+basic-auth = ["sqlite"]
+
 [dependencies]
+sqlite = { version = "0.26", optional=true }
 clap = { version = "3.1.18", features = ["derive"] }
 uuid = {version = "1.0.0", features = ["v4"] }
 tokio = { version = "1.17.0", features = ["full"] }

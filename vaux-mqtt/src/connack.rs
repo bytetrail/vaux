@@ -62,11 +62,15 @@ impl ConnAck {
                         property_map.insert(key, value);
                     }
                 }
-                Err(_) => return Err(MQTTCodecError::new("invalid property type")),
+                Err(_) => {
+                    return Err(MQTTCodecError::MalformedPacket(
+                        "invalid property type".to_string(),
+                    ))
+                }
             };
             if src.remaining() < read_until {
-                return Err(MQTTCodecError::new(
-                    "property size does not match expected length",
+                return Err(MQTTCodecError::MalformedPacket(
+                    "property size does not match expected length".to_string(),
                 ));
             }
         }
@@ -98,10 +102,9 @@ impl ConnAck {
             PropertyType::AuthMethod => self.auth_method = Some(decode_utf8_string(src)?),
             PropertyType::AuthData => self.auth_data = Some(decode_binary_data(src)?),
             prop => {
-                return Err(MQTTCodecError::new(&format!(
-                    "unexpected property type value: {}",
-                    prop
-                )))
+                return Err(MQTTCodecError::MalformedPacket(
+                    format!("unexpected property type value: {}", prop).to_string(),
+                ))
             }
         }
         Ok(())
@@ -214,9 +217,7 @@ impl Encode for ConnAck {
         let mut header = FixedHeader::new(PacketType::ConnAck);
         let prop_remaining = self.property_remaining().unwrap();
         header.set_remaining(
-            VARIABLE_HEADER_LEN
-                + prop_remaining
-                + variable_byte_int_size(prop_remaining),
+            VARIABLE_HEADER_LEN + prop_remaining + variable_byte_int_size(prop_remaining),
         );
         header.encode(dest)?;
         let connack_flag: u8 = if self.session_present { 0x01 } else { 0x00 };
@@ -300,9 +301,9 @@ impl Encode for ConnAck {
 mod test {
     use super::*;
     use crate::codec::PropertyType;
+    use crate::PropertyType::MaxQoS;
     use crate::{Encode, UserPropertyMap};
     use bytes::BytesMut;
-    use crate::PropertyType::MaxQoS;
 
     /// Minimum length CONNACK return
     /// Byte 1 = packet type + flags
@@ -737,7 +738,7 @@ mod test {
         assert_eq!(expected as u8, dest[6]);
     }
 
-    fn test_property (
+    fn test_property(
         connack: ConnAck,
         dest: &mut BytesMut,
         expected_len: u32,

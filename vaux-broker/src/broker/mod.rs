@@ -1,3 +1,4 @@
+mod client;
 pub(crate) mod session;
 
 use crate::broker::session::Session;
@@ -12,7 +13,7 @@ use tokio::sync::RwLock;
 use tokio_util::codec::Framed;
 use uuid::Uuid;
 use vaux_mqtt::Packet::PingResponse;
-use vaux_mqtt::{ConnAck, FixedHeader, MQTTCodec, MQTTCodecError, Packet, PacketType};
+use vaux_mqtt::{ConnAck, Disconnect, FixedHeader, MQTTCodec, Packet, PacketType, Reason};
 
 pub const DEFAULT_PORT: u16 = 1883;
 pub const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
@@ -83,6 +84,14 @@ impl Broker {
         let mut framed = Framed::new(stream, MQTTCodec {});
         let idle = Duration::from_millis(WAIT_IDLE_TIME);
         let session = match framed.next().await {
+            None => {
+                // continue without action
+                None
+            }
+            Some(Err(_)) => {
+                // TODO handle MQTT codec error(s)
+                None
+            }
             Some(Ok(Packet::Connect(packet))) => {
                 let mut active_session: Option<Arc<RwLock<Session>>> = None;
                 let mut ack = ConnAck::default();
@@ -130,8 +139,11 @@ impl Broker {
                 framed.send(resp).await?;
                 None
             }
-            _ => {
-                return Err(Box::new(MQTTCodecError::new("connect packet not received")));
+            Some(Ok(_)) => {
+                // disconnect with protocol error
+                let disconnect = Packet::Disconnect(Disconnect::new(Reason::ProtocolErr));
+                framed.send(disconnect).await?;
+                return Ok(());
             }
         };
         if let Some(session) = session {
@@ -140,28 +152,29 @@ impl Broker {
             );
             let mut last_activity = Instant::now();
             loop {
-                let request = framed.next().await;
-                if let Some(request) = request {
+                let option = framed.next().await;
+                if let Some(result) = option {
                     last_activity = Instant::now();
-                    match request {
-                        Ok(request) => match request {
+                    match result {
+                        Ok(packet) => match packet {
                             Packet::PingRequest(_) => {
                                 let header = FixedHeader::new(PacketType::PingResp);
-                                framed.send(Packet::PingResponse(header)).await?;
+                                //framed.send(Packet::PingResponse(header)).await?;
                             }
                             req => {
+                                // report currently unsupported packets as protocol errors
                                 println!("unsupported packet type {:?}", &req);
-                                return Err(Box::new(MQTTCodecError::new(
-                                    format!("unsupported packet type: {:?}", req).as_str(),
-                                )));
+                                //let disconnect = Packet::Disconnect(Disconnect::new(Reason::ProtocolErr));
+                                //framed.send(disconnect).await?;
+                                return Ok(());
                             }
                         },
                         Err(e) => {
                             println!("error handling client {:?}", e);
                             return Err(Box::new(e));
                         }
-                    } // match request
-                } // if let Some(request ...
+                    } // match result
+                } // if let Some(result ...
                 std::thread::sleep(idle);
                 if last_activity.elapsed() > keep_alive {
                     // immediate disconnect

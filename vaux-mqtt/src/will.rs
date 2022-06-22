@@ -1,7 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use crate::codec::{
+    check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
+    encode_binary_data,
+};
+use crate::{
+    encode_utf8_string, encode_variable_len_integer, Decode, Encode, MQTTCodecError, PropertyType,
+    QoSLevel, Remaining, PROP_SIZE_U32, PROP_SIZE_U8,
+};
 use bytes::{Buf, BufMut, BytesMut};
-use crate::{Decode, Encode, encode_utf8_string, encode_variable_len_integer, MQTTCodecError, PROP_SIZE_U32, PROP_SIZE_U8, PropertyType, QoSLevel, Remaining};
-use crate::codec::{check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer, encode_binary_data};
+use std::collections::{HashMap, HashSet};
 
 const DEFAULT_WILL_DELAY: u32 = 0;
 
@@ -70,10 +76,13 @@ impl Decode for WillMessage {
                             0 => self.payload_utf8 = false,
                             1 => self.payload_utf8 = true,
                             err => {
-                                return Err(MQTTCodecError::new(&format!(
-                                    "unexpected will message payload format value: {}",
-                                    err
-                                )))
+                                return Err(MQTTCodecError::MalformedPacket(
+                                    format!(
+                                        "unexpected will message payload format value: {}",
+                                        err
+                                    )
+                                    .to_string(),
+                                ))
                             }
                         }
                     }
@@ -104,26 +113,23 @@ impl Decode for WillMessage {
                         property_map.insert(key, value);
                     }
                     err => {
-                        return Err(MQTTCodecError::new(&format!(
-                            "unexpected will property id: {}",
-                            err
-                        )))
+                        return Err(MQTTCodecError::MalformedPacket(
+                            format!("unexpected will property id: {}", err).to_string(),
+                        ))
                     }
                 },
                 Err(e) => {
-                    return Err(MQTTCodecError::new(&format!(
-                        "unknown property type: {:?}",
-                        e
-                    )))
+                    return Err(MQTTCodecError::MalformedPacket(
+                        format!("unknown property type: {:?}", e).to_string(),
+                    ))
                 }
             };
         }
-        self.topic =  decode_utf8_string(src)?;
+        self.topic = decode_utf8_string(src)?;
         self.payload = decode_binary_data(src)?;
         Ok(())
     }
 }
-
 
 impl Encode for WillMessage {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
@@ -162,7 +168,6 @@ impl Encode for WillMessage {
     }
 }
 
-
 impl Remaining for WillMessage {
     fn size(&self) -> u32 {
         self.property_remaining().unwrap() + self.payload_remaining().unwrap()
@@ -196,6 +201,6 @@ impl Remaining for WillMessage {
     }
 
     fn payload_remaining(&self) -> Option<u32> {
-        Some((self.topic.len() + 2 + self.payload.len()+2) as u32)
+        Some((self.topic.len() + 2 + self.payload.len() + 2) as u32)
     }
 }

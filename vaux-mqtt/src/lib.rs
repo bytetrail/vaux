@@ -1,6 +1,7 @@
 mod codec;
 mod connack;
 mod connect;
+mod disconnect;
 mod will;
 
 use crate::codec::{
@@ -8,10 +9,11 @@ use crate::codec::{
     PROP_SIZE_U32, PROP_SIZE_U8,
 };
 
-pub use crate::will::WillMessage;
 pub use crate::codec::{MQTTCodec, MQTTCodecError, PacketType, Reason};
 pub use crate::connack::ConnAck;
 pub use crate::connect::Connect;
+pub use crate::disconnect::Disconnect;
+pub use crate::will::WillMessage;
 use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;
 
@@ -123,7 +125,7 @@ pub enum Packet {
     PingResponse(FixedHeader),
     Connect(Connect),
     ConnAck(ConnAck),
-    Disconnect(FixedHeader),
+    Disconnect(Disconnect),
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -143,11 +145,12 @@ impl TryFrom<u8> for QoSLevel {
             0x00 => Ok(QoSLevel::AtMostOnce),
             0x01 => Ok(QoSLevel::AtLeastOnce),
             0x02 => Ok(QoSLevel::ExactlyOnce),
-            value => Err(MQTTCodecError::new(&format!("{} is not a value QoSLevel", value))),
+            value => Err(MQTTCodecError::MalformedPacket(
+                format!("{} is not a value QoSLevel", value).to_string(),
+            )),
         }
     }
 }
-
 
 #[cfg(test)]
 mod test {}

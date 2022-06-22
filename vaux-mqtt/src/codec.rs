@@ -140,7 +140,9 @@ impl TryFrom<u8> for PropertyType {
             0x28 => Ok(PropertyType::WildcardSubAvail),
             0x29 => Ok(PropertyType::SubIdAvail),
             0x2a => Ok(PropertyType::ShardSubAvail),
-            _ => Err(MQTTCodecError::new("unexpected property type value")),
+            _ => Err(MQTTCodecError::MalformedPacket(
+                "unexpected property type value".to_string(),
+            )),
         }
     }
 }
@@ -245,6 +247,29 @@ pub enum Reason {
     WildcardSubUnsupported,
 }
 
+#[derive(Debug, Clone)]
+pub struct InvalidReasonError {
+    invalid_code: u8,
+}
+
+impl From<InvalidReasonError> for MQTTCodecError {
+    fn from(invalid_reason: InvalidReasonError) -> Self {
+        MQTTCodecError::MalformedPacket(
+            format!(
+                "{} is not a valid MQTT reason code",
+                invalid_reason.invalid_code
+            )
+            .to_string(),
+        )
+    }
+}
+
+impl Display for InvalidReasonError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} is not a valid MQTT reason code", self.invalid_code)
+    }
+}
+
 #[allow(non_upper_case_globals)]
 impl Reason {
     pub const NormalDisconnect: Reason = Reason::Success;
@@ -252,7 +277,7 @@ impl Reason {
 }
 
 impl TryFrom<u8> for Reason {
-    type Error = MQTTCodecError;
+    type Error = InvalidReasonError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
@@ -299,39 +324,43 @@ impl TryFrom<u8> for Reason {
             0xa0 => Ok(Reason::MaxConnectTime),
             0xa1 => Ok(Reason::SubIdUnsupported),
             0xa2 => Ok(Reason::WildcardSubUnsupported),
-            value => Err(MQTTCodecError::new(&format!("Invalid reason: {}", value))),
+            value => Err(InvalidReasonError {
+                invalid_code: value,
+            }),
         }
     }
 }
 
 #[derive(Debug)]
-pub struct MQTTCodecError {
-    reason: String,
+pub enum MQTTCodecError {
+    UnsupportedProtocol,
+    ProtocolVersion(u8),
+    MalformedPacket(String),
+    Unspecified(String),
 }
 
 impl Display for MQTTCodecError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "MQTT codec error: {}", self.reason)
+        match self {
+            MQTTCodecError::UnsupportedProtocol => write!(f, "Unsupported protocol error"),
+            MQTTCodecError::ProtocolVersion(version) => {
+                write!(f, "Unsupported MQTT protocol version: {}", version)
+            }
+            MQTTCodecError::MalformedPacket(error) => write!(f, "malformed packet: \"{}", error),
+            MQTTCodecError::Unspecified(error) => {
+                write!(f, "unspecified error: \"{}\"", error.to_string())
+            }
+        }
     }
 }
 
 impl From<std::io::Error> for MQTTCodecError {
-    fn from(_err: std::io::Error) -> Self {
-        MQTTCodecError {
-            reason: "IO error".to_string(),
-        }
+    fn from(err: std::io::Error) -> Self {
+        MQTTCodecError::Unspecified(err.to_string())
     }
 }
 
 impl std::error::Error for MQTTCodecError {}
-
-impl MQTTCodecError {
-    pub fn new(reason: &str) -> Self {
-        MQTTCodecError {
-            reason: reason.to_string(),
-        }
-    }
-}
 
 /// Returns the length of an encoded MQTT variable length unsigned int
 pub(crate) fn variable_byte_int_size(value: u32) -> u32 {
@@ -348,8 +377,8 @@ pub(crate) fn check_property(
     properties: &mut HashSet<PropertyType>,
 ) -> Result<(), MQTTCodecError> {
     if properties.contains(&property) {
-        return Err(MQTTCodecError::new(
-            format!("{} already set", property).as_str(),
+        return Err(MQTTCodecError::MalformedPacket(
+            format!("{} already set", property).to_string(),
         ));
     }
     properties.insert(property);
@@ -360,17 +389,18 @@ pub(crate) fn decode_prop_bool(src: &mut BytesMut) -> Result<bool, MQTTCodecErro
     match src.get_u8() {
         0 => Ok(false),
         1 => Ok(true),
-        value => Err(MQTTCodecError::new(&format!(
-            "invalid property value: {}",
-            value
-        ))),
+        value => Err(MQTTCodecError::MalformedPacket(
+            format!("invalid property value: {}", value).to_string(),
+        )),
     }
 }
 
 pub(crate) fn encode_utf8_string(src: &str, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
     let len = src.len();
     if len > u16::MAX as usize {
-        return Err(MQTTCodecError::new("string exceeds max length"));
+        return Err(MQTTCodecError::MalformedPacket(
+            "string exceeds max length".to_string(),
+        ));
     }
     dest.put_u16(src.len() as u16);
     dest.put(src.as_bytes());
@@ -380,7 +410,9 @@ pub(crate) fn encode_utf8_string(src: &str, dest: &mut BytesMut) -> Result<(), M
 pub(crate) fn decode_utf8_string(src: &mut BytesMut) -> Result<String, MQTTCodecError> {
     let len = src.get_u16();
     if src.remaining() < len as usize {
-        return Err(MQTTCodecError::new("malformed MQTT packet: string length"));
+        return Err(MQTTCodecError::MalformedPacket(
+            "malformed MQTT packet: string length".to_string(),
+        ));
     }
     let mut chars: Vec<u8> = Vec::with_capacity(len as usize);
     for _ in 0..len {
@@ -388,7 +420,9 @@ pub(crate) fn decode_utf8_string(src: &mut BytesMut) -> Result<String, MQTTCodec
     }
     match String::from_utf8(chars) {
         Ok(s) => Ok(s),
-        Err(e) => Err(MQTTCodecError::new(&format!("{:?}", e))),
+        Err(e) => Err(MQTTCodecError::MalformedPacket(
+            format!("{:?}", e).to_string(),
+        )),
     }
 }
 
@@ -405,7 +439,9 @@ pub(crate) fn decode_binary_data(src: &mut BytesMut) -> Result<Vec<u8>, MQTTCode
 pub(crate) fn encode_binary_data(src: &[u8], dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
     let len = src.len();
     if len > u16::MAX as usize {
-        return Err(MQTTCodecError::new("binary data exceeds max length"));
+        return Err(MQTTCodecError::MalformedPacket(
+            "binary data exceeds max length".to_string(),
+        ));
     }
     dest.put_u16(len as u16);
     dest.put(src);
@@ -466,7 +502,9 @@ impl Decoder for MQTTCodec {
                             }
                             PacketType::Publish => Ok(None),
                             //PacketType::ConnAck => Ok(Some(Packet::ConnAck(packet_header))),
-                            _ => Err(MQTTCodecError::new("unsupported packet type")),
+                            _ => Err(MQTTCodecError::MalformedPacket(
+                                "unsupported packet type".to_string(),
+                            )),
                         }
                     }
                     None => Ok(None),
@@ -492,7 +530,11 @@ impl Encoder<Packet> for MQTTCodec {
                 dest.put_u8(0x_00);
                 Ok(())
             }
-            _ => return Err(MQTTCodecError::new("unsupported packet type")),
+            _ => {
+                return Err(MQTTCodecError::MalformedPacket(
+                    "unsupported packet type".to_string(),
+                ))
+            }
         }?;
         Ok(())
     }
@@ -525,8 +567,8 @@ fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQTTCo
         | PacketType::Subscribe
         | PacketType::Unsubscribe => {
             if flags != PACKET_RESERVED_NONE {
-                MQTTCodecError::new(
-                    format!("invalid flags for {}: {}", packet_type, flags).as_str(),
+                MQTTCodecError::MalformedPacket(
+                    format!("invalid flags for {}: {}", packet_type, flags).to_string(),
                 );
             }
             Ok(Some(FixedHeader {
@@ -545,8 +587,8 @@ fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQTTCo
         | PacketType::Disconnect
         | PacketType::Auth => {
             if flags != PACKET_RESERVED_NONE {
-                MQTTCodecError::new(
-                    format!("invalid flags for {}: {}", packet_type, flags).as_str(),
+                MQTTCodecError::MalformedPacket(
+                    format!("invalid flags for {}: {}", packet_type, flags).to_string(),
                 );
             }
             Ok(Some(FixedHeader {
@@ -560,7 +602,9 @@ fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQTTCo
             flags,
             remaining,
         })),
-        _ => Err(MQTTCodecError::new("unexpected packet type ")),
+        _ => Err(MQTTCodecError::MalformedPacket(
+            "unexpected packet type ".to_string(),
+        )),
     }
 }
 

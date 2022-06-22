@@ -1,5 +1,11 @@
-use crate::codec::{check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer, MQTTCodecError, PropertyType, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8, encode_binary_data};
-use crate::{variable_byte_int_size, Decode, Encode, QoSLevel, UserPropertyMap, WillMessage, FixedHeader, PacketType, Remaining, encode_variable_len_integer, encode_utf8_string};
+use crate::codec::{
+    check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
+    encode_binary_data, MQTTCodecError, PropertyType, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
+};
+use crate::{
+    encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, Decode, Encode,
+    FixedHeader, PacketType, QoSLevel, Remaining, UserPropertyMap, WillMessage,
+};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::{HashMap, HashSet};
 
@@ -38,12 +44,11 @@ pub struct Connect {
 }
 
 impl Connect {
-
     fn receive_max(&self) -> u16 {
         self.receive_max
     }
 
-    fn set_receive_max(&mut self, receive_max: u16)  {
+    fn set_receive_max(&mut self, receive_max: u16) {
         assert_ne!(0, receive_max);
         self.receive_max = receive_max;
     }
@@ -64,7 +69,7 @@ impl Connect {
             if will.retain {
                 flags |= CONNECT_FLAG_WILL_RETAIN
             }
-            flags |= (will.qos as u8 ) << CONNECT_FLAG_SHIFT;
+            flags |= (will.qos as u8) << CONNECT_FLAG_SHIFT;
         }
         dest.put_u8(flags);
     }
@@ -72,19 +77,15 @@ impl Connect {
     pub(crate) fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
         let len = src.get_u16();
         if len != 0x04 {
-            return Err(MQTTCodecError::new(
-                format!("invalid protocol name length: {}", len).as_str(),
-            ));
+            return Err(MQTTCodecError::UnsupportedProtocol);
         }
         let mqtt_str = src.get_u32();
         if mqtt_str != MQTT_PROTOCOL_U32 {
-            return Err(MQTTCodecError::new("unsupported protocol"));
+            return Err(MQTTCodecError::UnsupportedProtocol);
         }
         let protocol_version = src.get_u8();
         if protocol_version != MQTT_PROTOCOL_VERSION {
-            return Err(MQTTCodecError::new(
-                format!("unsupported protocol version: {}", protocol_version).as_str(),
-            ));
+            return Err(MQTTCodecError::ProtocolVersion(protocol_version));
         }
         // connect flags
         let connect_flags = src.get_u8();
@@ -97,7 +98,9 @@ impl Connect {
             if let Ok(qos) = QoSLevel::try_from(qos) {
                 self.will_message = Some(WillMessage::new(qos, will_retain));
             } else {
-                return Err(MQTTCodecError::new("invalid Will QoS level"));
+                return Err(MQTTCodecError::MalformedPacket(
+                    "invalid Will QoS level".to_string(),
+                ));
             }
         }
         self.keep_alive = src.get_u16();
@@ -132,13 +135,13 @@ impl Connect {
                                 0 => self.req_resp_info = false,
                                 1 => self.req_resp_info = true,
                                 v => {
-                                    return Err(MQTTCodecError::new(
+                                    return Err(MQTTCodecError::MalformedPacket(
                                         format!(
                                             "invalid value {} for {}",
                                             v,
                                             PropertyType::ReqRespInfo
                                         )
-                                        .as_str(),
+                                        .to_string(),
                                     ))
                                 }
                             },
@@ -146,13 +149,13 @@ impl Connect {
                                 0 => self.problem_info = false,
                                 1 => self.problem_info = true,
                                 v => {
-                                    return Err(MQTTCodecError::new(
+                                    return Err(MQTTCodecError::MalformedPacket(
                                         format!(
                                             "invalid value {} for {}",
                                             v,
                                             PropertyType::RespInfo
                                         )
-                                        .as_str(),
+                                        .to_string(),
                                     ))
                                 }
                             },
@@ -166,18 +169,20 @@ impl Connect {
                                 } else {
                                     // MQTT protocol not specific that auth method must appear before
                                     // auth data. This implementation imposes order and may be incorrect
-                                    return Err(MQTTCodecError::new(&format!(
-                                        "Property: {} provided without providing {}",
-                                        PropertyType::AuthData,
-                                        PropertyType::AuthMethod
-                                    )));
+                                    return Err(MQTTCodecError::MalformedPacket(
+                                        format!(
+                                            "Property: {} provided without providing {}",
+                                            PropertyType::AuthData,
+                                            PropertyType::AuthMethod
+                                        )
+                                        .to_string(),
+                                    ));
                                 }
                             }
                             val => {
-                                return Err(MQTTCodecError::new(&format!(
-                                    "unexpected property type value: {}",
-                                    val
-                                )))
+                                return Err(MQTTCodecError::MalformedPacket(
+                                    format!("unexpected property type value: {}", val).to_string(),
+                                ))
                             }
                         }
                     } else {
@@ -193,11 +198,15 @@ impl Connect {
                         property_map.insert(key, value);
                     }
                 }
-                Err(_) => return Err(MQTTCodecError::new("invalid property type")),
+                Err(_) => {
+                    return Err(MQTTCodecError::MalformedPacket(
+                        "invalid property type".to_string(),
+                    ))
+                }
             };
             if src.remaining() < read_until {
-                return Err(MQTTCodecError::new(
-                    "property size does not match expected length",
+                return Err(MQTTCodecError::MalformedPacket(
+                    "property size does not match expected length".to_string(),
                 ));
             }
         }
@@ -211,7 +220,9 @@ impl Connect {
         password: bool,
     ) -> Result<(), MQTTCodecError> {
         if src.remaining() < 3 {
-            return Err(MQTTCodecError::new("missing client ID"));
+            return Err(MQTTCodecError::MalformedPacket(
+                "missing client ID".to_string(),
+            ));
         }
         self.client_id = decode_utf8_string(src)?;
         if self.will_message != None {
@@ -291,9 +302,10 @@ impl Encode for Connect {
         let prop_remaining = self.property_remaining().unwrap();
         let payload_remaining = self.payload_remaining().unwrap();
         header.set_remaining(
-                DEFAULT_CONNECT_REMAINING
-                + prop_remaining + payload_remaining
-                + variable_byte_int_size(prop_remaining)
+            DEFAULT_CONNECT_REMAINING
+                + prop_remaining
+                + payload_remaining
+                + variable_byte_int_size(prop_remaining),
         );
         header.encode(dest)?;
         dest.put_u32(MQTT_PROTOCOL_U32);
@@ -390,14 +402,14 @@ mod test {
 
     #[test]
     fn test_encode_flags() {
-        let mut connect= Connect::default();
+        let mut connect = Connect::default();
         connect.clean_start = true;
         let mut dest = BytesMut::new();
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
         assert_eq!(dest[7], CONNECT_FLAG_CLEAN_START);
         let mut dest = BytesMut::new();
-        let password = vec![1,2,3,4,5];
+        let password = vec![1, 2, 3, 4, 5];
         connect.password = Some(password);
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
@@ -406,7 +418,7 @@ mod test {
 
     #[test]
     fn test_encode_will() {
-        let mut connect= Connect::default();
+        let mut connect = Connect::default();
         let will = WillMessage::new(QoSLevel::AtLeastOnce, true);
         connect.will_message = Some(will);
         let mut dest = BytesMut::new();
@@ -423,7 +435,7 @@ mod test {
 
     #[test]
     fn test_encode_keep_alive() {
-        let mut connect= Connect::default();
+        let mut connect = Connect::default();
         connect.keep_alive = 0xcafe;
         let mut dest = BytesMut::new();
         let result = connect.encode(&mut dest);
@@ -433,7 +445,7 @@ mod test {
 
     #[test]
     fn test_encode_session_expiry() {
-        let mut connect= Connect::default();
+        let mut connect = Connect::default();
         connect.session_expiry_interval = Some(0xcafe);
         let mut dest = BytesMut::new();
         test_property(connect, &mut dest, 5, PropertyType::SessionExpiry);
@@ -441,7 +453,7 @@ mod test {
 
     #[test]
     fn test_encode_receive_max() {
-        let mut connect= Connect::default();
+        let mut connect = Connect::default();
         connect.receive_max = 0xcafe;
         let mut dest = BytesMut::new();
         test_property(connect, &mut dest, 3, PropertyType::RecvMax);
@@ -449,7 +461,7 @@ mod test {
 
     #[test]
     fn test_encode_max_packet_size() {
-        let mut connect= Connect::default();
+        let mut connect = Connect::default();
         connect.max_packet_size = Some(0xcafe);
         let mut dest = BytesMut::new();
         test_property(connect, &mut dest, 5, PropertyType::MaxPacketSize);
@@ -457,7 +469,7 @@ mod test {
 
     #[test]
     fn test_encode_topic_alias_max() {
-        let mut connect= Connect::default();
+        let mut connect = Connect::default();
         connect.topic_alias_max = Some(0xcafe);
         let mut dest = BytesMut::new();
         test_property(connect, &mut dest, 3, PropertyType::TopicAliasMax);
@@ -465,7 +477,7 @@ mod test {
 
     #[test]
     fn test_encode_req_resp_info() {
-        let mut connect= Connect::default();
+        let mut connect = Connect::default();
         connect.req_resp_info = true;
         let mut dest = BytesMut::new();
         test_property(connect, &mut dest, 2, PropertyType::ReqRespInfo);
@@ -473,7 +485,7 @@ mod test {
 
     #[test]
     fn test_encode_req_problem_info() {
-        let mut connect= Connect::default();
+        let mut connect = Connect::default();
         connect.problem_info = false;
         let mut dest = BytesMut::new();
         test_property(connect, &mut dest, 2, PropertyType::ReqProblemInfo);
@@ -481,7 +493,7 @@ mod test {
 
     #[test]
     fn test_encode_auth_method() {
-        let mut connect= Connect::default();
+        let mut connect = Connect::default();
         connect.auth_method = Some("Authenticate".to_string());
         let mut dest = BytesMut::new();
         test_property(connect, &mut dest, 15, PropertyType::AuthMethod);
@@ -489,15 +501,15 @@ mod test {
 
     #[test]
     fn test_encode_auth_data() {
-        let mut connect= Connect::default();
-        connect.auth_data = Some(vec![0,1,2,3,4,5]);
+        let mut connect = Connect::default();
+        connect.auth_data = Some(vec![0, 1, 2, 3, 4, 5]);
         let mut dest = BytesMut::new();
         test_property(connect, &mut dest, 9, PropertyType::AuthData);
     }
 
     #[test]
     fn test_encode_client_id() {
-        let mut connect= Connect::default();
+        let mut connect = Connect::default();
         connect.client_id = "123-456-789".to_string();
         let mut dest = BytesMut::new();
         let result = connect.encode(&mut dest);
@@ -508,10 +520,10 @@ mod test {
 
     #[test]
     fn test_encode_() {
-        let mut connect= Connect::default();
+        let mut connect = Connect::default();
         connect.client_id = "123-456-789".to_string();
         let mut dest = BytesMut::new();
-        let result = connect.encode(&mut dest);        
+        let result = connect.encode(&mut dest);
         assert!(result.is_ok());
     }
 
@@ -610,7 +622,7 @@ mod test {
         );
     }
 
-    fn test_property (
+    fn test_property(
         connect: Connect,
         dest: &mut BytesMut,
         expected_prop_len: u32,
@@ -620,9 +632,12 @@ mod test {
         let result = connect.encode(dest);
         assert!(result.is_ok());
         assert_eq!(expected_len, dest.len() as u32, "Packet Size");
-        assert_eq!(expected_prop_len, connect.property_remaining().unwrap(), "Encoded Property Length");
+        assert_eq!(
+            expected_prop_len,
+            connect.property_remaining().unwrap(),
+            "Encoded Property Length"
+        );
         assert_eq!(expected_prop_len as u8, dest[10], "Property Length");
         assert_eq!(property as u8, dest[11], "Property Type");
     }
-
 }
