@@ -15,7 +15,7 @@ const DEFAULT_RECV_MAX: u16 = 65535;
 const DEFAULT_TOPIC_ALIAS_MAX: u16 = 0;
 const VARIABLE_HEADER_LEN: u32 = 2;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ConnAck {
     session_present: bool,
     reason: Reason,

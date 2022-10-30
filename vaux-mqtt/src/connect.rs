@@ -3,6 +3,7 @@ use crate::{variable_byte_int_size, Decode, Encode, QoSLevel, UserPropertyMap, W
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::{HashMap, HashSet};
 
+const MQTT_PROTOCOL_NAME_LEN: u16 = 0x00_04;
 const MQTT_PROTOCOL_U32: u32 = 0x4d515454;
 const MQTT_PROTOCOL_VERSION: u8 = 0x05;
 
@@ -18,7 +19,7 @@ const DEFAULT_RECEIVE_MAX: u16 = 0xffff;
 /// Default remaining size for connect packet
 const DEFAULT_CONNECT_REMAINING: u32 = 10;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Connect {
     pub clean_start: bool,
     pub keep_alive: u16,
@@ -211,9 +212,11 @@ impl Connect {
         password: bool,
     ) -> Result<(), MQTTCodecError> {
         if src.remaining() < 3 {
-            return Err(MQTTCodecError::new("missing client ID"));
+            // assign a 0 length client ID
+            self.client_id = "".to_string();
+        } else {
+            self.client_id = decode_utf8_string(src)?;
         }
-        self.client_id = decode_utf8_string(src)?;
         if self.will_message != None {
             let will_message = self.will_message.as_mut().unwrap();
             will_message.decode(src)?;
@@ -296,6 +299,7 @@ impl Encode for Connect {
                 + variable_byte_int_size(prop_remaining)
         );
         header.encode(dest)?;
+        dest.put_u16(MQTT_PROTOCOL_NAME_LEN);
         dest.put_u32(MQTT_PROTOCOL_U32);
         dest.put_u8(MQTT_PROTOCOL_VERSION);
         self.encode_flags(dest);
@@ -507,15 +511,6 @@ mod test {
     }
 
     #[test]
-    fn test_encode_() {
-        let mut connect= Connect::default();
-        connect.client_id = "123-456-789".to_string();
-        let mut dest = BytesMut::new();
-        let result = connect.encode(&mut dest);        
-        assert!(result.is_ok());
-    }
-
-    #[test]
     fn test_default_remaining() {
         let connect = Connect::default();
         let remaining = connect.size();
@@ -524,6 +519,10 @@ mod test {
             "[Default] expected {} remaining size",
             CONNECT_MIN_REMAINING
         );
+        let mut dest = BytesMut::new();
+        let result = connect.encode(&mut dest);
+        assert!(result.is_ok());
+        assert_eq!(CONNECT_MIN_REMAINING as usize, dest.len()-2, "Expected minimum size {}", CONNECT_MIN_REMAINING);
     }
 
     #[test]

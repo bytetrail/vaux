@@ -5,7 +5,7 @@ use crate::codec::{check_property, decode_binary_data, decode_utf8_string, decod
 
 const DEFAULT_WILL_DELAY: u32 = 0;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 /// MQTT Will message. The Will message name comes from last will and
 /// testament. The will message is typically sent under the following
 /// conditions when a client disconnects:

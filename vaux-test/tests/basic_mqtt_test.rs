@@ -1,4 +1,5 @@
 use bytes::BytesMut;
+use uuid::Uuid;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder};
@@ -7,7 +8,7 @@ use vaux_mqtt::{ConnAck, Connect, FixedHeader, MQTTCodec, Packet, PacketType};
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_HOST: &'static str = "127.0.0.1";
 const PING_RESP_LEN: usize = 2;
-const CONNACK_RESP_LEN: usize = 2;
+const CONNACK_RESP_LEN: usize = 5;
 
 #[test]
 /// This tests expects the basic TCP server to be running on
@@ -24,7 +25,8 @@ fn test_basic_ping() {
 
 #[test]
 fn test_basic_connect() {
-    let request = Connect::default();
+    let mut request = Connect::default();
+    request.client_id = Uuid::new_v4().to_string();
     let ack = ConnAck::default();
     test_basic(
         Packet::Connect(request),
@@ -39,7 +41,7 @@ fn test_basic(request: Packet, expected_len: usize, expected_response: Packet) {
         Ok(mut stream) => {
             let mut buffer = [0u8; 128];
             let mut dest = BytesMut::new();
-            let result = codec.encode(request, &mut dest);
+            let result = codec.encode(request.clone(), &mut dest);
             if let Err(e) = result {
                 assert!(false, "Failed to encode packet: {:?}", e);
             }

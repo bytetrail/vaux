@@ -150,14 +150,12 @@ impl Broker {
                                 framed.send(Packet::PingResponse(header)).await?;
                             }
                             req => {
-                                println!("unsupported packet type {:?}", &req);
                                 return Err(Box::new(MQTTCodecError::new(
                                     format!("unsupported packet type: {:?}", req).as_str(),
                                 )));
                             }
                         },
                         Err(e) => {
-                            println!("error handling client {:?}", e);
                             return Err(Box::new(e));
                         }
                     } // match request

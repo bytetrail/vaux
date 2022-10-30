@@ -1,5 +1,5 @@
 use crate::connect::Connect;
-use crate::{Encode, FixedHeader, Packet, PACKET_RESERVED_NONE};
+use crate::{Encode, FixedHeader, Packet, PACKET_RESERVED_NONE, ConnAck, Decode};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -465,17 +465,18 @@ impl Decoder for MQTTCodec {
                                 Ok(Some(Packet::Connect(connect)))
                             }
                             PacketType::Publish => Ok(None),
-                            //PacketType::ConnAck => Ok(Some(Packet::ConnAck(packet_header))),
+                            PacketType::ConnAck => {
+                                let mut connack = ConnAck::default();
+                                connack.decode(src)?;
+                                Ok(Some(Packet::ConnAck(connack)))
+                            }
                             _ => Err(MQTTCodecError::new("unsupported packet type")),
                         }
                     }
                     None => Ok(None),
                 }
             }
-            Err(e) => {
-                println!("Error: {:?}", e);
-                Err(e)
-            }
+            Err(e) => Err(e),
         }
     }
 }
@@ -517,6 +518,7 @@ fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQTTCo
     let flags = first_byte & 0x0f;
     let remaining = decode_variable_len_integer(src);
     if src.remaining() != remaining as usize {
+        // TODO return a protocol error
         return Ok(None);
     }
     match packet_type {

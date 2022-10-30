@@ -63,7 +63,7 @@ impl Encode for UserPropertyMap {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FixedHeader {
     packet_type: PacketType,
     flags: u8,
@@ -117,7 +117,7 @@ impl Encode for FixedHeader {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Packet {
     PingRequest(FixedHeader),
     PingResponse(FixedHeader),
