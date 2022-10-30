@@ -1,5 +1,5 @@
 use crate::connect::Connect;
-use crate::{Encode, FixedHeader, Packet, PACKET_RESERVED_NONE, ConnAck, Decode};
+use crate::{ConnAck, Decode, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -453,29 +453,25 @@ impl Decoder for MQTTCodec {
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         match decode_fixed_header(src) {
-            Ok(packet_header) => {
-                match packet_header {
-                    Some(packet_header) => {
-                        match packet_header.packet_type {
-                            PacketType::PingReq => Ok(Some(Packet::PingRequest(packet_header))),
-                            PacketType::PingResp => Ok(Some(Packet::PingResponse(packet_header))),
-                            PacketType::Connect => {
-                                let mut connect = Connect::default();
-                                connect.decode(src)?;
-                                Ok(Some(Packet::Connect(connect)))
-                            }
-                            PacketType::Publish => Ok(None),
-                            PacketType::ConnAck => {
-                                let mut connack = ConnAck::default();
-                                connack.decode(src)?;
-                                Ok(Some(Packet::ConnAck(connack)))
-                            }
-                            _ => Err(MQTTCodecError::new("unsupported packet type")),
-                        }
+            Ok(packet_header) => match packet_header {
+                Some(packet_header) => match packet_header.packet_type {
+                    PacketType::PingReq => Ok(Some(Packet::PingRequest(packet_header))),
+                    PacketType::PingResp => Ok(Some(Packet::PingResponse(packet_header))),
+                    PacketType::Connect => {
+                        let mut connect = Connect::default();
+                        connect.decode(src)?;
+                        Ok(Some(Packet::Connect(connect)))
                     }
-                    None => Ok(None),
-                }
-            }
+                    PacketType::Publish => Ok(None),
+                    PacketType::ConnAck => {
+                        let mut connack = ConnAck::default();
+                        connack.decode(src)?;
+                        Ok(Some(Packet::ConnAck(connack)))
+                    }
+                    _ => Err(MQTTCodecError::new("unsupported packet type")),
+                },
+                None => Ok(None),
+            },
             Err(e) => Err(e),
         }
     }

@@ -1,7 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use crate::codec::{
+    check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
+    encode_binary_data,
+};
+use crate::{
+    encode_utf8_string, encode_variable_len_integer, Decode, Encode, MQTTCodecError, PropertyType,
+    QoSLevel, Remaining, PROP_SIZE_U32, PROP_SIZE_U8,
+};
 use bytes::{Buf, BufMut, BytesMut};
-use crate::{Decode, Encode, encode_utf8_string, encode_variable_len_integer, MQTTCodecError, PROP_SIZE_U32, PROP_SIZE_U8, PropertyType, QoSLevel, Remaining};
-use crate::codec::{check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer, encode_binary_data};
+use std::collections::{HashMap, HashSet};
 
 const DEFAULT_WILL_DELAY: u32 = 0;
 
@@ -118,12 +124,11 @@ impl Decode for WillMessage {
                 }
             };
         }
-        self.topic =  decode_utf8_string(src)?;
+        self.topic = decode_utf8_string(src)?;
         self.payload = decode_binary_data(src)?;
         Ok(())
     }
 }
-
 
 impl Encode for WillMessage {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
@@ -154,14 +159,13 @@ impl Encode for WillMessage {
             encode_binary_data(correlation_data, dest)?;
         }
         if let Some(user_properties) = &self.user_property {
-            user_properties.encode(dest);
+            user_properties.encode(dest)?;
         }
         encode_utf8_string(&self.topic, dest)?;
         encode_binary_data(&self.payload, dest)?;
         Ok(())
     }
 }
-
 
 impl Remaining for WillMessage {
     fn size(&self) -> u32 {
@@ -196,6 +200,6 @@ impl Remaining for WillMessage {
     }
 
     fn payload_remaining(&self) -> Option<u32> {
-        Some((self.topic.len() + 2 + self.payload.len()+2) as u32)
+        Some((self.topic.len() + 2 + self.payload.len() + 2) as u32)
     }
 }

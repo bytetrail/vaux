@@ -8,10 +8,10 @@ use crate::codec::{
     PROP_SIZE_U32, PROP_SIZE_U8,
 };
 
-pub use crate::will::WillMessage;
 pub use crate::codec::{MQTTCodec, MQTTCodecError, PacketType, Reason};
 pub use crate::connack::ConnAck;
 pub use crate::connect::Connect;
+pub use crate::will::WillMessage;
 use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;
 
@@ -126,6 +126,18 @@ pub enum Packet {
     Disconnect(FixedHeader),
 }
 
+impl From<&Packet> for PacketType {
+    fn from(p: &Packet) -> Self {
+        match p {
+            Packet::PingRequest(_) => PacketType::PingReq,
+            Packet::PingResponse(_) => PacketType::PingResp,
+            Packet::Connect(_) => PacketType::Connect,
+            Packet::ConnAck(_) => PacketType::ConnAck,
+            Packet::Disconnect(_) => PacketType::Disconnect,
+        }
+    }
+}
+
 #[allow(clippy::enum_variant_names)]
 #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -143,11 +155,13 @@ impl TryFrom<u8> for QoSLevel {
             0x00 => Ok(QoSLevel::AtMostOnce),
             0x01 => Ok(QoSLevel::AtLeastOnce),
             0x02 => Ok(QoSLevel::ExactlyOnce),
-            value => Err(MQTTCodecError::new(&format!("{} is not a value QoSLevel", value))),
+            value => Err(MQTTCodecError::new(&format!(
+                "{} is not a value QoSLevel",
+                value
+            ))),
         }
     }
 }
-
 
 #[cfg(test)]
 mod test {}

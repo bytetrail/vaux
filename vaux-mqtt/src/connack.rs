@@ -214,9 +214,7 @@ impl Encode for ConnAck {
         let mut header = FixedHeader::new(PacketType::ConnAck);
         let prop_remaining = self.property_remaining().unwrap();
         header.set_remaining(
-            VARIABLE_HEADER_LEN
-                + prop_remaining
-                + variable_byte_int_size(prop_remaining),
+            VARIABLE_HEADER_LEN + prop_remaining + variable_byte_int_size(prop_remaining),
         );
         header.encode(dest)?;
         let connack_flag: u8 = if self.session_present { 0x01 } else { 0x00 };
@@ -300,9 +298,9 @@ impl Encode for ConnAck {
 mod test {
     use super::*;
     use crate::codec::PropertyType;
+    use crate::PropertyType::MaxQoS;
     use crate::{Encode, UserPropertyMap};
     use bytes::BytesMut;
-    use crate::PropertyType::MaxQoS;
 
     /// Minimum length CONNACK return
     /// Byte 1 = packet type + flags
@@ -737,7 +735,7 @@ mod test {
         assert_eq!(expected as u8, dest[6]);
     }
 
-    fn test_property (
+    fn test_property(
         connack: ConnAck,
         dest: &mut BytesMut,
         expected_len: u32,

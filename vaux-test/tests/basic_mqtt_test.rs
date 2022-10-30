@@ -1,8 +1,8 @@
 use bytes::BytesMut;
-use uuid::Uuid;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use tokio_util::codec::{Decoder, Encoder};
+use uuid::Uuid;
 use vaux_mqtt::{ConnAck, Connect, FixedHeader, MQTTCodec, Packet, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
@@ -11,15 +11,13 @@ const PING_RESP_LEN: usize = 2;
 const CONNACK_RESP_LEN: usize = 5;
 
 #[test]
-/// This tests expects the basic TCP server to be running on
-/// * Host: 127.0.0.1
-/// * Port: 1883
 fn test_basic_ping() {
     let fixed_header = FixedHeader::new(PacketType::PingResp);
     test_basic(
         Packet::PingRequest(FixedHeader::new(PacketType::PingReq)),
         PING_RESP_LEN,
-        Packet::PingResponse(fixed_header),
+        &Packet::PingResponse(fixed_header),
+        true,
     );
 }
 
@@ -31,11 +29,34 @@ fn test_basic_connect() {
     test_basic(
         Packet::Connect(request),
         CONNACK_RESP_LEN,
-        Packet::ConnAck(ack),
+        &Packet::ConnAck(ack),
+        true,
     );
 }
 
-fn test_basic(request: Packet, expected_len: usize, expected_response: Packet) {
+#[test]
+fn test_broker_assigned_id() {
+    const EXPECTED_CONNACK_LEN: usize = 44;
+    let request = Connect::default();
+    let ack = ConnAck::default();
+    let packet = Packet::ConnAck(ack);
+    let result = test_basic(
+        Packet::Connect(request),
+        EXPECTED_CONNACK_LEN,
+        &packet,
+        false,
+    );
+    if let Some(Packet::ConnAck(ack)) = result {
+        assert!(ack.assigned_client_id.is_some());
+    }
+}
+
+fn test_basic(
+    request: Packet,
+    expected_len: usize,
+    expected_response: &Packet,
+    deep_check: bool,
+) -> Option<Packet> {
     let mut codec = MQTTCodec {};
     match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
         Ok(mut stream) => {
@@ -56,8 +77,13 @@ fn test_basic(request: Packet, expected_len: usize, expected_response: Packet) {
                         let result = codec.decode(&mut BytesMut::from(&buffer[0..len]));
                         match result {
                             Ok(p) => {
-                                if let Some(packet) = p {
-                                    assert_eq!(expected_response, packet);
+                                if let Some(packet) = p.as_ref() {
+                                    if deep_check {
+                                        assert_eq!(expected_response, packet);
+                                    } else {
+                                        let packet_type: PacketType = expected_response.into();
+                                        assert_eq!(packet_type, packet.into());
+                                    }
                                 } else {
                                     assert!(
                                         false,
@@ -65,17 +91,28 @@ fn test_basic(request: Packet, expected_len: usize, expected_response: Packet) {
                                         expected_response
                                     );
                                 }
+                                p
                             }
                             Err(e) => {
                                 assert!(false, "Unexpected error decoding ping response: {:?}", e);
+                                None
                             }
                         }
                     }
-                    Err(e) => assert!(false, "unable to read message from broker: {:?}", e),
+                    Err(e) => {
+                        assert!(false, "unable to read message from broker: {:?}", e);
+                        None
+                    }
                 },
-                Err(e) => assert!(false, "unable to write message to broker: {}", e),
+                Err(e) => {
+                    assert!(false, "unable to write message to broker: {}", e);
+                    None
+                }
             }
         }
-        Err(e) => assert!(false, "Unable to connect to test broker: {}", e.to_string()),
+        Err(e) => {
+            assert!(false, "Unable to connect to test broker: {}", e.to_string());
+            None
+        }
     }
 }
