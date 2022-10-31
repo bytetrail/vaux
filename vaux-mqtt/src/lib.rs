@@ -8,7 +8,7 @@ use crate::codec::{
     PROP_SIZE_U32, PROP_SIZE_U8,
 };
 
-pub use crate::codec::{MQTTCodec, MQTTCodecError, PacketType, Reason};
+pub use crate::codec::{decode_fixed_header, MQTTCodecError, PacketType, Reason};
 pub use crate::connack::ConnAck;
 pub use crate::connect::Connect;
 pub use crate::will::WillMessage;
@@ -18,17 +18,17 @@ use std::collections::HashMap;
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
 pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
 
-pub(crate) trait Remaining {
+pub trait Remaining {
     fn size(&self) -> u32;
     fn property_remaining(&self) -> Option<u32>;
     fn payload_remaining(&self) -> Option<u32>;
 }
 
-pub(crate) trait Encode: Remaining {
+pub trait Encode: Remaining {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError>;
 }
 
-pub(crate) trait Decode {
+pub trait Decode {
     fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError>;
 }
 
@@ -88,6 +88,10 @@ impl FixedHeader {
 
     pub fn packet_type(&self) -> PacketType {
         self.packet_type
+    }
+
+    pub fn flags(&self) -> u8 {
+        self.flags
     }
 
     pub fn set_remaining(&mut self, remaining: u32) {

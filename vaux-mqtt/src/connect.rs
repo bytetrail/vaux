@@ -75,7 +75,7 @@ impl Connect {
         dest.put_u8(flags);
     }
 
-    pub(crate) fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    pub fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
         let len = src.get_u16();
         if len != 0x04 {
             return Err(MQTTCodecError::new(

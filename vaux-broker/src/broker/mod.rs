@@ -1,4 +1,5 @@
 pub(crate) mod session;
+pub(crate) mod codec;
 
 use crate::broker::session::Session;
 use futures::{SinkExt, StreamExt};
@@ -12,7 +13,9 @@ use tokio::sync::RwLock;
 use tokio_util::codec::Framed;
 use uuid::Uuid;
 use vaux_mqtt::Packet::PingResponse;
-use vaux_mqtt::{ConnAck, FixedHeader, MQTTCodec, MQTTCodecError, Packet, PacketType};
+use vaux_mqtt::{ConnAck, FixedHeader, MQTTCodecError, Packet, PacketType};
+
+use self::codec::MQTTCodec;
 
 pub const DEFAULT_PORT: u16 = 1883;
 pub const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
@@ -130,7 +133,12 @@ impl Broker {
                 framed.send(resp).await?;
                 None
             }
-            _ => {
+            _ => {                                
+                let mut header = FixedHeader::new(PacketType::Disconnect);
+                header
+                let disconnect = Packet::Disconnect(header);
+                
+                framed.send(disconnect).await?;
                 return Err(Box::new(MQTTCodecError::new("connect packet not received")));
             }
         };
