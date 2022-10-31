@@ -1,8 +1,8 @@
 use crate::{FixedHeader, PACKET_RESERVED_NONE};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
+use std::default;
 use std::fmt::{Display, Formatter};
-
 
 pub(crate) const PROP_SIZE_U32: u32 = 5;
 pub(crate) const PROP_SIZE_U16: u32 = 3;
@@ -197,8 +197,9 @@ impl Display for PacketType {
 /// packet request. For more information on reason codes see the MQTT Specification,
 /// <https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901031>
 #[repr(u8)]
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+#[derive(Default, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Reason {
+    #[default]
     Success,
     GrantedQoS1,
     GrantedQoS2,
@@ -442,7 +443,6 @@ pub(crate) fn decode_variable_len_integer(src: &mut BytesMut) -> u32 {
     }
     result
 }
-
 
 pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQTTCodecError> {
     if src.remaining() < 2 {

@@ -1,7 +1,8 @@
-use bytes::{BytesMut, BufMut};
+use bytes::{BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
-use vaux_mqtt::{decode_fixed_header, Packet, MQTTCodecError, PacketType, ConnAck, Connect, Decode, Encode};
-
+use vaux_mqtt::{
+    decode_fixed_header, ConnAck, Connect, Decode, Encode, MQTTCodecError, Packet, PacketType,
+};
 
 #[derive(Debug)]
 pub struct MQTTCodec;

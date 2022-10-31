@@ -1,6 +1,7 @@
 mod codec;
 mod connack;
 mod connect;
+mod disconnect;
 mod will;
 
 use crate::codec::{
@@ -11,6 +12,7 @@ use crate::codec::{
 pub use crate::codec::{decode_fixed_header, MQTTCodecError, PacketType, Reason};
 pub use crate::connack::ConnAck;
 pub use crate::connect::Connect;
+pub use crate::disconnect::Disconnect;
 pub use crate::will::WillMessage;
 use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;
@@ -127,7 +129,7 @@ pub enum Packet {
     PingResponse(FixedHeader),
     Connect(Connect),
     ConnAck(ConnAck),
-    Disconnect(FixedHeader),
+    Disconnect(Disconnect),
 }
 
 impl From<&Packet> for PacketType {
