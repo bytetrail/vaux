@@ -1,7 +1,6 @@
 use crate::{FixedHeader, PACKET_RESERVED_NONE};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
-use std::default;
 use std::fmt::{Display, Formatter};
 
 pub(crate) const PROP_SIZE_U32: u32 = 5;
@@ -513,6 +512,7 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQ
 
 #[cfg(test)]
 mod test {
+
     use super::*;
 
     #[test]

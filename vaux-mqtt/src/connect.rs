@@ -38,7 +38,7 @@ pub struct Connect {
     auth_method: Option<String>,
     auth_data: Option<Vec<u8>>,
     will_message: Option<WillMessage>,
-    user_property: Option<UserPropertyMap>,
+    user_props: Option<UserPropertyMap>,
     pub client_id: String,
     username: Option<String>,
     password: Option<Vec<u8>>,
@@ -187,10 +187,10 @@ impl Connect {
                             }
                         }
                     } else {
-                        if self.user_property == None {
-                            self.user_property = Some(HashMap::new());
+                        if self.user_props == None {
+                            self.user_props = Some(HashMap::new());
                         }
-                        let property_map = self.user_property.as_mut().unwrap();
+                        let property_map = self.user_props.as_mut().unwrap();
                         // MQTT v5.0 specification indicates that a key may appear multiple times
                         // this implementation will overwrite existing values with duplicate
                         // keys
@@ -261,7 +261,7 @@ impl crate::Remaining for Connect {
         if !self.problem_info {
             property_remaining += PROP_SIZE_U8
         }
-        if let Some(user_property) = self.user_property.as_ref() {
+        if let Some(user_property) = self.user_props.as_ref() {
             property_remaining += user_property.size();
         }
         if let Some(auth_method) = self.auth_method.as_ref() {
@@ -330,7 +330,7 @@ impl Encode for Connect {
             dest.put_u8(PropertyType::ReqProblemInfo as u8);
             dest.put_u8(1);
         }
-        if let Some(user_properties) = &self.user_property {
+        if let Some(user_properties) = &self.user_props {
             user_properties.encode(dest)?;
         }
         if let Some(auth_method) = &self.auth_method {
@@ -377,7 +377,7 @@ impl Default for Connect {
             auth_method: None,
             auth_data: None,
             will_message: None,
-            user_property: None,
+            user_props: None,
             client_id: "".to_string(),
             username: None,
             password: None,
@@ -573,7 +573,7 @@ mod test {
         let value = "12345".to_string();
         let expected = CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
         user_properties.insert(key, value);
-        connect.user_property = Some(user_properties);
+        connect.user_props = Some(user_properties);
         let remaining = connect.size();
         assert_eq!(
             expected, remaining,
@@ -591,7 +591,7 @@ mod test {
         let value = "567890".to_string();
         expected += key.len() as u32 + value.len() as u32 + PROP_ENCODE;
         user_properties.insert(key, value);
-        connect.user_property = Some(user_properties);
+        connect.user_props = Some(user_properties);
         let remaining = connect.size();
         assert_eq!(
             expected, remaining,
