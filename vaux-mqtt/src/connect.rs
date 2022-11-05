@@ -400,13 +400,13 @@ mod test {
         let mut dest = BytesMut::new();
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
-        assert_eq!(dest[7], CONNECT_FLAG_CLEAN_START);
+        assert_eq!(dest[9], CONNECT_FLAG_CLEAN_START);
         let mut dest = BytesMut::new();
         let password = vec![1, 2, 3, 4, 5];
         connect.password = Some(password);
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
-        assert_eq!(dest[7], CONNECT_FLAG_CLEAN_START | CONNECT_FLAG_PASSWORD);
+        assert_eq!(dest[9], CONNECT_FLAG_CLEAN_START | CONNECT_FLAG_PASSWORD);
     }
 
     #[test]
@@ -417,9 +417,9 @@ mod test {
         let mut dest = BytesMut::new();
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
-        assert!(dest[7] & CONNECT_FLAG_WILL > 0);
-        assert!(dest[7] & CONNECT_FLAG_WILL_RETAIN > 0);
-        let qos_bits = (dest[7] & CONNECT_FLAG_WILL_QOS) >> CONNECT_FLAG_SHIFT;
+        assert!(dest[9] & CONNECT_FLAG_WILL > 0);
+        assert!(dest[9] & CONNECT_FLAG_WILL_RETAIN > 0);
+        let qos_bits = (dest[9] & CONNECT_FLAG_WILL_QOS) >> CONNECT_FLAG_SHIFT;
         let qos_result = QoSLevel::try_from(qos_bits);
         assert!(qos_result.is_ok());
         let qos = qos_result.unwrap();
@@ -433,7 +433,7 @@ mod test {
         let mut dest = BytesMut::new();
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
-        assert_eq!(0xcafe, ((dest[8] as u16) << 8) + dest[9] as u16);
+        assert_eq!(0xcafe, ((dest[10] as u16) << 8) + dest[11] as u16);
     }
 
     #[test]
@@ -507,8 +507,8 @@ mod test {
         let mut dest = BytesMut::new();
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
-        assert_eq!(24, dest.len() as u32, "Packet Size");
-        assert_eq!('1', dest[13] as char)
+        assert_eq!(26, dest.len() as u32, "Packet Size");
+        assert_eq!('1', dest[15] as char)
     }
 
     #[test]
@@ -621,7 +621,7 @@ mod test {
         expected_prop_len: u32,
         property: PropertyType,
     ) {
-        let expected_len = 13 + expected_prop_len;
+        let expected_len = 15 + expected_prop_len;
         let result = connect.encode(dest);
         assert!(result.is_ok());
         assert_eq!(expected_len, dest.len() as u32, "Packet Size");
@@ -630,7 +630,7 @@ mod test {
             connect.property_remaining().unwrap(),
             "Encoded Property Length"
         );
-        assert_eq!(expected_prop_len as u8, dest[10], "Property Length");
-        assert_eq!(property as u8, dest[11], "Property Type");
+        assert_eq!(expected_prop_len as u8, dest[12], "Property Length");
+        assert_eq!(property as u8, dest[13], "Property Type");
     }
 }

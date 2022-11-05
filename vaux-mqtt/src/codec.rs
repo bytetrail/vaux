@@ -1,4 +1,4 @@
-use crate::{FixedHeader, PACKET_RESERVED_NONE};
+use crate::{ConnAck, Connect, Decode, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -332,6 +332,46 @@ impl MQTTCodecError {
     }
 }
 
+pub fn decode(src: &mut BytesMut) -> Result<Option<Packet>, MQTTCodecError> {
+    match decode_fixed_header(src) {
+        Ok(packet_header) => match packet_header {
+            Some(packet_header) => match packet_header.packet_type() {
+                PacketType::PingReq => Ok(Some(Packet::PingRequest(packet_header))),
+                PacketType::PingResp => Ok(Some(Packet::PingResponse(packet_header))),
+                PacketType::Connect => {
+                    let mut connect = Connect::default();
+                    connect.decode(src)?;
+                    Ok(Some(Packet::Connect(connect)))
+                }
+                PacketType::Publish => Ok(None),
+                PacketType::ConnAck => {
+                    let mut connack = ConnAck::default();
+                    connack.decode(src)?;
+                    Ok(Some(Packet::ConnAck(connack)))
+                }
+                _ => Err(MQTTCodecError::new("unsupported packet type")),
+            },
+            None => Ok(None),
+        },
+        Err(e) => Err(e),
+    }
+}
+
+pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    match packet {
+        Packet::Connect(c) => c.encode(dest),
+        Packet::ConnAck(c) => c.encode(dest),
+        Packet::Disconnect(d) => d.encode(dest),
+        Packet::PingRequest(header) | Packet::PingResponse(header) => {
+            dest.put_u8(header.packet_type() as u8 | header.flags());
+            dest.put_u8(0x_00);
+            Ok(())
+        }
+        _ => return Err(MQTTCodecError::new("unsupported packet type")),
+    }?;
+    Ok(())
+}
+
 /// Returns the length of an encoded MQTT variable length unsigned int
 pub(crate) fn variable_byte_int_size(value: u32) -> u32 {
     match value {
@@ -512,7 +552,6 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQ
 
 #[cfg(test)]
 mod test {
-
     use super::*;
 
     #[test]

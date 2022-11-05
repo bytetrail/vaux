@@ -44,6 +44,7 @@ impl Encoder<Packet> for MQTTCodec {
         match packet {
             Packet::Connect(c) => c.encode(dest),
             Packet::ConnAck(c) => c.encode(dest),
+            Packet::Disconnect(d) => d.encode(dest),
             Packet::PingRequest(header) | Packet::PingResponse(header) => {
                 dest.put_u8(header.packet_type() as u8 | header.flags());
                 dest.put_u8(0x_00);

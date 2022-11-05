@@ -9,7 +9,7 @@ use crate::codec::{
     PROP_SIZE_U32, PROP_SIZE_U8,
 };
 
-pub use crate::codec::{decode_fixed_header, MQTTCodecError, PacketType, Reason};
+pub use crate::codec::{decode, decode_fixed_header, encode, MQTTCodecError, PacketType, Reason};
 pub use crate::connack::ConnAck;
 pub use crate::connect::Connect;
 pub use crate::disconnect::Disconnect;

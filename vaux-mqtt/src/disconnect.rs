@@ -1,8 +1,13 @@
 use std::io::Read;
 
-use bytes::{BufMut, Buf};
+use bytes::{Buf, BufMut};
 
-use crate::{codec::{variable_byte_int_size, PROP_SIZE_U32, encode_variable_len_integer, encode_utf8_string}, Decode, Encode, Reason, Remaining, UserPropertyMap, FixedHeader, PacketType};
+use crate::{
+    codec::{
+        encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_U32,
+    },
+    Decode, Encode, FixedHeader, PacketType, Reason, Remaining, UserPropertyMap,
+};
 
 const DEFAULT_DISCONNECT_REMAINING: u32 = 1;
 
@@ -48,7 +53,7 @@ impl Remaining for Disconnect {
             remaining += props.size();
         }
         self.server_ref.as_ref().map_or(0, |r| 2 + r.len());
-       Some(remaining)
+        Some(remaining)
     }
 
     /// The Disconnect packet does not have a payload. None is returned
@@ -61,7 +66,9 @@ impl Encode for Disconnect {
     fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
         let mut header = FixedHeader::new(PacketType::Disconnect);
         let prop_remaining = self.property_remaining().unwrap();
-        header.remaining = DEFAULT_DISCONNECT_REMAINING + variable_byte_int_size(prop_remaining) + DEFAULT_DISCONNECT_REMAINING;
+        header.remaining = DEFAULT_DISCONNECT_REMAINING
+            + variable_byte_int_size(prop_remaining)
+            + DEFAULT_DISCONNECT_REMAINING;
         if self.reason == Reason::Success && prop_remaining == 0 {
             header.remaining = 0;
             header.encode(dest)?;
@@ -93,12 +100,22 @@ impl Decode for Disconnect {
     }
 }
 
-
 #[cfg(test)]
 mod test {
+    use bytes::BytesMut;
+
+    use super::*;
 
     #[test]
     fn test_no_remaining() {
-        
+        let disconnect = Disconnect::new(Reason::Success);
+        let mut dest = BytesMut::new();
+        match disconnect.encode(&mut dest) {
+            Ok(_) => {
+                assert_eq!(2 as usize, dest.len());
+                assert_eq!(0, dest[1]);
+            }
+            Err(e) => panic!("Unexpected encoding error {:?}", e.to_string()),
+        }
     }
 }
