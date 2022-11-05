@@ -1,6 +1,8 @@
-use bytes::BufMut;
+use std::io::Read;
 
-use crate::{codec::{variable_byte_int_size, PROP_SIZE_U32, encode_variable_len_integer}, Decode, Encode, Reason, Remaining, UserPropertyMap, FixedHeader, PacketType};
+use bytes::{BufMut, Buf};
+
+use crate::{codec::{variable_byte_int_size, PROP_SIZE_U32, encode_variable_len_integer, encode_utf8_string}, Decode, Encode, Reason, Remaining, UserPropertyMap, FixedHeader, PacketType};
 
 const DEFAULT_DISCONNECT_REMAINING: u32 = 1;
 
@@ -45,6 +47,7 @@ impl Remaining for Disconnect {
         if let Some(props) = self.user_props.as_ref() {
             remaining += props.size();
         }
+        self.server_ref.as_ref().map_or(0, |r| 2 + r.len());
        Some(remaining)
     }
 
@@ -58,21 +61,44 @@ impl Encode for Disconnect {
     fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
         let mut header = FixedHeader::new(PacketType::Disconnect);
         let prop_remaining = self.property_remaining().unwrap();
-        if self.reason == Reason::Success {
-            dest.put_u8(0);
-
+        header.remaining = DEFAULT_DISCONNECT_REMAINING + variable_byte_int_size(prop_remaining) + DEFAULT_DISCONNECT_REMAINING;
+        if self.reason == Reason::Success && prop_remaining == 0 {
+            header.remaining = 0;
+            header.encode(dest)?;
+            return Ok(());
         }
+        header.encode(dest)?;
         let reason = self.reason as u8;
-    
         dest.put_u8(reason);
-
-
+        if let Some(user_props) = &self.user_props {
+            user_props.encode(dest)?;
+        }
+        if let Some(server_ref) = self.server_ref.as_ref() {
+            encode_utf8_string(server_ref, dest)?;
+        }
         Ok(())
     }
 }
 
 impl Decode for Disconnect {
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
-        todo!()
+        let len = src.get_u16();
+        // MQTT v5 specification 3.14.2.1
+        if len == 0 {
+            self.reason = Reason::Success;
+            return Ok(());
+        }
+        self.reason = Reason::try_from(src.get_u8())?;
+        Ok(())
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+
+    #[test]
+    fn test_no_remaining() {
+        
     }
 }
