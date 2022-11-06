@@ -54,9 +54,9 @@ impl UserPropertyMap {
         let v = value.to_owned();
         if self.map.contains_key(key) {
             self.map
-                .get_mut(key.clone())
+                .get_mut(key)
                 .unwrap()
-                .push(value.clone().to_string());
+                .push(value.to_string());
         } else {
             let mut v: Vec<String> = Vec::new();
             v.push(value.to_string());
