@@ -2,7 +2,7 @@ use bytes::BytesMut;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use uuid::Uuid;
-use vaux_mqtt::{ConnAck, Connect, FixedHeader, Packet, PacketType, encode, decode};
+use vaux_mqtt::{decode, encode, ConnAck, Connect, FixedHeader, Packet, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_HOST: &'static str = "127.0.0.1";

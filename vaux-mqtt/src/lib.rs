@@ -34,13 +34,49 @@ pub trait Decode {
     fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError>;
 }
 
-type UserPropertyMap = HashMap<String, String>;
+#[derive(Debug, Clone, PartialEq)]
+pub struct UserPropertyMap {
+    map: HashMap<String, Vec<String>>,
+}
+
+impl UserPropertyMap {
+    pub fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+
+    pub fn map(&self) -> &HashMap<String, Vec<String>> {
+        &self.map
+    }
+
+    pub fn add_property(&mut self, key: &str, value: &str) {
+        let v = value.to_owned();
+        if self.map.contains_key(key) {
+            self.map
+                .get_mut(key.clone())
+                .unwrap()
+                .push(value.clone().to_string());
+        } else {
+            let mut v: Vec<String> = Vec::new();
+            v.push(value.to_string());
+            self.map.insert(key.to_string(), v);
+        }
+    }
+
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.map.contains_key(key)
+    }
+}
 
 impl crate::Remaining for UserPropertyMap {
     fn size(&self) -> u32 {
         let mut remaining: u32 = 0;
-        for (key, value) in self.iter() {
-            remaining += key.len() as u32 + 2 + value.len() as u32 + 3;
+        for (key, value) in self.map.iter() {
+            let key_len = key.len() as u32 + 2;
+            for v in value {
+                remaining += key_len + v.len() as u32 + 3;
+            }
         }
         remaining
     }
@@ -56,10 +92,12 @@ impl crate::Remaining for UserPropertyMap {
 
 impl Encode for UserPropertyMap {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        for (k, v) in self.iter() {
-            dest.put_u8(PropertyType::UserProperty as u8);
-            encode_utf8_string(k, dest)?;
-            encode_utf8_string(v, dest)?;
+        for (k, v) in self.map.iter() {
+            for v in &self.map[k] {
+                dest.put_u8(PropertyType::UserProperty as u8);
+                encode_utf8_string(k, dest)?;
+                encode_utf8_string(&v, dest)?;
+            }
         }
         Ok(())
     }

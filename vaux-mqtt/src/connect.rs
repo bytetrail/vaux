@@ -188,15 +188,12 @@ impl Connect {
                         }
                     } else {
                         if self.user_props == None {
-                            self.user_props = Some(HashMap::new());
+                            self.user_props = Some(UserPropertyMap::new());
                         }
                         let property_map = self.user_props.as_mut().unwrap();
-                        // MQTT v5.0 specification indicates that a key may appear multiple times
-                        // this implementation will overwrite existing values with duplicate
-                        // keys
                         let key = decode_utf8_string(src)?;
                         let value = decode_utf8_string(src)?;
-                        property_map.insert(key, value);
+                        property_map.add_property(&key, &value);
                     }
                 }
                 Err(e) => return Err(e),
@@ -569,10 +566,10 @@ mod test {
         let mut connect = Connect::default();
 
         let mut user_properties = UserPropertyMap::new();
-        let key = "12335".to_string();
-        let value = "12345".to_string();
+        let key = "12335";
+        let value = "12345";
         let expected = CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
-        user_properties.insert(key, value);
+        user_properties.add_property(key, value);
         connect.user_props = Some(user_properties);
         let remaining = connect.size();
         assert_eq!(
@@ -586,11 +583,11 @@ mod test {
         let value = "12345".to_string();
         let mut expected =
             CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
-        user_properties.insert(key, value);
+        user_properties.add_property(&key, &value);
         let key = "567890".to_string();
         let value = "567890".to_string();
         expected += key.len() as u32 + value.len() as u32 + PROP_ENCODE;
-        user_properties.insert(key, value);
+        user_properties.add_property(&key, &value);
         connect.user_props = Some(user_properties);
         let remaining = connect.size();
         assert_eq!(

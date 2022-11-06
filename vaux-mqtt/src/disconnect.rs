@@ -1,12 +1,16 @@
-use std::{io::Read, collections::{HashSet, HashMap}};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Read,
+};
 
 use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     codec::{
-        encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_U32, decode_variable_len_integer, PropertyType, check_property,
+        check_property, decode_utf8_string, decode_variable_len_integer, encode_utf8_string,
+        encode_variable_len_integer, variable_byte_int_size, PropertyType, PROP_SIZE_U32,
     },
-    Decode, Encode, FixedHeader, PacketType, Reason, Remaining, UserPropertyMap, MQTTCodecError,
+    Decode, Encode, FixedHeader, MQTTCodecError, PacketType, Reason, Remaining, UserPropertyMap,
 };
 
 const DEFAULT_DISCONNECT_REMAINING: u32 = 1;
@@ -42,13 +46,13 @@ impl Disconnect {
                         check_property(property_type, &mut properties)?;
                         match property_type {
                             PropertyType::SessionExpiryInt => {
-
+                                self.session_expiry = Some(src.get_u32())
                             }
                             PropertyType::Reason => {
-
+                                self.reason_desc = Some(decode_utf8_string(src)?)
                             }
                             PropertyType::ServerRef => {
-
+                                self.server_ref = Some(decode_utf8_string(src)?)
                             }
                             val => {
                                 return Err(MQTTCodecError::new(&format!(
@@ -59,8 +63,12 @@ impl Disconnect {
                         }
                     } else {
                         if self.user_props == None {
-                            self.user_props = Some(HashMap::new());
+                            self.user_props = Some(UserPropertyMap::new());
                         }
+                        let property_map = self.user_props.as_mut().unwrap();
+                        let key = decode_utf8_string(src)?;
+                        let value = decode_utf8_string(src)?;
+                        property_map.add_property(&key, &value);
                     }
                 }
                 Err(e) => return Err(e),
@@ -138,6 +146,8 @@ impl Decode for Disconnect {
             return Ok(());
         }
         self.reason = Reason::try_from(src.get_u8())?;
+        self.decode_properties(src)?;
+
         Ok(())
     }
 }
@@ -176,7 +186,6 @@ mod test {
 
     #[test]
     fn test_server_ref() {
-
         const SERVER_REF: &'static str = "bytetrail.org";
         let mut disconnect = Disconnect::new(Reason::ServerMoved);
         disconnect.server_ref = Some(SERVER_REF.to_string());

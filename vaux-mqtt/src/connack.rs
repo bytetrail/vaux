@@ -51,15 +51,12 @@ impl ConnAck {
                         self.decode_property(property_type, src)?;
                     } else {
                         if self.user_properties == None {
-                            self.user_properties = Some(HashMap::new());
+                            self.user_properties = Some(UserPropertyMap::new());
                         }
                         let property_map = self.user_properties.as_mut().unwrap();
-                        // MQTT v5.0 specification indicates that a key may appear multiple times
-                        // this implementation will overwrite existing values with duplicate
-                        // keys
                         let key = decode_utf8_string(src)?;
                         let value = decode_utf8_string(src)?;
-                        property_map.insert(key, value);
+                        property_map.add_property(&key, &value);
                     }
                 }
                 Err(_) => return Err(MQTTCodecError::new("invalid property type")),
@@ -571,12 +568,17 @@ mod test {
     #[test]
     fn test_encode_user_properties() {
         let mut properties = UserPropertyMap::new();
-        properties.insert("broker_id".to_string(), "vaux".to_string());
-        properties.insert("broker_version".to_string(), "0.1.0".to_string());
+        properties.add_property("broker_id", "vaux");
+        properties.add_property("broker_version", "0.1.0");
         let mut prop_len = 0;
-        for (k, v) in properties.iter() {
-            prop_len += k.len() + v.len() + 5
+        for (k, value) in properties.map() {
+            let key_len = k.len() as u32 + 2;
+            for v in value {
+                prop_len += key_len + v.len() as u32 + 3;
+            }
         }
+        println!("Property len() {}", prop_len);
+        println!("User property remaining {}", properties.size());
         let expected_len = EXPECTED_MIN_CONNACK_LEN as u32 + prop_len as u32;
         let expected_prop_len = prop_len as u32;
         let mut dest = BytesMut::new();
@@ -594,8 +596,8 @@ mod test {
     #[test]
     fn test_decode_user_properties() {
         let mut properties = UserPropertyMap::new();
-        properties.insert("broker_id".to_string(), "vaux".to_string());
-        properties.insert("broker_version".to_string(), "0.1.0".to_string());
+        properties.add_property("broker_id", "vaux");
+        properties.add_property("broker_version", "0.1.0");
         let mut connack = ConnAck::default();
         connack.user_properties = Some(properties);
         let mut buf = BytesMut::new();

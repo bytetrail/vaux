@@ -4,7 +4,7 @@ use crate::codec::{
 };
 use crate::{
     encode_utf8_string, encode_variable_len_integer, Decode, Encode, MQTTCodecError, PropertyType,
-    QoSLevel, Remaining, PROP_SIZE_U32, PROP_SIZE_U8,
+    QoSLevel, Remaining, UserPropertyMap, PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::{HashMap, HashSet};
@@ -33,7 +33,7 @@ pub struct WillMessage {
     pub response_topic: Option<String>,
     pub is_request: bool,
     pub correlation_data: Option<Vec<u8>>,
-    pub user_property: Option<HashMap<String, String>>,
+    pub user_property: Option<UserPropertyMap>,
 }
 
 impl WillMessage {
@@ -102,12 +102,12 @@ impl Decode for WillMessage {
                     }
                     PropertyType::UserProperty => {
                         if self.user_property == None {
-                            self.user_property = Some(HashMap::new());
+                            self.user_property = Some(UserPropertyMap::new());
                         }
                         let property_map = self.user_property.as_mut().unwrap();
                         let key = decode_utf8_string(src)?;
                         let value = decode_utf8_string(src)?;
-                        property_map.insert(key, value);
+                        property_map.add_property(&key, &value);
                     }
                     err => {
                         return Err(MQTTCodecError::new(&format!(
