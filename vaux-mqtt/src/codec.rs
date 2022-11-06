@@ -49,7 +49,7 @@ pub enum PropertyType {
     ResponseTopic = 0x08,
     CorrelationData = 0x09,
     SubscriptionId = 0x0b,
-    SessionExpiry = 0x11,
+    SessionExpiryInt = 0x11,
     AssignedClientId = 0x12,
     KeepAlive = 0x13,
     AuthMethod = 0x15,
@@ -81,7 +81,7 @@ impl Display for PropertyType {
             PropertyType::ResponseTopic => write!(f, "\"Response Topic\""),
             PropertyType::CorrelationData => write!(f, "\"Correlation Data\""),
             PropertyType::SubscriptionId => write!(f, "\"Subscription Identifier\""),
-            PropertyType::SessionExpiry => write!(f, "\"Session Expiry Interval\""),
+            PropertyType::SessionExpiryInt => write!(f, "\"Session Expiry Interval\""),
             PropertyType::AssignedClientId => write!(f, "\"Assigned Client Identifier\""),
             PropertyType::KeepAlive => write!(f, "\"Server Keep Alive\""),
             PropertyType::AuthMethod => write!(f, "\"Authentication Method\""),
@@ -117,7 +117,7 @@ impl TryFrom<u8> for PropertyType {
             0x08 => Ok(PropertyType::ResponseTopic),
             0x09 => Ok(PropertyType::CorrelationData),
             0x0b => Ok(PropertyType::SubscriptionId),
-            0x11 => Ok(PropertyType::SessionExpiry),
+            0x11 => Ok(PropertyType::SessionExpiryInt),
             0x12 => Ok(PropertyType::AssignedClientId),
             0x13 => Ok(PropertyType::KeepAlive),
             0x15 => Ok(PropertyType::AuthMethod),
@@ -138,7 +138,7 @@ impl TryFrom<u8> for PropertyType {
             0x28 => Ok(PropertyType::WildcardSubAvail),
             0x29 => Ok(PropertyType::SubIdAvail),
             0x2a => Ok(PropertyType::ShardSubAvail),
-            _ => Err(MQTTCodecError::new("unexpected property type value")),
+            _ => Err(MQTTCodecError::new("invalid property type value")),
         }
     }
 }

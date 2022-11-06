@@ -122,7 +122,7 @@ impl Connect {
                     if property_type != PropertyType::UserProperty {
                         check_property(property_type, &mut properties)?;
                         match property_type {
-                            PropertyType::SessionExpiry => {
+                            PropertyType::SessionExpiryInt => {
                                 self.session_expiry_interval = Some(src.get_u32());
                             }
                             PropertyType::RecvMax => {
@@ -199,7 +199,7 @@ impl Connect {
                         property_map.insert(key, value);
                     }
                 }
-                Err(_) => return Err(MQTTCodecError::new("invalid property type")),
+                Err(e) => return Err(e),
             };
             if src.remaining() < read_until {
                 return Err(MQTTCodecError::new(
@@ -307,7 +307,7 @@ impl Encode for Connect {
         dest.put_u16(self.keep_alive);
         encode_variable_len_integer(prop_remaining, dest);
         if let Some(expiry) = self.session_expiry_interval {
-            dest.put_u8(PropertyType::SessionExpiry as u8);
+            dest.put_u8(PropertyType::SessionExpiryInt as u8);
             dest.put_u32(expiry);
         }
         if self.receive_max != DEFAULT_RECEIVE_MAX {
@@ -441,7 +441,7 @@ mod test {
         let mut connect = Connect::default();
         connect.session_expiry_interval = Some(0xcafe);
         let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 5, PropertyType::SessionExpiry);
+        test_property(connect, &mut dest, 5, PropertyType::SessionExpiryInt);
     }
 
     #[test]

@@ -79,7 +79,7 @@ impl ConnAck {
         src: &mut BytesMut,
     ) -> Result<(), MQTTCodecError> {
         match property_type {
-            PropertyType::SessionExpiry => self.expiry_interval = Some(src.get_u32()),
+            PropertyType::SessionExpiryInt => self.expiry_interval = Some(src.get_u32()),
             PropertyType::RecvMax => self.receive_max = src.get_u16(),
             PropertyType::MaxQoS => self.max_qos = QoSLevel::try_from(src.get_u8())?,
             PropertyType::RetainAvail => self.retain_avail = decode_prop_bool(src)?,
@@ -224,7 +224,7 @@ impl Encode for ConnAck {
         dest.reserve(prop_remaining as usize);
         encode_variable_len_integer(prop_remaining, dest);
         if let Some(expiry) = self.expiry_interval {
-            dest.put_u8(PropertyType::SessionExpiry as u8);
+            dest.put_u8(PropertyType::SessionExpiryInt as u8);
             dest.put_u32(expiry);
         }
         if self.receive_max != DEFAULT_RECV_MAX {
@@ -335,7 +335,7 @@ mod test {
             &mut dest,
             EXPECTED_LEN,
             EXPECTED_PROP_LEN,
-            PropertyType::SessionExpiry,
+            PropertyType::SessionExpiryInt,
         );
         // 0x00000101 in bytes 6-9
         assert_eq!(1, dest[8]);
@@ -351,7 +351,7 @@ mod test {
             0x00,
             0x00,
             0x05,
-            PropertyType::SessionExpiry as u8,
+            PropertyType::SessionExpiryInt as u8,
             0x00,
             0x00,
             0x10,

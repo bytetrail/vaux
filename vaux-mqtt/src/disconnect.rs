@@ -1,12 +1,12 @@
-use std::io::Read;
+use std::{io::Read, collections::{HashSet, HashMap}};
 
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     codec::{
-        encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_U32,
+        encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_U32, decode_variable_len_integer, PropertyType, check_property,
     },
-    Decode, Encode, FixedHeader, PacketType, Reason, Remaining, UserPropertyMap,
+    Decode, Encode, FixedHeader, PacketType, Reason, Remaining, UserPropertyMap, MQTTCodecError,
 };
 
 const DEFAULT_DISCONNECT_REMAINING: u32 = 1;
@@ -29,6 +29,45 @@ impl Disconnect {
             server_ref: None,
             user_props: None,
         }
+    }
+
+    fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        let prop_size = decode_variable_len_integer(src);
+        let read_until = src.remaining() - prop_size as usize;
+        let mut properties: HashSet<PropertyType> = HashSet::new();
+        while src.remaining() > read_until {
+            match PropertyType::try_from(src.get_u8()) {
+                Ok(property_type) => {
+                    if property_type != PropertyType::UserProperty {
+                        check_property(property_type, &mut properties)?;
+                        match property_type {
+                            PropertyType::SessionExpiryInt => {
+
+                            }
+                            PropertyType::Reason => {
+
+                            }
+                            PropertyType::ServerRef => {
+
+                            }
+                            val => {
+                                return Err(MQTTCodecError::new(&format!(
+                                    "unexpected property type: {}",
+                                    val
+                                )))
+                            }
+                        }
+                    } else {
+                        if self.user_props == None {
+                            self.user_props = Some(HashMap::new());
+                        }
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -77,6 +116,9 @@ impl Encode for Disconnect {
         header.encode(dest)?;
         let reason = self.reason as u8;
         dest.put_u8(reason);
+        if let Some(reason_desc) = self.reason_desc.as_ref() {
+            encode_utf8_string(reason_desc, dest)?;
+        }
         if let Some(user_props) = &self.user_props {
             user_props.encode(dest)?;
         }
@@ -114,6 +156,34 @@ mod test {
             Ok(_) => {
                 assert_eq!(2 as usize, dest.len());
                 assert_eq!(0, dest[1]);
+            }
+            Err(e) => panic!("Unexpected encoding error {:?}", e.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_reason_desc() {
+        let mut disconnect = Disconnect::new(Reason::ImplementationErr);
+        disconnect.reason_desc = Some("failed".to_string());
+        let mut dest = BytesMut::new();
+        match disconnect.encode(&mut dest) {
+            Ok(_) => {
+                assert_eq!("failed".len() + 5 as usize, dest.len());
+            }
+            Err(e) => panic!("Unexpected encoding error {:?}", e.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_server_ref() {
+
+        const SERVER_REF: &'static str = "bytetrail.org";
+        let mut disconnect = Disconnect::new(Reason::ServerMoved);
+        disconnect.server_ref = Some(SERVER_REF.to_string());
+        let mut dest = BytesMut::new();
+        match disconnect.encode(&mut dest) {
+            Ok(_) => {
+                assert_eq!(SERVER_REF.len() + 5 as usize, dest.len());
             }
             Err(e) => panic!("Unexpected encoding error {:?}", e.to_string()),
         }
