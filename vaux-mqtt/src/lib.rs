@@ -1,6 +1,7 @@
 mod codec;
 mod connack;
 mod connect;
+mod disconnect;
 mod will;
 
 use crate::codec::{
@@ -8,9 +9,10 @@ use crate::codec::{
     PROP_SIZE_U32, PROP_SIZE_U8,
 };
 
-pub use crate::codec::{decode_fixed_header, MQTTCodecError, PacketType, Reason};
+pub use crate::codec::{decode, decode_fixed_header, encode, MQTTCodecError, PacketType, Reason};
 pub use crate::connack::ConnAck;
 pub use crate::connect::Connect;
+pub use crate::disconnect::Disconnect;
 pub use crate::will::WillMessage;
 use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;
@@ -32,13 +34,49 @@ pub trait Decode {
     fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError>;
 }
 
-type UserPropertyMap = HashMap<String, String>;
+#[derive(Debug, Clone, PartialEq)]
+pub struct UserPropertyMap {
+    map: HashMap<String, Vec<String>>,
+}
+
+impl UserPropertyMap {
+    pub fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+
+    pub fn map(&self) -> &HashMap<String, Vec<String>> {
+        &self.map
+    }
+
+    pub fn add_property(&mut self, key: &str, value: &str) {
+        let v = value.to_owned();
+        if self.map.contains_key(key) {
+            self.map
+                .get_mut(key)
+                .unwrap()
+                .push(value.to_string());
+        } else {
+            let mut v: Vec<String> = Vec::new();
+            v.push(value.to_string());
+            self.map.insert(key.to_string(), v);
+        }
+    }
+
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.map.contains_key(key)
+    }
+}
 
 impl crate::Remaining for UserPropertyMap {
     fn size(&self) -> u32 {
         let mut remaining: u32 = 0;
-        for (key, value) in self.iter() {
-            remaining += key.len() as u32 + 2 + value.len() as u32 + 3;
+        for (key, value) in self.map.iter() {
+            let key_len = key.len() as u32 + 2;
+            for v in value {
+                remaining += key_len + v.len() as u32 + 3;
+            }
         }
         remaining
     }
@@ -54,10 +92,12 @@ impl crate::Remaining for UserPropertyMap {
 
 impl Encode for UserPropertyMap {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        for (k, v) in self.iter() {
-            dest.put_u8(PropertyType::UserProperty as u8);
-            encode_utf8_string(k, dest)?;
-            encode_utf8_string(v, dest)?;
+        for (k, v) in self.map.iter() {
+            for v in &self.map[k] {
+                dest.put_u8(PropertyType::UserProperty as u8);
+                encode_utf8_string(k, dest)?;
+                encode_utf8_string(&v, dest)?;
+            }
         }
         Ok(())
     }
@@ -127,7 +167,7 @@ pub enum Packet {
     PingResponse(FixedHeader),
     Connect(Connect),
     ConnAck(ConnAck),
-    Disconnect(FixedHeader),
+    Disconnect(Disconnect),
 }
 
 impl From<&Packet> for PacketType {

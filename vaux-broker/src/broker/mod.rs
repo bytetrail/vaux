@@ -1,5 +1,5 @@
-pub(crate) mod session;
 pub(crate) mod codec;
+pub(crate) mod session;
 
 use crate::broker::session::Session;
 use futures::{SinkExt, StreamExt};
@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 use tokio_util::codec::Framed;
 use uuid::Uuid;
 use vaux_mqtt::Packet::PingResponse;
-use vaux_mqtt::{ConnAck, FixedHeader, MQTTCodecError, Packet, PacketType};
+use vaux_mqtt::{ConnAck, Disconnect, FixedHeader, MQTTCodecError, Packet, PacketType, Reason};
 
 use self::codec::MQTTCodec;
 
@@ -133,11 +133,10 @@ impl Broker {
                 framed.send(resp).await?;
                 None
             }
-            _ => {                                
-                let mut header = FixedHeader::new(PacketType::Disconnect);
-                header
+            _ => {
+                let mut header = Disconnect::new(Reason::ProtocolErr);
                 let disconnect = Packet::Disconnect(header);
-                
+
                 framed.send(disconnect).await?;
                 return Err(Box::new(MQTTCodecError::new("connect packet not received")));
             }

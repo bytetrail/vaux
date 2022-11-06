@@ -1,8 +1,7 @@
-use crate::{FixedHeader, PACKET_RESERVED_NONE};
+use crate::{ConnAck, Connect, Decode, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
-
 
 pub(crate) const PROP_SIZE_U32: u32 = 5;
 pub(crate) const PROP_SIZE_U16: u32 = 3;
@@ -50,7 +49,7 @@ pub enum PropertyType {
     ResponseTopic = 0x08,
     CorrelationData = 0x09,
     SubscriptionId = 0x0b,
-    SessionExpiry = 0x11,
+    SessionExpiryInt = 0x11,
     AssignedClientId = 0x12,
     KeepAlive = 0x13,
     AuthMethod = 0x15,
@@ -82,7 +81,7 @@ impl Display for PropertyType {
             PropertyType::ResponseTopic => write!(f, "\"Response Topic\""),
             PropertyType::CorrelationData => write!(f, "\"Correlation Data\""),
             PropertyType::SubscriptionId => write!(f, "\"Subscription Identifier\""),
-            PropertyType::SessionExpiry => write!(f, "\"Session Expiry Interval\""),
+            PropertyType::SessionExpiryInt => write!(f, "\"Session Expiry Interval\""),
             PropertyType::AssignedClientId => write!(f, "\"Assigned Client Identifier\""),
             PropertyType::KeepAlive => write!(f, "\"Server Keep Alive\""),
             PropertyType::AuthMethod => write!(f, "\"Authentication Method\""),
@@ -118,7 +117,7 @@ impl TryFrom<u8> for PropertyType {
             0x08 => Ok(PropertyType::ResponseTopic),
             0x09 => Ok(PropertyType::CorrelationData),
             0x0b => Ok(PropertyType::SubscriptionId),
-            0x11 => Ok(PropertyType::SessionExpiry),
+            0x11 => Ok(PropertyType::SessionExpiryInt),
             0x12 => Ok(PropertyType::AssignedClientId),
             0x13 => Ok(PropertyType::KeepAlive),
             0x15 => Ok(PropertyType::AuthMethod),
@@ -139,7 +138,7 @@ impl TryFrom<u8> for PropertyType {
             0x28 => Ok(PropertyType::WildcardSubAvail),
             0x29 => Ok(PropertyType::SubIdAvail),
             0x2a => Ok(PropertyType::ShardSubAvail),
-            _ => Err(MQTTCodecError::new("unexpected property type value")),
+            _ => Err(MQTTCodecError::new("invalid property type value")),
         }
     }
 }
@@ -197,8 +196,9 @@ impl Display for PacketType {
 /// packet request. For more information on reason codes see the MQTT Specification,
 /// <https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901031>
 #[repr(u8)]
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
+#[derive(Default, Debug, Eq, PartialEq, Copy, Clone)]
 pub enum Reason {
+    #[default]
     Success,
     GrantedQoS1,
     GrantedQoS2,
@@ -332,6 +332,46 @@ impl MQTTCodecError {
     }
 }
 
+pub fn decode(src: &mut BytesMut) -> Result<Option<Packet>, MQTTCodecError> {
+    match decode_fixed_header(src) {
+        Ok(packet_header) => match packet_header {
+            Some(packet_header) => match packet_header.packet_type() {
+                PacketType::PingReq => Ok(Some(Packet::PingRequest(packet_header))),
+                PacketType::PingResp => Ok(Some(Packet::PingResponse(packet_header))),
+                PacketType::Connect => {
+                    let mut connect = Connect::default();
+                    connect.decode(src)?;
+                    Ok(Some(Packet::Connect(connect)))
+                }
+                PacketType::Publish => Ok(None),
+                PacketType::ConnAck => {
+                    let mut connack = ConnAck::default();
+                    connack.decode(src)?;
+                    Ok(Some(Packet::ConnAck(connack)))
+                }
+                _ => Err(MQTTCodecError::new("unsupported packet type")),
+            },
+            None => Ok(None),
+        },
+        Err(e) => Err(e),
+    }
+}
+
+pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    match packet {
+        Packet::Connect(c) => c.encode(dest),
+        Packet::ConnAck(c) => c.encode(dest),
+        Packet::Disconnect(d) => d.encode(dest),
+        Packet::PingRequest(header) | Packet::PingResponse(header) => {
+            dest.put_u8(header.packet_type() as u8 | header.flags());
+            dest.put_u8(0x_00);
+            Ok(())
+        }
+        _ => return Err(MQTTCodecError::new("unsupported packet type")),
+    }?;
+    Ok(())
+}
+
 /// Returns the length of an encoded MQTT variable length unsigned int
 pub(crate) fn variable_byte_int_size(value: u32) -> u32 {
     match value {
@@ -442,7 +482,6 @@ pub(crate) fn decode_variable_len_integer(src: &mut BytesMut) -> u32 {
     }
     result
 }
-
 
 pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQTTCodecError> {
     if src.remaining() < 2 {

@@ -1,9 +1,8 @@
 use bytes::BytesMut;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use tokio_util::codec::{Decoder, Encoder};
 use uuid::Uuid;
-use vaux_mqtt::{ConnAck, Connect, FixedHeader, MQTTCodec, Packet, PacketType};
+use vaux_mqtt::{decode, encode, ConnAck, Connect, FixedHeader, Packet, PacketType};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_HOST: &'static str = "127.0.0.1";
@@ -57,12 +56,11 @@ fn test_basic(
     expected_response: &Packet,
     deep_check: bool,
 ) -> Option<Packet> {
-    let mut codec = MQTTCodec {};
     match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
         Ok(mut stream) => {
             let mut buffer = [0u8; 128];
             let mut dest = BytesMut::new();
-            let result = codec.encode(request.clone(), &mut dest);
+            let result = encode(request.clone(), &mut dest);
             if let Err(e) = result {
                 assert!(false, "Failed to encode packet: {:?}", e);
             }
@@ -74,7 +72,7 @@ fn test_basic(
                             "expected {} bytes in response",
                             expected_len
                         );
-                        let result = codec.decode(&mut BytesMut::from(&buffer[0..len]));
+                        let result = decode(&mut BytesMut::from(&buffer[0..len]));
                         match result {
                             Ok(p) => {
                                 if let Some(packet) = p.as_ref() {

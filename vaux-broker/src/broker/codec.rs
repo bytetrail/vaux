@@ -1,7 +1,8 @@
-use bytes::{BytesMut, BufMut};
+use bytes::{BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
-use vaux_mqtt::{decode_fixed_header, Packet, MQTTCodecError, PacketType, ConnAck, Connect, Decode, Encode};
-
+use vaux_mqtt::{
+    decode_fixed_header, ConnAck, Connect, Decode, Encode, MQTTCodecError, Packet, PacketType,
+};
 
 #[derive(Debug)]
 pub struct MQTTCodec;
@@ -43,6 +44,7 @@ impl Encoder<Packet> for MQTTCodec {
         match packet {
             Packet::Connect(c) => c.encode(dest),
             Packet::ConnAck(c) => c.encode(dest),
+            Packet::Disconnect(d) => d.encode(dest),
             Packet::PingRequest(header) | Packet::PingResponse(header) => {
                 dest.put_u8(header.packet_type() as u8 | header.flags());
                 dest.put_u8(0x_00);

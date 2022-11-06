@@ -38,7 +38,7 @@ pub struct Connect {
     auth_method: Option<String>,
     auth_data: Option<Vec<u8>>,
     will_message: Option<WillMessage>,
-    user_property: Option<UserPropertyMap>,
+    user_props: Option<UserPropertyMap>,
     pub client_id: String,
     username: Option<String>,
     password: Option<Vec<u8>>,
@@ -122,7 +122,7 @@ impl Connect {
                     if property_type != PropertyType::UserProperty {
                         check_property(property_type, &mut properties)?;
                         match property_type {
-                            PropertyType::SessionExpiry => {
+                            PropertyType::SessionExpiryInt => {
                                 self.session_expiry_interval = Some(src.get_u32());
                             }
                             PropertyType::RecvMax => {
@@ -187,19 +187,16 @@ impl Connect {
                             }
                         }
                     } else {
-                        if self.user_property == None {
-                            self.user_property = Some(HashMap::new());
+                        if self.user_props == None {
+                            self.user_props = Some(UserPropertyMap::new());
                         }
-                        let property_map = self.user_property.as_mut().unwrap();
-                        // MQTT v5.0 specification indicates that a key may appear multiple times
-                        // this implementation will overwrite existing values with duplicate
-                        // keys
+                        let property_map = self.user_props.as_mut().unwrap();
                         let key = decode_utf8_string(src)?;
                         let value = decode_utf8_string(src)?;
-                        property_map.insert(key, value);
+                        property_map.add_property(&key, &value);
                     }
                 }
-                Err(_) => return Err(MQTTCodecError::new("invalid property type")),
+                Err(e) => return Err(e),
             };
             if src.remaining() < read_until {
                 return Err(MQTTCodecError::new(
@@ -261,7 +258,7 @@ impl crate::Remaining for Connect {
         if !self.problem_info {
             property_remaining += PROP_SIZE_U8
         }
-        if let Some(user_property) = self.user_property.as_ref() {
+        if let Some(user_property) = self.user_props.as_ref() {
             property_remaining += user_property.size();
         }
         if let Some(auth_method) = self.auth_method.as_ref() {
@@ -307,7 +304,7 @@ impl Encode for Connect {
         dest.put_u16(self.keep_alive);
         encode_variable_len_integer(prop_remaining, dest);
         if let Some(expiry) = self.session_expiry_interval {
-            dest.put_u8(PropertyType::SessionExpiry as u8);
+            dest.put_u8(PropertyType::SessionExpiryInt as u8);
             dest.put_u32(expiry);
         }
         if self.receive_max != DEFAULT_RECEIVE_MAX {
@@ -330,7 +327,7 @@ impl Encode for Connect {
             dest.put_u8(PropertyType::ReqProblemInfo as u8);
             dest.put_u8(1);
         }
-        if let Some(user_properties) = &self.user_property {
+        if let Some(user_properties) = &self.user_props {
             user_properties.encode(dest)?;
         }
         if let Some(auth_method) = &self.auth_method {
@@ -377,7 +374,7 @@ impl Default for Connect {
             auth_method: None,
             auth_data: None,
             will_message: None,
-            user_property: None,
+            user_props: None,
             client_id: "".to_string(),
             username: None,
             password: None,
@@ -400,13 +397,13 @@ mod test {
         let mut dest = BytesMut::new();
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
-        assert_eq!(dest[7], CONNECT_FLAG_CLEAN_START);
+        assert_eq!(dest[9], CONNECT_FLAG_CLEAN_START);
         let mut dest = BytesMut::new();
         let password = vec![1, 2, 3, 4, 5];
         connect.password = Some(password);
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
-        assert_eq!(dest[7], CONNECT_FLAG_CLEAN_START | CONNECT_FLAG_PASSWORD);
+        assert_eq!(dest[9], CONNECT_FLAG_CLEAN_START | CONNECT_FLAG_PASSWORD);
     }
 
     #[test]
@@ -417,9 +414,9 @@ mod test {
         let mut dest = BytesMut::new();
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
-        assert!(dest[7] & CONNECT_FLAG_WILL > 0);
-        assert!(dest[7] & CONNECT_FLAG_WILL_RETAIN > 0);
-        let qos_bits = (dest[7] & CONNECT_FLAG_WILL_QOS) >> CONNECT_FLAG_SHIFT;
+        assert!(dest[9] & CONNECT_FLAG_WILL > 0);
+        assert!(dest[9] & CONNECT_FLAG_WILL_RETAIN > 0);
+        let qos_bits = (dest[9] & CONNECT_FLAG_WILL_QOS) >> CONNECT_FLAG_SHIFT;
         let qos_result = QoSLevel::try_from(qos_bits);
         assert!(qos_result.is_ok());
         let qos = qos_result.unwrap();
@@ -433,7 +430,7 @@ mod test {
         let mut dest = BytesMut::new();
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
-        assert_eq!(0xcafe, ((dest[8] as u16) << 8) + dest[9] as u16);
+        assert_eq!(0xcafe, ((dest[10] as u16) << 8) + dest[11] as u16);
     }
 
     #[test]
@@ -441,7 +438,7 @@ mod test {
         let mut connect = Connect::default();
         connect.session_expiry_interval = Some(0xcafe);
         let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 5, PropertyType::SessionExpiry);
+        test_property(connect, &mut dest, 5, PropertyType::SessionExpiryInt);
     }
 
     #[test]
@@ -507,8 +504,8 @@ mod test {
         let mut dest = BytesMut::new();
         let result = connect.encode(&mut dest);
         assert!(result.is_ok());
-        assert_eq!(24, dest.len() as u32, "Packet Size");
-        assert_eq!('1', dest[13] as char)
+        assert_eq!(26, dest.len() as u32, "Packet Size");
+        assert_eq!('1', dest[15] as char)
     }
 
     #[test]
@@ -569,11 +566,11 @@ mod test {
         let mut connect = Connect::default();
 
         let mut user_properties = UserPropertyMap::new();
-        let key = "12335".to_string();
-        let value = "12345".to_string();
+        let key = "12335";
+        let value = "12345";
         let expected = CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
-        user_properties.insert(key, value);
-        connect.user_property = Some(user_properties);
+        user_properties.add_property(key, value);
+        connect.user_props = Some(user_properties);
         let remaining = connect.size();
         assert_eq!(
             expected, remaining,
@@ -586,12 +583,12 @@ mod test {
         let value = "12345".to_string();
         let mut expected =
             CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
-        user_properties.insert(key, value);
+        user_properties.add_property(&key, &value);
         let key = "567890".to_string();
         let value = "567890".to_string();
         expected += key.len() as u32 + value.len() as u32 + PROP_ENCODE;
-        user_properties.insert(key, value);
-        connect.user_property = Some(user_properties);
+        user_properties.add_property(&key, &value);
+        connect.user_props = Some(user_properties);
         let remaining = connect.size();
         assert_eq!(
             expected, remaining,
@@ -621,7 +618,7 @@ mod test {
         expected_prop_len: u32,
         property: PropertyType,
     ) {
-        let expected_len = 13 + expected_prop_len;
+        let expected_len = 15 + expected_prop_len;
         let result = connect.encode(dest);
         assert!(result.is_ok());
         assert_eq!(expected_len, dest.len() as u32, "Packet Size");
@@ -630,7 +627,7 @@ mod test {
             connect.property_remaining().unwrap(),
             "Encoded Property Length"
         );
-        assert_eq!(expected_prop_len as u8, dest[10], "Property Length");
-        assert_eq!(property as u8, dest[11], "Property Type");
+        assert_eq!(expected_prop_len as u8, dest[12], "Property Length");
+        assert_eq!(property as u8, dest[13], "Property Type");
     }
 }
