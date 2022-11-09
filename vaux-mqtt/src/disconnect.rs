@@ -146,7 +146,6 @@ impl Decode for Disconnect {
         }
         self.reason = Reason::try_from(src.get_u8())?;
         self.decode_properties(src)?;
-
         Ok(())
     }
 }
@@ -154,8 +153,6 @@ impl Decode for Disconnect {
 #[cfg(test)]
 mod test {
     use bytes::BytesMut;
-
-    use crate::disconnect;
 
     use super::*;
 
@@ -211,6 +208,23 @@ mod test {
         let result = disconnect.decode(&mut src);
         assert!(result.is_ok(), "Unexpected error decoding: {}", result.unwrap_err());
         assert_eq!(Reason::Success, disconnect.reason);
+    }
+
+    #[test]
+    fn test_decode_with_reason() {
+        let encoded: [u8; 3] = [
+            0x01,
+            Reason::AdminAction as u8,
+            0x00,
+        ];
+        let mut src = BytesMut::new();
+        src.extend_from_slice(&encoded);
+        let mut disconnect = Disconnect::default();
+        disconnect.reason = Reason::ImplementationErr;
+        let result = disconnect.decode(&mut src);
+        assert!(result.is_ok(), "Unexpected error decoding: {}", result.unwrap_err());
+        assert_eq!(Reason::AdminAction, disconnect.reason);
+
     }
 
 }
