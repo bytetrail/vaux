@@ -1,6 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
-    io::Read,
+    collections::{HashSet},
 };
 
 use bytes::{Buf, BufMut, BytesMut};
@@ -139,7 +138,7 @@ impl Encode for Disconnect {
 
 impl Decode for Disconnect {
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
-        let len = src.get_u16();
+        let len = decode_variable_len_integer(src);
         // MQTT v5 specification 3.14.2.1
         if len == 0 {
             self.reason = Reason::Success;
@@ -155,6 +154,8 @@ impl Decode for Disconnect {
 #[cfg(test)]
 mod test {
     use bytes::BytesMut;
+
+    use crate::disconnect;
 
     use super::*;
 
@@ -172,7 +173,7 @@ mod test {
     }
 
     #[test]
-    fn test_reason_desc() {
+    fn test_encode_reason_desc() {
         let mut disconnect = Disconnect::new(Reason::ImplementationErr);
         disconnect.reason_desc = Some("failed".to_string());
         let mut dest = BytesMut::new();
@@ -185,7 +186,7 @@ mod test {
     }
 
     #[test]
-    fn test_server_ref() {
+    fn test_encode_server_ref() {
         const SERVER_REF: &'static str = "bytetrail.org";
         let mut disconnect = Disconnect::new(Reason::ServerMoved);
         disconnect.server_ref = Some(SERVER_REF.to_string());
@@ -197,4 +198,19 @@ mod test {
             Err(e) => panic!("Unexpected encoding error {:?}", e.to_string()),
         }
     }
+
+    #[test]
+    fn test_basic_decode() {
+        let encoded: [u8; 1] = [
+            0x00,
+        ];
+        let mut src = BytesMut::new();
+        src.extend_from_slice(&encoded);
+        let mut disconnect = Disconnect::default();
+        disconnect.reason = Reason::ImplementationErr;
+        let result = disconnect.decode(&mut src);
+        assert!(result.is_ok(), "Unexpected error decoding: {}", result.unwrap_err());
+        assert_eq!(Reason::Success, disconnect.reason);
+    }
+
 }
