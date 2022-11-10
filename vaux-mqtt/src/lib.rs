@@ -43,11 +43,12 @@ impl UserPropertyMap {
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
-        }
+        } 
     }
 
     pub fn map(&self) -> &HashMap<String, Vec<String>> {
         &self.map
+        
     }
 
     pub fn add_property(&mut self, key: &str, value: &str) {
