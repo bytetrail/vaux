@@ -17,7 +17,7 @@ const VARIABLE_HEADER_LEN: u32 = 2;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ConnAck {
-    session_present: bool,
+    pub session_present: bool,
     reason: Reason,
     reason_str: Option<String>,
     pub expiry_interval: Option<u32>,
@@ -39,6 +39,7 @@ pub struct ConnAck {
 }
 
 impl ConnAck {
+
     fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
         let prop_size = decode_variable_len_integer(src);
         let read_until = src.remaining() - prop_size as usize;

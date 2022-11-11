@@ -98,15 +98,13 @@ impl Broker {
                 }
                 if let Some(session) = session_pool.read().await.get(&session_id) {
                     active_session = Some(session.clone());
-                }
-                let mut session = Session::new(
-                    session_id.clone(),
-                    Duration::from_secs(DEFAULT_MAX_KEEP_ALIVE),
-                );
-                if let Some(expiry) = packet.session_expiry_interval {
-                    session.expiry = Duration::from_secs(expiry as u64);
-                }
+                    ack.session_present = true;
+                } 
                 if packet.clean_start || active_session.is_none() {
+                    let mut session = Session::new(
+                        session_id.clone(),
+                        Duration::from_secs(DEFAULT_MAX_KEEP_ALIVE),
+                    );
                     let session = Arc::new(RwLock::new(session));
                     session_pool
                         .write()
@@ -117,12 +115,15 @@ impl Broker {
                 if packet.keep_alive > DEFAULT_MAX_KEEP_ALIVE as u16 {
                     ack.server_keep_alive = Some(DEFAULT_MAX_KEEP_ALIVE as u16);
                 } else {
-                    active_session
+                    let mut session = active_session
                         .as_ref()
                         .unwrap()
                         .write()
-                        .await
-                        .set_max_keep_alive_secs(packet.keep_alive as u64);
+                        .await;
+                        if let Some(expiry) = packet.session_expiry_interval {
+                            session.expiry = Duration::from_secs(expiry as u64);
+                        }
+                        session.set_max_keep_alive_secs(packet.keep_alive as u64);
                 }
                 framed.send(Packet::ConnAck(ack)).await?;
                 active_session

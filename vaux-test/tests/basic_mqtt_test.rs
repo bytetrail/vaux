@@ -50,6 +50,15 @@ fn test_broker_assigned_id() {
     }
 }
 
+#[test] 
+fn test_existing_session() {
+    let request = Connect::default();
+    let ack = ConnAck::default();
+
+    connect(Some("test_client_01"));
+}
+
+
 fn test_basic(
     request: Packet,
     expected_len: usize,
@@ -113,4 +122,52 @@ fn test_basic(
             None
         }
     }
+}
+
+
+fn connect(id: Option<&str>) -> String {
+    let mut connect = Connect::default();
+    if let Some(id) = id {
+        connect.client_id = id.to_string();
+    }
+    let connect_packet = Packet::Connect(connect);
+    match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
+        Ok(mut stream) => {
+            let mut buffer = [0u8; 128];
+            let mut dest = BytesMut::default();
+            let result = encode(connect_packet, &mut dest);
+            if let Err(e) = result {
+                assert!(false, "Failed to encode packet: {:?}", e);
+            }
+            match stream.write_all(&dest.to_vec()) {
+                Ok(_) => match stream.read(&mut buffer) {
+                    Ok(len) => {
+                        match decode(&mut BytesMut::from(&buffer[0..len])) {
+                            Ok(p) => {
+                                if let Some(packet) = p {
+                                    match packet {
+                                        Packet::ConnAck(connack) => {
+
+                                        }
+                                        Packet::Disconnect(disconnect) => {
+
+                                        }
+                                        _ => panic!("unexpected packet returned from remote"),
+                                    }
+                                } else {
+                                    panic!("no packet returned");
+                                }
+                            }
+                            Err(e) => panic!("unable to decode connect response")
+                        }
+                        
+                    }
+                    Err(e) => panic!("unable to read stream: {}", e.to_string()),
+                }
+                Err(e) => panic!("Unable to write packet(s) to test broker: {}", e.to_string()),
+            }
+        }
+        Err(e) =>  assert!(false, "Unable to connect to test broker: {}", e.to_string()),
+    }
+    "".to_string()
 }
