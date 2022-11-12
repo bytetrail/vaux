@@ -6,6 +6,7 @@ use std::fmt::{Display, Formatter};
 pub(crate) const PROP_SIZE_U32: u32 = 5;
 pub(crate) const PROP_SIZE_U16: u32 = 3;
 pub(crate) const PROP_SIZE_U8: u32 = 2;
+pub(crate) const PROP_SIZE_UTF8_STRING: u32 = 3;
 
 /// MQTT property type. For more information on the specific property types,
 /// please see the
@@ -367,7 +368,6 @@ pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MQTTCodecError>
             dest.put_u8(0x_00);
             Ok(())
         }
-        _ => return Err(MQTTCodecError::new("unsupported packet type")),
     }?;
     Ok(())
 }

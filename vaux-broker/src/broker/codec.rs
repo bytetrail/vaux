@@ -1,7 +1,8 @@
 use bytes::{BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 use vaux_mqtt::{
-    decode_fixed_header, ConnAck, Connect, Decode, Encode, MQTTCodecError, Packet, PacketType,
+    decode_fixed_header, ConnAck, Connect, Decode, Disconnect, Encode, MQTTCodecError, Packet,
+    PacketType,
 };
 
 #[derive(Debug)]
@@ -27,6 +28,11 @@ impl Decoder for MQTTCodec {
                         let mut connack = ConnAck::default();
                         connack.decode(src)?;
                         Ok(Some(Packet::ConnAck(connack)))
+                    }
+                    PacketType::Disconnect => {
+                        let mut disconnect = Disconnect::default();
+                        disconnect.decode(src)?;
+                        Ok(Some(Packet::Disconnect(disconnect)))
                     }
                     _ => Err(MQTTCodecError::new("unsupported packet type")),
                 },

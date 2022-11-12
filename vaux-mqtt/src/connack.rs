@@ -9,7 +9,7 @@ use crate::{
 };
 use crate::{FixedHeader, MQTTCodecError, PacketType};
 use bytes::{Buf, BufMut, BytesMut};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 const DEFAULT_RECV_MAX: u16 = 65535;
 const DEFAULT_TOPIC_ALIAS_MAX: u16 = 0;
@@ -17,7 +17,7 @@ const VARIABLE_HEADER_LEN: u32 = 2;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ConnAck {
-    session_present: bool,
+    pub session_present: bool,
     reason: Reason,
     reason_str: Option<String>,
     pub expiry_interval: Option<u32>,
