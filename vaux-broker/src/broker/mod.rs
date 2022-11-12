@@ -99,7 +99,7 @@ impl Broker {
                 if let Some(session) = session_pool.read().await.get(&session_id) {
                     active_session = Some(session.clone());
                     ack.session_present = true;
-                } 
+                }
                 if packet.clean_start || active_session.is_none() {
                     let mut session = Session::new(
                         session_id.clone(),
@@ -115,15 +115,11 @@ impl Broker {
                 if packet.keep_alive > DEFAULT_MAX_KEEP_ALIVE as u16 {
                     ack.server_keep_alive = Some(DEFAULT_MAX_KEEP_ALIVE as u16);
                 } else {
-                    let mut session = active_session
-                        .as_ref()
-                        .unwrap()
-                        .write()
-                        .await;
-                        if let Some(expiry) = packet.session_expiry_interval {
-                            session.expiry = Duration::from_secs(expiry as u64);
-                        }
-                        session.set_max_keep_alive_secs(packet.keep_alive as u64);
+                    let mut session = active_session.as_ref().unwrap().write().await;
+                    if let Some(expiry) = packet.session_expiry_interval {
+                        session.expiry = Duration::from_secs(expiry as u64);
+                    }
+                    session.set_max_keep_alive_secs(packet.keep_alive as u64);
                 }
                 framed.send(Packet::ConnAck(ack)).await?;
                 active_session
@@ -135,9 +131,8 @@ impl Broker {
                 None
             }
             _ => {
-                let mut header = Disconnect::new(Reason::ProtocolErr);
+                let header = Disconnect::new(Reason::ProtocolErr);
                 let disconnect = Packet::Disconnect(header);
-
                 framed.send(disconnect).await?;
                 return Err(Box::new(MQTTCodecError::new("connect packet not received")));
             }
@@ -157,10 +152,13 @@ impl Broker {
                                 let header = FixedHeader::new(PacketType::PingResp);
                                 framed.send(Packet::PingResponse(header)).await?;
                             }
+                            Packet::Disconnect(_) => {
+                                // exit loop closing connection
+                                break;
+                            }
                             req => {
-                                println!("Packet request {:?}", req);
                                 return Err(Box::new(MQTTCodecError::new(
-                                    format!("unsupported packet type: {:?}", req).as_str(),
+                                    format!("unexpected packet type: {:?}", req).as_str(),
                                 )));
                             }
                         },

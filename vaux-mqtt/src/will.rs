@@ -7,7 +7,7 @@ use crate::{
     QoSLevel, Remaining, UserPropertyMap, PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 const DEFAULT_WILL_DELAY: u32 = 0;
 

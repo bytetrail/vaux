@@ -367,7 +367,6 @@ pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MQTTCodecError>
             dest.put_u8(0x_00);
             Ok(())
         }
-        _ => return Err(MQTTCodecError::new("unsupported packet type")),
     }?;
     Ok(())
 }

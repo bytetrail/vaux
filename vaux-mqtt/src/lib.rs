@@ -43,21 +43,16 @@ impl UserPropertyMap {
     pub fn new() -> Self {
         Self {
             map: HashMap::new(),
-        } 
+        }
     }
 
     pub fn map(&self) -> &HashMap<String, Vec<String>> {
         &self.map
-        
     }
 
     pub fn add_property(&mut self, key: &str, value: &str) {
-        let v = value.to_owned();
         if self.map.contains_key(key) {
-            self.map
-                .get_mut(key)
-                .unwrap()
-                .push(value.to_string());
+            self.map.get_mut(key).unwrap().push(value.to_string());
         } else {
             let mut v: Vec<String> = Vec::new();
             v.push(value.to_string());
@@ -93,8 +88,8 @@ impl crate::Remaining for UserPropertyMap {
 
 impl Encode for UserPropertyMap {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        for (k, v) in self.map.iter() {
-            for v in &self.map[k] {
+        for (k, value) in self.map.iter() {
+            for v in value {
                 dest.put_u8(PropertyType::UserProperty as u8);
                 encode_utf8_string(k, dest)?;
                 encode_utf8_string(&v, dest)?;

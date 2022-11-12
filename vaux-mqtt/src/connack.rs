@@ -9,7 +9,7 @@ use crate::{
 };
 use crate::{FixedHeader, MQTTCodecError, PacketType};
 use bytes::{Buf, BufMut, BytesMut};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 const DEFAULT_RECV_MAX: u16 = 65535;
 const DEFAULT_TOPIC_ALIAS_MAX: u16 = 0;
@@ -39,7 +39,6 @@ pub struct ConnAck {
 }
 
 impl ConnAck {
-
     fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
         let prop_size = decode_variable_len_integer(src);
         let read_until = src.remaining() - prop_size as usize;

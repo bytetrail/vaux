@@ -2,7 +2,9 @@ use bytes::BytesMut;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use uuid::Uuid;
-use vaux_mqtt::{decode, encode, ConnAck, Connect, FixedHeader, Packet, PacketType};
+use vaux_mqtt::{
+    decode, encode, ConnAck, Connect, Disconnect, FixedHeader, Packet, PacketType, Reason,
+};
 
 const DEFAULT_PORT: u16 = 1883;
 const DEFAULT_HOST: &'static str = "127.0.0.1";
@@ -50,14 +52,19 @@ fn test_broker_assigned_id() {
     }
 }
 
-#[test] 
+#[test]
 fn test_existing_session() {
-    let request = Connect::default();
-    let ack = ConnAck::default();
-
-    connect(Some("test_client_01"));
+    let client_id = Uuid::new_v4().to_string();
+    let mut client = MQTTClient::new();
+    let result = client.connect(Some(&client_id));
+    assert!(result.is_some(), "expected connection acknowledge");
+    let ack = result.unwrap();
+    assert!(ack.assigned_client_id.is_none());
+    assert_eq!(false, ack.session_present, "expected no existing session");
+    client.disconnect();
+    let ack = client.connect(Some(&client_id)).unwrap();
+    assert!(ack.session_present, "expected session present");
 }
-
 
 fn test_basic(
     request: Packet,
@@ -124,33 +131,41 @@ fn test_basic(
     }
 }
 
+struct MQTTClient {
+    connection: Option<TcpStream>,
+}
 
-fn connect(id: Option<&str>) -> String {
-    let mut connect = Connect::default();
-    if let Some(id) = id {
-        connect.client_id = id.to_string();
+impl MQTTClient {
+    fn new() -> Self {
+        MQTTClient { connection: None }
     }
-    let connect_packet = Packet::Connect(connect);
-    match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
-        Ok(mut stream) => {
-            let mut buffer = [0u8; 128];
-            let mut dest = BytesMut::default();
-            let result = encode(connect_packet, &mut dest);
-            if let Err(e) = result {
-                assert!(false, "Failed to encode packet: {:?}", e);
-            }
-            match stream.write_all(&dest.to_vec()) {
-                Ok(_) => match stream.read(&mut buffer) {
-                    Ok(len) => {
-                        match decode(&mut BytesMut::from(&buffer[0..len])) {
+
+    fn connect(&mut self, id: Option<&str>) -> Option<ConnAck> {
+        let mut connect = Connect::default();
+        if let Some(id) = id {
+            connect.client_id = id.to_string();
+        }
+        let connect_packet = Packet::Connect(connect);
+        match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
+            Ok(stream) => {
+                self.connection = Some(stream);
+                let mut buffer = [0u8; 128];
+                let mut dest = BytesMut::default();
+                let result = encode(connect_packet, &mut dest);
+                if let Err(e) = result {
+                    assert!(false, "Failed to encode packet: {:?}", e);
+                }
+                match self.connection.as_ref().unwrap().write_all(&dest.to_vec()) {
+                    Ok(_) => match self.connection.as_ref().unwrap().read(&mut buffer) {
+                        Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
                             Ok(p) => {
                                 if let Some(packet) = p {
                                     match packet {
                                         Packet::ConnAck(connack) => {
-
+                                            return Some(connack);
                                         }
-                                        Packet::Disconnect(disconnect) => {
-
+                                        Packet::Disconnect(_disconnect) => {
+                                            panic!("disconnect");
                                         }
                                         _ => panic!("unexpected packet returned from remote"),
                                     }
@@ -158,16 +173,35 @@ fn connect(id: Option<&str>) -> String {
                                     panic!("no packet returned");
                                 }
                             }
-                            Err(e) => panic!("unable to decode connect response")
-                        }
-                        
-                    }
-                    Err(e) => panic!("unable to read stream: {}", e.to_string()),
+                            Err(e) => panic!("unable to decode connect response {}", e.to_string()),
+                        },
+                        Err(e) => panic!("unable to read stream: {}", e.to_string()),
+                    },
+                    Err(e) => panic!(
+                        "Unable to write packet(s) to test broker: {}",
+                        e.to_string()
+                    ),
                 }
-                Err(e) => panic!("Unable to write packet(s) to test broker: {}", e.to_string()),
+            }
+            Err(e) => assert!(false, "Unable to connect to test broker: {}", e.to_string()),
+        }
+        None
+    }
+
+    fn disconnect(&mut self) {
+        let disconnect = Disconnect::new(Reason::Success);
+        let packet = Packet::Disconnect(disconnect);
+        let mut _buffer = [0u8; 128];
+        let mut dest = BytesMut::default();
+        let result = encode(packet, &mut dest);
+        if let Err(e) = result {
+            assert!(false, "Failed to encode packet: {:?}", e);
+        }
+        match self.connection.as_ref().unwrap().write_all(&dest.to_vec()) {
+            Ok(_) => self.connection = None,
+            _ => {
+                panic!("unable to disconnect successfully");
             }
         }
-        Err(e) =>  assert!(false, "Unable to connect to test broker: {}", e.to_string()),
     }
-    "".to_string()
 }

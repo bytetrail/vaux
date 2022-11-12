@@ -1,6 +1,4 @@
-use std::{
-    collections::{HashSet},
-};
+use std::collections::HashSet;
 
 use bytes::{Buf, BufMut, BytesMut};
 
@@ -112,9 +110,7 @@ impl Encode for Disconnect {
     fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
         let mut header = FixedHeader::new(PacketType::Disconnect);
         let prop_remaining = self.property_remaining().unwrap();
-        header.remaining = DEFAULT_DISCONNECT_REMAINING
-            + variable_byte_int_size(prop_remaining)
-            + DEFAULT_DISCONNECT_REMAINING;
+        header.remaining = DEFAULT_DISCONNECT_REMAINING + variable_byte_int_size(prop_remaining);
         if self.reason == Reason::Success && prop_remaining == 0 {
             header.remaining = 0;
             header.encode(dest)?;
@@ -123,14 +119,20 @@ impl Encode for Disconnect {
         header.encode(dest)?;
         let reason = self.reason as u8;
         dest.put_u8(reason);
-        if let Some(reason_desc) = self.reason_desc.as_ref() {
-            encode_utf8_string(reason_desc, dest)?;
-        }
-        if let Some(user_props) = &self.user_props {
-            user_props.encode(dest)?;
-        }
-        if let Some(server_ref) = self.server_ref.as_ref() {
-            encode_utf8_string(server_ref, dest)?;
+        if let Some(prop_len) = self.property_remaining() {
+            encode_variable_len_integer(prop_len, dest);
+            if let Some(expiry) = self.session_expiry {
+                dest.put_u32(expiry);
+            }
+            if let Some(reason_desc) = self.reason_desc.as_ref() {
+                encode_utf8_string(reason_desc, dest)?;
+            }
+            if let Some(user_props) = &self.user_props {
+                user_props.encode(dest)?;
+            }
+            if let Some(server_ref) = self.server_ref.as_ref() {
+                encode_utf8_string(server_ref, dest)?;
+            }
         }
         Ok(())
     }
@@ -138,9 +140,8 @@ impl Encode for Disconnect {
 
 impl Decode for Disconnect {
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
-        let len = decode_variable_len_integer(src);
         // MQTT v5 specification 3.14.2.1
-        if len == 0 {
+        if src.remaining() == 0 {
             self.reason = Reason::Success;
             return Ok(());
         }
@@ -198,33 +199,33 @@ mod test {
 
     #[test]
     fn test_basic_decode() {
-        let encoded: [u8; 1] = [
-            0x00,
-        ];
+        let encoded: [u8; 0] = [];
         let mut src = BytesMut::new();
         src.extend_from_slice(&encoded);
         let mut disconnect = Disconnect::default();
         disconnect.reason = Reason::ImplementationErr;
         let result = disconnect.decode(&mut src);
-        assert!(result.is_ok(), "Unexpected error decoding: {}", result.unwrap_err());
+        assert!(
+            result.is_ok(),
+            "Unexpected error decoding: {}",
+            result.unwrap_err()
+        );
         assert_eq!(Reason::Success, disconnect.reason);
     }
 
     #[test]
     fn test_decode_with_reason() {
-        let encoded: [u8; 3] = [
-            0x01,
-            Reason::AdminAction as u8,
-            0x00,
-        ];
+        let encoded: [u8; 2] = [Reason::AdminAction as u8, 0x00];
         let mut src = BytesMut::new();
         src.extend_from_slice(&encoded);
         let mut disconnect = Disconnect::default();
         disconnect.reason = Reason::ImplementationErr;
         let result = disconnect.decode(&mut src);
-        assert!(result.is_ok(), "Unexpected error decoding: {}", result.unwrap_err());
+        assert!(
+            result.is_ok(),
+            "Unexpected error decoding: {}",
+            result.unwrap_err()
+        );
         assert_eq!(Reason::AdminAction, disconnect.reason);
-
     }
-
 }

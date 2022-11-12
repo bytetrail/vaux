@@ -7,7 +7,7 @@ use crate::{
     FixedHeader, PacketType, QoSLevel, Remaining, UserPropertyMap, WillMessage,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 const MQTT_PROTOCOL_NAME_LEN: u16 = 0x00_04;
 const MQTT_PROTOCOL_U32: u32 = 0x4d515454;
