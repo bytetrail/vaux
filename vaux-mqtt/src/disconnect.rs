@@ -6,6 +6,7 @@ use crate::{
     codec::{
         check_property, decode_utf8_string, decode_variable_len_integer, encode_utf8_string,
         encode_variable_len_integer, variable_byte_int_size, PropertyType, PROP_SIZE_U32,
+        PROP_SIZE_UTF8_STRING,
     },
     Decode, Encode, FixedHeader, MQTTCodecError, PacketType, Reason, Remaining, UserPropertyMap,
 };
@@ -92,11 +93,15 @@ impl Remaining for Disconnect {
         if self.session_expiry.is_some() {
             remaining += PROP_SIZE_U32;
         }
-        remaining += self.reason_desc.as_ref().map_or(0, |r| 3 + r.len() as u32);
-        if let Some(props) = self.user_props.as_ref() {
-            remaining += props.size();
-        }
-        self.server_ref.as_ref().map_or(0, |r| 2 + r.len());
+        remaining += self
+            .reason_desc
+            .as_ref()
+            .map_or(0, |r| PROP_SIZE_UTF8_STRING + r.len() as u32);
+        remaining += self.user_props.as_ref().map_or(0, |p| p.size());
+        remaining += self
+            .server_ref
+            .as_ref()
+            .map_or(0, |r| PROP_SIZE_UTF8_STRING + r.len() as u32);
         Some(remaining)
     }
 
@@ -177,7 +182,7 @@ mod test {
         let mut dest = BytesMut::new();
         match disconnect.encode(&mut dest) {
             Ok(_) => {
-                assert_eq!("failed".len() + 5 as usize, dest.len());
+                assert_eq!("failed".len() + 6 as usize, dest.len());
             }
             Err(e) => panic!("Unexpected encoding error {:?}", e.to_string()),
         }
@@ -186,12 +191,15 @@ mod test {
     #[test]
     fn test_encode_server_ref() {
         const SERVER_REF: &'static str = "bytetrail.org";
+        const PROP_LEN: u8 = 16;
         let mut disconnect = Disconnect::new(Reason::ServerMoved);
         disconnect.server_ref = Some(SERVER_REF.to_string());
         let mut dest = BytesMut::new();
         match disconnect.encode(&mut dest) {
             Ok(_) => {
-                assert_eq!(SERVER_REF.len() + 5 as usize, dest.len());
+                assert_eq!(SERVER_REF.len() + 6 as usize, dest.len());
+                assert_eq!(Reason::ServerMoved as u8, dest[2]);
+                assert_eq!(PROP_LEN, dest[3]);
             }
             Err(e) => panic!("Unexpected encoding error {:?}", e.to_string()),
         }
