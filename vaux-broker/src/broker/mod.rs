@@ -96,11 +96,18 @@ impl Broker {
                     session_id = packet.client_id;
                 }
                 if let Some(session) = session_pool.read().await.get(&session_id) {
-                    active_session = Some(session.clone());
-                    ack.session_present = true;
+                    let mut session_lock = session.blocking_write();
+                    if session_lock.connected() {
+                        // handle take over
+                        session_lock.set_orphaned();
+                    } else if !session_lock.orphaned(){
+                        session_lock.set_connected(true);
+                        active_session = Some(session.clone());
+                        ack.session_present = true;    
+                    }
                 }
                 if packet.clean_start || active_session.is_none() {
-                    let mut session = Session::new(
+                    let session = Session::new(
                         session_id.clone(),
                         Duration::from_secs(DEFAULT_KEEP_ALIVE),
                     );
@@ -141,6 +148,10 @@ impl Broker {
                 let duration = Duration::from_secs(session.read().await.keep_alive());
                 match timeout(duration, framed.next()).await {
                     Ok(request) => {
+                        if session.read().await.orphaned() {
+                            // respond with session taken over error
+                            // TODO
+                        }        
                         if let Some(request) = request {
                             session.write().await.set_last_active();
                             match request {

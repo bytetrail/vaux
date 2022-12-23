@@ -10,28 +10,32 @@ pub struct Session {
     id: String,
     last_active: Instant,
     connected: bool,
+    orphaned: bool,
     keep_alive: Duration,
     pub session_expiry: Duration,
+
 }
 
 impl Session {
     /// Creates a new session with the last active time set to Instant::now()
-    pub fn new(id: String, max_keep_alive: Duration) -> Self {
+    pub fn new(id: String, keep_alive: Duration) -> Self {
         Session {
             id,
             last_active: Instant::now(),
             connected: true,
-            keep_alive: Duration::from_secs(DEFAULT_KEEP_ALIVE),
+            orphaned: false,
+            keep_alive,
             session_expiry: Duration::new(0, 0),
         }
     }
 
-    pub fn new_with_expiry(id: String, max_keep_alive_secs: u32, expiry_secs: u32) -> Self {
+    pub fn new_with_expiry(id: String, keep_alive_secs: u32, expiry_secs: u32) -> Self {
         Session {
             id,
             last_active: Instant::now(),
             connected: true,
-            keep_alive: Duration::from_secs(max_keep_alive_secs as u64),
+            orphaned: false,
+            keep_alive: Duration::from_secs(keep_alive_secs as u64),
             session_expiry: Duration::from_secs(expiry_secs as u64),
         }
     }
@@ -48,6 +52,14 @@ impl Session {
         self.connected = connected;
     }
 
+    pub fn orphaned(&self) -> bool {
+        self.orphaned
+    }
+
+    pub(crate) fn set_orphaned(&mut self)  {
+        self.orphaned = true;
+    }
+    
     /// Sets the last session activity to the time that the method is invoked.
     pub fn set_last_active(&mut self) {
         self.last_active = Instant::now();
@@ -89,8 +101,8 @@ mod test {
     #[test]
     fn test_new_with_expiry() {
         let session = Session::new_with_expiry("test_01".to_string(), 60, 600);
-        assert_eq!(Duration::from_secs(600), session.expiry);
-        assert_eq!(Duration::from_secs(60), session.max_keep_alive);
+        assert_eq!(Duration::from_secs(600), session.session_expiry);
+        assert_eq!(Duration::from_secs(60), session.keep_alive);
     }
 
     #[test]

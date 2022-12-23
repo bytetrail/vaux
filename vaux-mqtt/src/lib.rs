@@ -34,7 +34,7 @@ pub trait Decode {
     fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError>;
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UserPropertyMap {
     map: HashMap<String, Vec<String>>,
 }
