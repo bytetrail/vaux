@@ -18,9 +18,23 @@ impl MQTTClient {
         }
     }
 
-    pub fn connect() {}
+    pub fn connect(&mut self) {
+        match TcpStream::connect(self.addr) {
+            Ok(s) => {
+                self.connection = Some(s);
+            }
+            Err(_) => todo!(),
+        }
+    }
 
-    pub fn disconnect() {}
+    pub fn disconnect(&mut self) {
+        if let Some(_conn) = self.connection.as_mut() {
+
+        } else {
+            // it is an error to disconnect when not connected
+        }
+
+    }
 }
 
 #[cfg(test)]

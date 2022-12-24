@@ -248,7 +248,7 @@ pub enum Reason {
 #[allow(non_upper_case_globals)]
 impl Reason {
     pub const NormalDisconnect: Reason = Reason::Success;
-    pub const GrantedQos0: Reason = Reason::Success;
+    pub const GrantedQoS0: Reason = Reason::Success;
 }
 
 impl TryFrom<u8> for Reason {

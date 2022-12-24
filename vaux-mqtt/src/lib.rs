@@ -2,6 +2,7 @@ mod codec;
 mod connack;
 mod connect;
 mod disconnect;
+mod publish;
 mod will;
 
 use crate::codec::{

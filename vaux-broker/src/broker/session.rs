@@ -13,7 +13,6 @@ pub struct Session {
     orphaned: bool,
     keep_alive: Duration,
     pub session_expiry: Duration,
-
 }
 
 impl Session {
@@ -56,10 +55,10 @@ impl Session {
         self.orphaned
     }
 
-    pub(crate) fn set_orphaned(&mut self)  {
+    pub(crate) fn set_orphaned(&mut self) {
         self.orphaned = true;
     }
-    
+
     /// Sets the last session activity to the time that the method is invoked.
     pub fn set_last_active(&mut self) {
         self.last_active = Instant::now();

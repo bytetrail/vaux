@@ -3,14 +3,14 @@ pub(crate) mod session;
 
 use crate::broker::session::Session;
 use futures::{SinkExt, StreamExt};
-use tokio::time::timeout;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{Duration};
+use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
+use tokio::time::timeout;
 use tokio_util::codec::Framed;
 use uuid::Uuid;
 use vaux_mqtt::Packet::PingResponse;
@@ -100,17 +100,15 @@ impl Broker {
                     if session_lock.connected() {
                         // handle take over
                         session_lock.set_orphaned();
-                    } else if !session_lock.orphaned(){
+                    } else if !session_lock.orphaned() {
                         session_lock.set_connected(true);
                         active_session = Some(session.clone());
-                        ack.session_present = true;    
+                        ack.session_present = true;
                     }
                 }
                 if packet.clean_start || active_session.is_none() {
-                    let session = Session::new(
-                        session_id.clone(),
-                        Duration::from_secs(DEFAULT_KEEP_ALIVE),
-                    );
+                    let session =
+                        Session::new(session_id.clone(), Duration::from_secs(DEFAULT_KEEP_ALIVE));
                     let session = Arc::new(RwLock::new(session));
                     session_pool
                         .write()
@@ -151,7 +149,7 @@ impl Broker {
                         if session.read().await.orphaned() {
                             // respond with session taken over error
                             // TODO
-                        }        
+                        }
                         if let Some(request) = request {
                             session.write().await.set_last_active();
                             match request {
@@ -179,7 +177,7 @@ impl Broker {
                                     return Err(Box::new(e));
                                 }
                             } // match request
-                        } // if let Some(request ...        
+                        } // if let Some(request ...
                     }
                     Err(_elapsed) => {
                         // connection keep alive expired
