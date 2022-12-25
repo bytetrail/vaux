@@ -1,29 +1,36 @@
-use crate::{QoSLevel, FixedHeader, UserPropertyMap};
+use crate::{QoSLevel, FixedHeader, UserPropertyMap, MQTTCodecError};
+
+
+const RETAIN_MASK: u8 = 0b_0000_0001;
+const DUP_MASK: u8 = 0b_0000_1000;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Publish {
-    dup: bool,
-    qos: QoSLevel,
-    retain: bool,
-    topic_name: Option<String>,
-    topic_alias: Option<u16>,
-    response_topic: Option<String>,
-    packet_id: Option<u16>,
-    payload_format: Option<u8>,
-    message_expiry: Option<u32>,
-    correlation_data: Option<Vec<u8>>,
-    user_props: Option<UserPropertyMap>,
-    sub_id: Option<Vec<u32>>,
-    content_type: Option<String>,
-    payload: Option<Vec<u8>>,
+    pub dup: bool,
+    pub qos: QoSLevel,
+    pub retain: bool,
+    pub topic_name: Option<String>,
+    pub topic_alias: Option<u16>,
+    pub response_topic: Option<String>,
+    pub packet_id: Option<u16>,
+    pub payload_format: Option<u8>,
+    pub message_expiry: Option<u32>,
+    pub correlation_data: Option<Vec<u8>>,
+    pub user_props: Option<UserPropertyMap>,
+    pub sub_id: Option<Vec<u32>>,
+    pub content_type: Option<String>,
+    pub payload: Option<Vec<u8>>,
 }
 
 impl Publish {
-    pub fn new(hdr: FixedHeader) -> Self {
-        Publish {
-            dup: todo!(),
-            qos: todo!(),
-            retain: todo!(),
+    pub fn new_from_header(hdr: FixedHeader) -> Result<Self, MQTTCodecError> {
+        let qos = QoSLevel::try_from(hdr.flags)?;
+        let retain = hdr.flags & RETAIN_MASK != 0;
+        let dup = hdr.flags & DUP_MASK != 0;
+        Ok(Publish {
+            dup,
+            qos,
+            retain,
             topic_name: None,
             topic_alias: None,
             response_topic: None,
@@ -35,6 +42,6 @@ impl Publish {
             sub_id: None,
             content_type: None,
             payload: None,
-        }
+        })
     }
 }

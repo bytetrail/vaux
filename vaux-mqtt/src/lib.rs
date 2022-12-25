@@ -16,6 +16,7 @@ pub use crate::connect::Connect;
 pub use crate::disconnect::Disconnect;
 pub use crate::will::WillMessage;
 use bytes::{BufMut, BytesMut};
+use publish::Publish;
 use std::collections::HashMap;
 
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
@@ -164,6 +165,7 @@ pub enum Packet {
     PingResponse(FixedHeader),
     Connect(Connect),
     ConnAck(ConnAck),
+    Publish(Publish),
     Disconnect(Disconnect),
 }
 
@@ -174,6 +176,7 @@ impl From<&Packet> for PacketType {
             Packet::PingResponse(_) => PacketType::PingResp,
             Packet::Connect(_) => PacketType::Connect,
             Packet::ConnAck(_) => PacketType::ConnAck,
+            Packet::Publish(_) => PacketType::Publish,
             Packet::Disconnect(_) => PacketType::Disconnect,
         }
     }
