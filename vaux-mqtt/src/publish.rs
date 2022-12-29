@@ -1,5 +1,4 @@
-use crate::{QoSLevel, FixedHeader, UserPropertyMap, MQTTCodecError};
-
+use crate::{Decode, Encode, FixedHeader, MQTTCodecError, QoSLevel, Remaining, UserPropertyMap};
 
 const RETAIN_MASK: u8 = 0b_0000_0001;
 const DUP_MASK: u8 = 0b_0000_1000;
@@ -27,6 +26,11 @@ impl Publish {
         let qos = QoSLevel::try_from(hdr.flags)?;
         let retain = hdr.flags & RETAIN_MASK != 0;
         let dup = hdr.flags & DUP_MASK != 0;
+        if dup && qos == QoSLevel::AtMostOnce {
+            return Err(MQTTCodecError::new(
+                "[MQTT 3.1.1.1] DUP must be 0 for QOS level \"At most once\"",
+            ));
+        }
         Ok(Publish {
             dup,
             qos,
@@ -43,5 +47,31 @@ impl Publish {
             content_type: None,
             payload: None,
         })
+    }
+}
+
+impl Remaining for Publish {
+    fn size(&self) -> u32 {
+        todo!()
+    }
+
+    fn property_remaining(&self) -> Option<u32> {
+        todo!()
+    }
+
+    fn payload_remaining(&self) -> Option<u32> {
+        todo!()
+    }
+}
+
+impl Encode for Publish {
+    fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MQTTCodecError> {
+        todo!()
+    }
+}
+
+impl Decode for Publish {
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), MQTTCodecError> {
+        todo!()
     }
 }

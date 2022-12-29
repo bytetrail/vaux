@@ -1,5 +1,5 @@
 use crate::publish::Publish;
-use crate::{ConnAck, Connect, Decode, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE, publish};
+use crate::{publish, ConnAck, Connect, Decode, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -140,7 +140,9 @@ impl TryFrom<u8> for PropertyType {
             0x28 => Ok(PropertyType::WildcardSubAvail),
             0x29 => Ok(PropertyType::SubIdAvail),
             0x2a => Ok(PropertyType::ShardSubAvail),
-            _ => Err(MQTTCodecError::new("invalid property type value")),
+            _ => Err(MQTTCodecError::new(
+                "[MQTT 2.2.2.2] invalid property type identifier",
+            )),
         }
     }
 }
@@ -366,7 +368,7 @@ pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MQTTCodecError>
     match packet {
         Packet::Connect(c) => c.encode(dest),
         Packet::ConnAck(c) => c.encode(dest),
-        Packet::Publish(p) => {Ok(())}
+        Packet::Publish(p) => Ok(()),
         Packet::Disconnect(d) => d.encode(dest),
         Packet::PingRequest(header) | Packet::PingResponse(header) => {
             dest.put_u8(header.packet_type() as u8 | header.flags());
