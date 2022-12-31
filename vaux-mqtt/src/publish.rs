@@ -6,7 +6,7 @@ use crate::{
     codec::{
         decode_utf8_string, decode_variable_len_integer, encode_utf8_string,
         variable_byte_int_size, PropertyType, PROP_SIZE_BINARY, PROP_SIZE_U16, PROP_SIZE_U32,
-        PROP_SIZE_U8, PROP_SIZE_UTF8_STRING, SIZE_UTF8_STRING, check_property,
+        PROP_SIZE_U8, PROP_SIZE_UTF8_STRING, SIZE_UTF8_STRING, check_property, decode_binary_data,
     },
     Decode, Encode, FixedHeader, MQTTCodecError, QoSLevel, Remaining, UserPropertyMap,
 };
@@ -75,6 +75,24 @@ impl Publish {
         property_type: PropertyType,
         src: &mut BytesMut,
     ) -> Result<(), MQTTCodecError> {
+        match property_type {
+            PropertyType::PayloadFormat => self.payload_utf8 = src.get_u8() == 1,
+            PropertyType::MessageExpiry => self.message_expiry = Some(src.get_u32()),
+            PropertyType::TopicAlias => self.topic_alias = Some(src.get_u16()),
+            PropertyType::ResponseTopic => self.response_topic = Some(decode_utf8_string(src)?),
+            PropertyType::CorrelationData => self.correlation_data = Some(decode_binary_data(src)?),
+            PropertyType::SubscriptionId => {
+                if self.sub_id.is_none() {
+                    self.sub_id = Some(Vec::new());
+                }
+                self.sub_id.as_mut().unwrap().push(decode_variable_len_integer(src));
+            }
+            PropertyType::ContentType => self.content_type = Some(decode_utf8_string(src)?),            
+            prop =>   return Err(MQTTCodecError::new(&format!(
+                "MQTTv5 3.3.2.3 unexpected property type value: {}",
+                prop
+            )))
+        }
         Ok(())
     }
 }
@@ -163,9 +181,9 @@ impl Decode for Publish {
             self.packet_id = Some(src.get_u16());
         }
         let property_len = decode_variable_len_integer(src);
-        let read_until = src.remaining() - property_len as usize;
+        let payload_len = src.remaining() - property_len as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
-        while src.remaining() > read_until {
+        while src.remaining() > payload_len {
             match PropertyType::try_from(src.get_u8()) {
                 Ok(property_type) => {
                     if property_type != PropertyType::UserProperty {
@@ -181,8 +199,14 @@ impl Decode for Publish {
                         property_map.add_property(&key, &value);
                     }
                 }
-                Err(_) => return Err(MQTTCodecError::new("invalid property type")),
+                Err(_) => return Err(MQTTCodecError::new("MQTTv5 3.3.2.3 invalid property type")),
             };
+        }
+        if src.remaining() > 0 {
+            match src.get(src.len() - src.remaining()..src.remaining()) {
+                Some(p) => self.payload = Some(Vec::from(p)),
+                None => return Err(MQTTCodecError::new("unable to decode payload")),
+            }    
         }
         Ok(())
     }
