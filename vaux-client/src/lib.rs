@@ -1,7 +1,6 @@
 use std::{
-    fmt::Error,
     io::{Read, Write},
-    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    net::{SocketAddr, TcpStream},
 };
 
 use bytes::BytesMut;
@@ -59,7 +58,7 @@ impl MQTTClient {
     }
 
     pub fn connect(&mut self) -> MQTTResult<()> {
-        let mut connect = Connect::default();
+        let connect = Connect::default();
         let connect_packet = Packet::Connect(connect);
         match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
             Ok(stream) => {
@@ -123,6 +122,10 @@ impl MQTTClient {
                 ))
             }
         }
+    }
+
+    pub fn send(topic: &str, message: &[u8]) -> MQTTResult<()> {
+        Ok(())
     }
 
     pub fn disconnect(&mut self) {

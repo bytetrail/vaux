@@ -1,5 +1,5 @@
 use crate::publish::Publish;
-use crate::{publish, ConnAck, Connect, Decode, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE};
+use crate::{ConnAck, Connect, Decode, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -8,6 +8,8 @@ pub(crate) const PROP_SIZE_U32: u32 = 5;
 pub(crate) const PROP_SIZE_U16: u32 = 3;
 pub(crate) const PROP_SIZE_U8: u32 = 2;
 pub(crate) const PROP_SIZE_UTF8_STRING: u32 = 3;
+pub(crate) const PROP_SIZE_BINARY: u32 = 3;
+pub(crate) const SIZE_UTF8_STRING: u32 = 2;
 
 /// MQTT property type. For more information on the specific property types,
 /// please see the
@@ -702,3 +704,9 @@ mod test {
         assert_eq!(777, val);
     }
 }
+
+
+
+
+
+                              
