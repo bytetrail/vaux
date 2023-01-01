@@ -4,7 +4,7 @@ use std::{
 };
 
 use bytes::BytesMut;
-use vaux_mqtt::{decode, encode, Connect, Packet};
+use vaux_mqtt::{decode, encode, Connect, Packet, publish::Publish};
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 1883;
@@ -49,16 +49,19 @@ impl MQTTClient {
         }
     }
 
-    pub fn new_with_id(addr: SocketAddr, id: String) -> Self {
+    pub fn new_with_id(addr: SocketAddr, id: &str) -> Self {
         MQTTClient {
             addr,
-            client_id: Some(id),
+            client_id: Some(id.to_owned()),
             connection: None,
         }
     }
 
     pub fn connect(&mut self) -> MQTTResult<()> {
-        let connect = Connect::default();
+        let mut connect = Connect::default();
+        if let Some(id) = self.client_id.as_ref() {
+            connect.client_id = id.to_owned();
+        }
         let connect_packet = Packet::Connect(connect);
         match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
             Ok(stream) => {
@@ -124,9 +127,31 @@ impl MQTTClient {
         }
     }
 
-    pub fn send(topic: &str, message: &[u8]) -> MQTTResult<()> {
+    pub fn send(&mut self, topic: &str, message: &str) -> MQTTResult<()> {
+        let mut publish = Publish::default();
+        publish.payload_utf8 = true;
+        publish.topic_name = Some(topic.to_string());
+        publish.payload = Some(Vec::from(message.as_bytes()));
+
+        let mut buffer = [0u8; 128];
+        let mut dest = BytesMut::default();
+        let result = encode(Packet::Publish(publish), &mut dest);
+        if let Err(e) = result {
+            assert!(false, "Failed to encode packet: {:?}", e);
+        }
+        match self.connection.as_ref().unwrap().write_all(&dest.to_vec()) {
+            Ok(_) => match self.connection.as_ref().unwrap().read(&mut buffer) {
+                Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
+                    Ok(_) => todo!(),
+                    Err(e) => eprintln!("{:#?}", e),
+                }
+                Err(_) => todo!(),
+            }
+            Err(_) => todo!(),
+        }
         Ok(())
     }
+
 
     pub fn disconnect(&mut self) {
         if let Some(_conn) = self.connection.as_mut() {

@@ -151,7 +151,12 @@ impl Decode for Disconnect {
             return Ok(());
         }
         self.reason = Reason::try_from(src.get_u8())?;
-        self.decode_properties(src)?;
+        if src.remaining() > 0 {
+            let property_remaining = decode_variable_len_integer(src);
+            if property_remaining > 0 {
+                self.decode_properties(src)?;
+            }    
+        }
         Ok(())
     }
 }

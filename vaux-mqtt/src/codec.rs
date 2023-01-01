@@ -1,5 +1,5 @@
 use crate::publish::Publish;
-use crate::{ConnAck, Connect, Decode, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE};
+use crate::{ConnAck, Connect, Decode, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE, Disconnect};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -392,6 +392,12 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<Packet>, MQTTCodecError> {
                     let mut publish = Publish::new_from_header(packet_header)?;
                     Ok(Some(Packet::Publish(publish)))
                 }
+                PacketType::Disconnect => {
+                    println!("DISCONNECT");
+                    let mut disconnect = Disconnect::default();
+                    disconnect.decode(src)?;
+                    Ok(Some(Packet::Disconnect(disconnect)))
+                }
                 PacketType::ConnAck => {
                     let mut connack = ConnAck::default();
                     connack.decode(src)?;
@@ -409,7 +415,7 @@ pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MQTTCodecError>
     match packet {
         Packet::Connect(c) => c.encode(dest),
         Packet::ConnAck(c) => c.encode(dest),
-        Packet::Publish(p) => Ok(()),
+        Packet::Publish(p) => p.encode(dest),
         Packet::Disconnect(d) => d.encode(dest),
         Packet::PingRequest(header) | Packet::PingResponse(header) => {
             dest.put_u8(header.packet_type() as u8 | header.flags());

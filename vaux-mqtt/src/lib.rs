@@ -2,7 +2,7 @@ mod codec;
 mod connack;
 mod connect;
 mod disconnect;
-mod publish;
+pub mod publish;
 mod will;
 
 use crate::codec::{
@@ -184,8 +184,9 @@ impl From<&Packet> for PacketType {
 
 #[allow(clippy::enum_variant_names)]
 #[repr(u8)]
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Default, Debug, PartialEq, Eq, Copy, Clone)]
 pub enum QoSLevel {
+    #[default]
     AtMostOnce = 0,
     AtLeastOnce = 1,
     ExactlyOnce = 2,
