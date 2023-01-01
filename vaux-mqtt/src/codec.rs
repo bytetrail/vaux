@@ -149,6 +149,45 @@ impl TryFrom<u8> for PropertyType {
     }
 }
 
+impl PropertyType {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        dest.put_u8(*self as u8);
+        match self {
+            PropertyType::PayloadFormat => todo!(),
+            PropertyType::ReqProblemInfo => todo!(),
+            PropertyType::WildcardSubAvail => todo!(),
+            PropertyType::SubIdAvail => todo!(),
+            PropertyType::ShardSubAvail => todo!(),
+
+            PropertyType::MessageExpiry => todo!(),
+            PropertyType::ContentType => todo!(),
+            PropertyType::ResponseTopic => todo!(),
+            PropertyType::CorrelationData => todo!(),
+            PropertyType::SubscriptionId => todo!(),
+            PropertyType::SessionExpiryInt => todo!(),
+            PropertyType::AssignedClientId => todo!(),
+            PropertyType::KeepAlive => todo!(),
+            PropertyType::AuthMethod => todo!(),
+            PropertyType::AuthData => todo!(),
+            PropertyType::WillDelay => todo!(),
+            PropertyType::ReqRespInfo => todo!(),
+            PropertyType::RespInfo => todo!(),
+            PropertyType::ServerRef => todo!(),
+            PropertyType::Reason => todo!(),
+            PropertyType::RecvMax => todo!(),
+            PropertyType::TopicAliasMax => todo!(),
+            PropertyType::TopicAlias => todo!(),
+            PropertyType::MaxQoS => todo!(),
+            PropertyType::RetainAvail => todo!(),
+            PropertyType::UserProperty => todo!(),
+            PropertyType::MaxPacketSize => todo!(),
+            PropertyType::WildcardSubAvail => todo!(),
+            PropertyType::SubIdAvail => todo!(),
+            PropertyType::ShardSubAvail => todo!(),
+        }
+    }
+}
+
 /// MQTT Control Packet Type
 /// #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -311,7 +350,7 @@ impl TryFrom<u8> for Reason {
 
 #[derive(Debug)]
 pub struct MQTTCodecError {
-    reason: String,
+    pub reason: String,
 }
 
 impl Display for MQTTCodecError {
@@ -402,6 +441,53 @@ pub(crate) fn check_property(
     }
     properties.insert(property);
     Ok(())
+}
+
+pub(crate) fn encode_u8_property(property_type: PropertyType, value: u8, dest: &mut BytesMut) {
+    dest.put_u8(property_type as u8);
+    dest.put_u8(value);
+}
+
+pub(crate) fn encode_bool_property(property_type: PropertyType, value: bool, dest: &mut BytesMut) {
+    dest.put_u8(property_type as u8);
+    dest.put_u8(value as u8);
+}
+
+pub(crate) fn encode_u16_property(property_type: PropertyType, value: u16, dest: &mut BytesMut) {
+    dest.put_u8(property_type as u8);
+    dest.put_u16(value);
+}
+
+pub(crate) fn encode_u32_property(property_type: PropertyType, value: u32, dest: &mut BytesMut) {
+    dest.put_u8(property_type as u8);
+    dest.put_u32(value);
+}
+
+pub(crate) fn encode_utf8_property(
+    property_type: PropertyType,
+    value: &str,
+    dest: &mut BytesMut,
+) -> Result<(), MQTTCodecError> {
+    dest.put_u8(property_type as u8);
+    encode_utf8_string(value, dest)
+}
+
+pub(crate) fn encode_bin_property(
+    property_type: PropertyType,
+    value: &[u8],
+    dest: &mut BytesMut,
+) -> Result<(), MQTTCodecError> {
+    dest.put_u8(property_type as u8);
+    encode_binary_data(value, dest)
+}
+
+pub(crate) fn encode_var_int_property(
+    property_type: PropertyType,
+    value: u32,
+    dest: &mut BytesMut,
+) {
+    dest.put_u8(property_type as u8);
+    encode_variable_len_integer(value, dest);
 }
 
 pub(crate) fn decode_prop_bool(src: &mut BytesMut) -> Result<bool, MQTTCodecError> {
@@ -704,9 +790,3 @@ mod test {
         assert_eq!(777, val);
     }
 }
-
-
-
-
-
-                              
