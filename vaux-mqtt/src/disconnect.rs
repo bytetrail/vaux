@@ -15,11 +15,11 @@ const DEFAULT_DISCONNECT_REMAINING: u32 = 1;
 
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct Disconnect {
-    reason: Reason,
-    session_expiry: Option<u32>,
-    reason_desc: Option<String>,
-    server_ref: Option<String>,
-    user_props: Option<UserPropertyMap>,
+    pub reason: Reason,
+    pub session_expiry: Option<u32>,
+    pub reason_desc: Option<String>,
+    pub server_ref: Option<String>,
+    pub user_props: Option<UserPropertyMap>,
 }
 
 impl Disconnect {
@@ -155,7 +155,7 @@ impl Decode for Disconnect {
             let property_remaining = decode_variable_len_integer(src);
             if property_remaining > 0 {
                 self.decode_properties(src)?;
-            }    
+            }
         }
         Ok(())
     }

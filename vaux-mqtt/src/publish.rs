@@ -6,11 +6,11 @@ use crate::{
     codec::{
         check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
         encode_bin_property, encode_bool_property, encode_u16_property, encode_u32_property,
-        encode_utf8_property, encode_utf8_string, encode_var_int_property, variable_byte_int_size,
-        PropertyType, PROP_SIZE_BINARY, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
-        PROP_SIZE_UTF8_STRING, SIZE_UTF8_STRING, encode_variable_len_integer,
+        encode_utf8_property, encode_utf8_string, encode_var_int_property,
+        encode_variable_len_integer, variable_byte_int_size, PropertyType, PROP_SIZE_BINARY,
+        PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8, PROP_SIZE_UTF8_STRING, SIZE_UTF8_STRING,
     },
-    Decode, Encode, FixedHeader, MQTTCodecError, QoSLevel, Remaining, UserPropertyMap, PacketType,
+    Decode, Encode, FixedHeader, MQTTCodecError, PacketType, QoSLevel, Remaining, UserPropertyMap,
 };
 
 const RETAIN_MASK: u8 = 0b_0000_0001;
@@ -120,7 +120,6 @@ impl Remaining for Publish {
         let payload_size = self.payload_remaining().unwrap();
         let prop_remaining = self.property_remaining().unwrap();
         remaining + payload_size + prop_remaining + variable_byte_int_size(prop_remaining)
-
     }
 
     fn property_remaining(&self) -> Option<u32> {
@@ -166,7 +165,9 @@ impl Encode for Publish {
         header.set_remaining(size);
         header.encode(dest)?;
         if self.topic_name.is_none() && self.topic_alias.is_none() {
-            return Err(MQTTCodecError::new("MQTTv5 3.3.2.1 must have topic name or topic alias"));
+            return Err(MQTTCodecError::new(
+                "MQTTv5 3.3.2.1 must have topic name or topic alias",
+            ));
         }
         match self.topic_name.as_ref() {
             Some(topic_name) => encode_utf8_string(topic_name, dest)?,
@@ -268,7 +269,7 @@ mod test {
     #[test]
     fn test_encode_no_props() {
         const LEN_PROP_LEN: u32 = 1;
-        const EXPECTED_REMAINING: u32 =  LEN_TOPIC_NAME_LEN + LEN_TOPIC_NAME + LEN_PROP_LEN;
+        const EXPECTED_REMAINING: u32 = LEN_TOPIC_NAME_LEN + LEN_TOPIC_NAME + LEN_PROP_LEN;
         const EXPECTED_LEN: u32 = EXPECTED_REMAINING + 2;
         let hdr = crate::FixedHeader {
             packet_type: crate::PacketType::Publish,
@@ -281,10 +282,18 @@ mod test {
                 let mut dest = BytesMut::new();
                 match publish.encode(&mut dest) {
                     Ok(_) => {
-                        assert_eq!(EXPECTED_LEN, dest.len() as u32, "expected length to be {}", EXPECTED_LEN);
+                        assert_eq!(
+                            EXPECTED_LEN,
+                            dest.len() as u32,
+                            "expected length to be {}",
+                            EXPECTED_LEN
+                        );
                         assert_eq!(EXPECTED_REMAINING, dest[1] as u32);
                         assert_eq!(LEN_TOPIC_NAME, dest[3] as u32);
-                        assert_eq!("topic".to_string(), String::from_utf8(Vec::from(dest.get(4..9).unwrap())).unwrap());
+                        assert_eq!(
+                            "topic".to_string(),
+                            String::from_utf8(Vec::from(dest.get(4..9).unwrap())).unwrap()
+                        );
                     }
                     Err(e) => panic!("unable to encode publish record: {}", e),
                 }
@@ -293,7 +302,7 @@ mod test {
         }
     }
 
-    #[test] 
+    #[test]
     fn test_fail_topic() {
         let hdr = crate::FixedHeader {
             packet_type: crate::PacketType::Publish,
@@ -339,7 +348,8 @@ mod test {
     fn test_basic_payload() {
         const LEN_PROP_LEN: u32 = 1;
         const LEN_PAYLOAD: u32 = 20;
-        const EXPECTED_REMAINING: u32 = LEN_TOPIC_NAME_LEN + LEN_TOPIC_NAME + LEN_PROP_LEN + LEN_PAYLOAD;
+        const EXPECTED_REMAINING: u32 =
+            LEN_TOPIC_NAME_LEN + LEN_TOPIC_NAME + LEN_PROP_LEN + LEN_PAYLOAD;
         const EXPECTED_LEN: u32 = EXPECTED_REMAINING + 2;
         let hdr = crate::FixedHeader {
             packet_type: crate::PacketType::Publish,
@@ -353,9 +363,15 @@ mod test {
                 publish.topic_name = Some(String::from("topic"));
                 match publish.encode(&mut dest) {
                     Ok(_) => {
-                        assert_eq!(EXPECTED_LEN, dest.len() as u32, "expected length to be {}", EXPECTED_LEN);
+                        assert_eq!(
+                            EXPECTED_LEN,
+                            dest.len() as u32,
+                            "expected length to be {}",
+                            EXPECTED_LEN
+                        );
                         assert_eq!(EXPECTED_REMAINING, dest[1] as u32);
-                        let payload = dest.get((EXPECTED_LEN-LEN_PAYLOAD) as usize..EXPECTED_LEN as usize);
+                        let payload =
+                            dest.get((EXPECTED_LEN - LEN_PAYLOAD) as usize..EXPECTED_LEN as usize);
                         for v in payload.unwrap() {
                             assert_eq!(10_u8, *v, "expected 10 for payload byte value");
                         }

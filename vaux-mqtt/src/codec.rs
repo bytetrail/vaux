@@ -1,5 +1,7 @@
 use crate::publish::Publish;
-use crate::{ConnAck, Connect, Decode, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE, Disconnect};
+use crate::{
+    ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE,
+};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -149,45 +151,6 @@ impl TryFrom<u8> for PropertyType {
     }
 }
 
-impl PropertyType {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        dest.put_u8(*self as u8);
-        match self {
-            PropertyType::PayloadFormat => todo!(),
-            PropertyType::ReqProblemInfo => todo!(),
-            PropertyType::WildcardSubAvail => todo!(),
-            PropertyType::SubIdAvail => todo!(),
-            PropertyType::ShardSubAvail => todo!(),
-
-            PropertyType::MessageExpiry => todo!(),
-            PropertyType::ContentType => todo!(),
-            PropertyType::ResponseTopic => todo!(),
-            PropertyType::CorrelationData => todo!(),
-            PropertyType::SubscriptionId => todo!(),
-            PropertyType::SessionExpiryInt => todo!(),
-            PropertyType::AssignedClientId => todo!(),
-            PropertyType::KeepAlive => todo!(),
-            PropertyType::AuthMethod => todo!(),
-            PropertyType::AuthData => todo!(),
-            PropertyType::WillDelay => todo!(),
-            PropertyType::ReqRespInfo => todo!(),
-            PropertyType::RespInfo => todo!(),
-            PropertyType::ServerRef => todo!(),
-            PropertyType::Reason => todo!(),
-            PropertyType::RecvMax => todo!(),
-            PropertyType::TopicAliasMax => todo!(),
-            PropertyType::TopicAlias => todo!(),
-            PropertyType::MaxQoS => todo!(),
-            PropertyType::RetainAvail => todo!(),
-            PropertyType::UserProperty => todo!(),
-            PropertyType::MaxPacketSize => todo!(),
-            PropertyType::WildcardSubAvail => todo!(),
-            PropertyType::SubIdAvail => todo!(),
-            PropertyType::ShardSubAvail => todo!(),
-        }
-    }
-}
-
 /// MQTT Control Packet Type
 /// #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -287,6 +250,12 @@ pub enum Reason {
     MaxConnectTime,
     SubIdUnsupported,
     WildcardSubUnsupported,
+}
+
+impl Display for Reason {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 #[allow(non_upper_case_globals)]

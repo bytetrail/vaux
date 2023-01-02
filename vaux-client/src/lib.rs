@@ -1,10 +1,11 @@
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
+    time::Duration,
 };
 
 use bytes::BytesMut;
-use vaux_mqtt::{decode, encode, Connect, Packet, publish::Publish};
+use vaux_mqtt::{decode, encode, publish::Publish, Connect, Packet, QoSLevel};
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 1883;
@@ -127,6 +128,10 @@ impl MQTTClient {
         }
     }
 
+    /// Basic send of a UTF8 encoded payload. The message is sent with QoS
+    /// Level 0 and a payload format indicated a UTF8. No additional properties
+    /// are set. A disconnect message can occur due to errors. This method uses
+    /// a simple blocking read with a timeout for test purposes.
     pub fn send(&mut self, topic: &str, message: &str) -> MQTTResult<()> {
         let mut publish = Publish::default();
         publish.payload_utf8 = true;
@@ -135,23 +140,52 @@ impl MQTTClient {
 
         let mut buffer = [0u8; 128];
         let mut dest = BytesMut::default();
-        let result = encode(Packet::Publish(publish), &mut dest);
+        let result = encode(Packet::Publish(publish.clone()), &mut dest);
         if let Err(e) = result {
             assert!(false, "Failed to encode packet: {:?}", e);
         }
         match self.connection.as_ref().unwrap().write_all(&dest.to_vec()) {
-            Ok(_) => match self.connection.as_ref().unwrap().read(&mut buffer) {
-                Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
-                    Ok(_) => todo!(),
-                    Err(e) => eprintln!("{:#?}", e),
+            Ok(_) => {
+                // set minimal timeout for potential disconnect on publish when
+                // no other packet expected
+                if self
+                    .connection
+                    .as_mut()
+                    .unwrap()
+                    .set_read_timeout(Some(Duration::from_millis(200)))
+                    .is_err()
+                {
+                    return Err(MQTTError::new(
+                        "unable to set connection read timeout",
+                        ErrorKind::Transport,
+                    ));
                 }
-                Err(_) => todo!(),
+                match self.connection.as_ref().unwrap().read(&mut buffer) {
+                    Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
+                        Ok(packet) => {
+                            if let Some(Packet::Disconnect(d)) = packet {
+                                eprintln!("unexpected disconnect due to {}", d.reason);
+                                if let Some(desc) = d.reason_desc {
+                                    eprintln!("description: {}", desc);
+                                }
+                            }
+                        }
+                        Err(e) => eprintln!("{:#?}", e),
+                    },
+                    Err(e) => {
+                        if e.kind() == std::io::ErrorKind::TimedOut {
+                            return Ok(());
+                        }
+                        else {
+                            eprintln!("unexpected transport error {:#?}", e);
+                        }
+                    }
+                }
             }
-            Err(_) => todo!(),
+            Err(e) => eprintln!("unexpected send error {:#?}", e),
         }
         Ok(())
     }
-
 
     pub fn disconnect(&mut self) {
         if let Some(_conn) = self.connection.as_mut() {
