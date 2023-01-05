@@ -228,6 +228,16 @@ impl Decode for Publish {
             self.packet_id = Some(src.get_u16());
         }
         let property_len = decode_variable_len_integer(src);
+        if property_len > src.remaining() as u32 {
+            return Err(MQTTCodecError::new(
+                "MQTTv5 2.2.2.1 property length exceeds packet size",
+            ));
+        }
+        if property_len == 1 {
+            return Err(MQTTCodecError::new(
+                "MQTTv5 2.2.2.1 invalid property length",
+            ));
+        }
         let payload_len = src.remaining() - property_len as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
         while src.remaining() > payload_len {
@@ -246,7 +256,7 @@ impl Decode for Publish {
                         property_map.add_property(&key, &value);
                     }
                 }
-                Err(_) => return Err(MQTTCodecError::new("MQTTv5 3.3.2.3 invalid property type")),
+                Err(err) => return Err(err),
             };
         }
         if src.remaining() > 0 {
@@ -380,6 +390,58 @@ mod test {
                 }
             }
             Err(e) => panic!("unable to encode publish record: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_decode_payload() {
+        const TEST_PACKET: [u8; 12] = [
+            0x00, 0x04, 0x76, 0x61, 0x75, 0x78, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
+        ];
+        let mut src = BytesMut::from(&TEST_PACKET[..]);
+        let mut hdr = FixedHeader::new(PacketType::Publish);
+        hdr.remaining = 0x0c;
+        let mut publish_packet = Publish::new_from_header(hdr).expect("unable to create packet");
+        match publish_packet.decode(&mut src) {
+            Ok(_) => {
+                assert_eq!("vaux", publish_packet.topic_name.unwrap());
+                assert_eq!(
+                    "hello",
+                    String::from_utf8(publish_packet.payload.unwrap()).expect("unable to decode")
+                );
+            }
+            Err(e) => panic!("unexpected error decoding publish: {}", e),
+        }
+    }
+
+    #[test]
+    /// MQTTv5
+    fn test_decode_packet_id() {
+        const EXPECTED_PACKET_ID: u16 = 270;
+        const TEST_PACKET_ID: [u8; 9] = [0x00, 0x04, 0x76, 0x61, 0x75, 0x78, 0x01, 0x0e, 0x00];
+        let mut src = BytesMut::from(&TEST_PACKET_ID[..]);
+        let mut hdr = FixedHeader::new(PacketType::Publish);
+        hdr.flags = 0x01;
+        hdr.remaining = 0x09;
+        let mut publish_packet =
+            Publish::new_from_header(hdr.clone()).expect("unable to create packet");
+        match publish_packet.decode(&mut src) {
+            Ok(_) => {
+                assert_eq!(EXPECTED_PACKET_ID, publish_packet.packet_id.unwrap());
+                assert_eq!("vaux", publish_packet.topic_name.unwrap());
+            }
+            Err(e) => panic!("unexpected error decoding publish: {}", e),
+        }
+        hdr.flags = 0x00;
+        let mut src = BytesMut::from(&TEST_PACKET_ID[..]);
+        let mut publish_packet = Publish::new_from_header(hdr).expect("unable to create packet");
+        match publish_packet.decode(&mut src) {
+            Ok(_) => {
+                panic!("expected malformed packet");
+            }
+            Err(e) => {
+                assert_eq!("MQTTv5 2.2.2.1 invalid property length", e.reason);
+            }
         }
     }
 }

@@ -144,9 +144,10 @@ impl TryFrom<u8> for PropertyType {
             0x28 => Ok(PropertyType::WildcardSubAvail),
             0x29 => Ok(PropertyType::SubIdAvail),
             0x2a => Ok(PropertyType::ShardSubAvail),
-            _ => Err(MQTTCodecError::new(
-                "[MQTT 2.2.2.2] invalid property type identifier",
-            )),
+            p => Err(MQTTCodecError::new(&format!(
+                "MQTTv5 2.2.2.2 invalid property type identifier: {}",
+                p
+            ))),
         }
     }
 }

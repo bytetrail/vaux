@@ -1,6 +1,10 @@
+pub mod session;
+
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
+    sync::mpsc::{self, Receiver, Sender},
+    thread::{self, spawn},
     time::Duration,
 };
 
@@ -14,6 +18,8 @@ pub struct MQTTClient {
     addr: SocketAddr,
     client_id: Option<String>,
     connection: Option<TcpStream>,
+    sender: Option<Sender<Packet>>,
+    receiver: Option<Receiver<MQTTResult<Packet>>>,
 }
 
 #[derive(Debug)]
@@ -47,6 +53,8 @@ impl MQTTClient {
             addr,
             client_id: None,
             connection: None,
+            sender: None,
+            receiver: None,
         }
     }
 
@@ -55,6 +63,8 @@ impl MQTTClient {
             addr,
             client_id: Some(id.to_owned()),
             connection: None,
+            sender: None,
+            receiver: None,
         }
     }
 
@@ -80,6 +90,7 @@ impl MQTTClient {
                                 if let Some(packet) = p {
                                     match packet {
                                         Packet::ConnAck(connack) => {
+                                            println!("CONNACK: {:#?}", connack);
                                             if self.client_id.is_none() {
                                                 self.client_id = connack.assigned_client_id;
                                             }
@@ -164,7 +175,7 @@ impl MQTTClient {
                     Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
                         Ok(packet) => {
                             if let Some(Packet::Disconnect(d)) = packet {
-                                eprintln!("unexpected disconnect due to {}", d.reason);
+                                eprintln!("unexpected disconnect:  {}", d.reason);
                                 if let Some(desc) = d.reason_desc {
                                     eprintln!("description: {}", desc);
                                 }
@@ -175,8 +186,7 @@ impl MQTTClient {
                     Err(e) => {
                         if e.kind() == std::io::ErrorKind::TimedOut {
                             return Ok(());
-                        }
-                        else {
+                        } else {
                             eprintln!("unexpected transport error {:#?}", e);
                         }
                     }
