@@ -7,9 +7,10 @@ use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
+use tokio::time::timeout;
 use tokio_util::codec::Framed;
 use uuid::Uuid;
 use vaux_mqtt::Packet::PingResponse;
@@ -19,9 +20,8 @@ use self::codec::MQTTCodec;
 
 pub const DEFAULT_PORT: u16 = 1883;
 pub const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
-const DEFAULT_MAX_KEEP_ALIVE: u64 = 60; // 60 seconds
+const DEFAULT_KEEP_ALIVE: u64 = 30; // 60 seconds
 const WAIT_IDLE_TIME: u64 = 50; // 50 milliseconds wait idle time
-const KEEP_ALIVE_FACTOR: f32 = 1.5_f32;
 
 #[derive(Debug, Clone)]
 pub struct Broker {
@@ -84,7 +84,6 @@ impl Broker {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let session_id: String;
         let mut framed = Framed::new(stream, MQTTCodec {});
-        let idle = Duration::from_millis(WAIT_IDLE_TIME);
         let session = match framed.next().await {
             Some(Ok(Packet::Connect(packet))) => {
                 let mut active_session: Option<Arc<RwLock<Session>>> = None;
@@ -97,14 +96,19 @@ impl Broker {
                     session_id = packet.client_id;
                 }
                 if let Some(session) = session_pool.read().await.get(&session_id) {
-                    active_session = Some(session.clone());
-                    ack.session_present = true;
+                    let mut session_lock = session.blocking_write();
+                    if session_lock.connected() {
+                        // handle take over
+                        session_lock.set_orphaned();
+                    } else if !session_lock.orphaned() {
+                        session_lock.set_connected(true);
+                        active_session = Some(session.clone());
+                        ack.session_present = true;
+                    }
                 }
                 if packet.clean_start || active_session.is_none() {
-                    let mut session = Session::new(
-                        session_id.clone(),
-                        Duration::from_secs(DEFAULT_MAX_KEEP_ALIVE),
-                    );
+                    let session =
+                        Session::new(session_id.clone(), Duration::from_secs(DEFAULT_KEEP_ALIVE));
                     let session = Arc::new(RwLock::new(session));
                     session_pool
                         .write()
@@ -112,14 +116,14 @@ impl Broker {
                         .insert(session_id.clone(), session.clone());
                     active_session = Some(session);
                 }
-                if packet.keep_alive > DEFAULT_MAX_KEEP_ALIVE as u16 {
-                    ack.server_keep_alive = Some(DEFAULT_MAX_KEEP_ALIVE as u16);
+                if packet.keep_alive > DEFAULT_KEEP_ALIVE as u16 {
+                    ack.server_keep_alive = Some(DEFAULT_KEEP_ALIVE as u16);
                 } else {
                     let mut session = active_session.as_ref().unwrap().write().await;
                     if let Some(expiry) = packet.session_expiry_interval {
-                        session.expiry = Duration::from_secs(expiry as u64);
+                        session.session_expiry = Duration::from_secs(expiry as u64);
                     }
-                    session.set_max_keep_alive_secs(packet.keep_alive as u64);
+                    session.set_keep_alive(packet.keep_alive as u64);
                 }
                 framed.send(Packet::ConnAck(ack)).await?;
                 active_session
@@ -138,40 +142,50 @@ impl Broker {
             }
         };
         if let Some(session) = session {
-            let keep_alive = Duration::from_secs(
-                (session.read().await.max_keep_alive_secs() as f32 * KEEP_ALIVE_FACTOR) as u64,
-            );
-            let mut last_activity = Instant::now();
             loop {
-                let request = framed.next().await;
-                if let Some(request) = request {
-                    last_activity = Instant::now();
-                    match request {
-                        Ok(request) => match request {
-                            Packet::PingRequest(_) => {
-                                let header = FixedHeader::new(PacketType::PingResp);
-                                framed.send(Packet::PingResponse(header)).await?;
-                            }
-                            Packet::Disconnect(_) => {
-                                // exit loop closing connection
-                                break;
-                            }
-                            req => {
-                                return Err(Box::new(MQTTCodecError::new(
-                                    format!("unexpected packet type: {:?}", req).as_str(),
-                                )));
-                            }
-                        },
-                        Err(e) => {
-                            return Err(Box::new(e));
+                let duration = Duration::from_secs(session.read().await.keep_alive());
+                match timeout(duration, framed.next()).await {
+                    Ok(request) => {
+                        if session.read().await.orphaned() {
+                            // respond with session taken over error
+                            // TODO
                         }
-                    } // match request
-                } // if let Some(request ...
-                std::thread::sleep(idle);
-                if last_activity.elapsed() > keep_alive {
-                    // immediate disconnect
-                    // TODO review specification for normal disconnect packet
-                    break;
+                        if let Some(request) = request {
+                            session.write().await.set_last_active();
+                            match request {
+                                Ok(request) => match request {
+                                    Packet::PingRequest(_) => {
+                                        let header = FixedHeader::new(PacketType::PingResp);
+                                        framed.send(Packet::PingResponse(header)).await?;
+                                    }
+                                    Packet::Disconnect(_) => {
+                                        // exit loop closing connection
+                                        session.write().await.set_connected(false);
+                                        break;
+                                    }
+                                    req => {
+                                        return Err(Box::new(MQTTCodecError::new(
+                                            format!("unexpected packet type: {:?}", req).as_str(),
+                                        )));
+                                    }
+                                },
+                                Err(e) => {
+                                    session.write().await.set_connected(false);
+                                    // disconnect with protocol error
+                                    let disconnect = Disconnect::new(Reason::ProtocolErr);
+                                    framed.send(Packet::Disconnect(disconnect)).await?;
+                                    return Err(Box::new(e));
+                                }
+                            } // match request
+                        } // if let Some(request ...
+                    }
+                    Err(_elapsed) => {
+                        // connection keep alive expired
+                        session.write().await.set_connected(false);
+                        let disconnect = Disconnect::new(Reason::KeepAliveTimeout);
+                        framed.send(Packet::Disconnect(disconnect)).await?;
+                        break;
+                    }
                 }
             } // loop
         }

@@ -1,4 +1,7 @@
-use crate::{ConnAck, Connect, Decode, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE};
+use crate::publish::Publish;
+use crate::{
+    ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE,
+};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -7,6 +10,8 @@ pub(crate) const PROP_SIZE_U32: u32 = 5;
 pub(crate) const PROP_SIZE_U16: u32 = 3;
 pub(crate) const PROP_SIZE_U8: u32 = 2;
 pub(crate) const PROP_SIZE_UTF8_STRING: u32 = 3;
+pub(crate) const PROP_SIZE_BINARY: u32 = 3;
+pub(crate) const SIZE_UTF8_STRING: u32 = 2;
 
 /// MQTT property type. For more information on the specific property types,
 /// please see the
@@ -139,7 +144,10 @@ impl TryFrom<u8> for PropertyType {
             0x28 => Ok(PropertyType::WildcardSubAvail),
             0x29 => Ok(PropertyType::SubIdAvail),
             0x2a => Ok(PropertyType::ShardSubAvail),
-            _ => Err(MQTTCodecError::new("invalid property type value")),
+            p => Err(MQTTCodecError::new(&format!(
+                "MQTTv5 2.2.2.2 invalid property type identifier: {}",
+                p
+            ))),
         }
     }
 }
@@ -245,10 +253,16 @@ pub enum Reason {
     WildcardSubUnsupported,
 }
 
+impl Display for Reason {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 #[allow(non_upper_case_globals)]
 impl Reason {
     pub const NormalDisconnect: Reason = Reason::Success;
-    pub const GrantedQos0: Reason = Reason::Success;
+    pub const GrantedQoS0: Reason = Reason::Success;
 }
 
 impl TryFrom<u8> for Reason {
@@ -306,7 +320,7 @@ impl TryFrom<u8> for Reason {
 
 #[derive(Debug)]
 pub struct MQTTCodecError {
-    reason: String,
+    pub reason: String,
 }
 
 impl Display for MQTTCodecError {
@@ -344,7 +358,16 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<Packet>, MQTTCodecError> {
                     connect.decode(src)?;
                     Ok(Some(Packet::Connect(connect)))
                 }
-                PacketType::Publish => Ok(None),
+                PacketType::Publish => {
+                    let mut publish = Publish::new_from_header(packet_header)?;
+                    Ok(Some(Packet::Publish(publish)))
+                }
+                PacketType::Disconnect => {
+                    println!("DISCONNECT");
+                    let mut disconnect = Disconnect::default();
+                    disconnect.decode(src)?;
+                    Ok(Some(Packet::Disconnect(disconnect)))
+                }
                 PacketType::ConnAck => {
                     let mut connack = ConnAck::default();
                     connack.decode(src)?;
@@ -362,6 +385,7 @@ pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MQTTCodecError>
     match packet {
         Packet::Connect(c) => c.encode(dest),
         Packet::ConnAck(c) => c.encode(dest),
+        Packet::Publish(p) => p.encode(dest),
         Packet::Disconnect(d) => d.encode(dest),
         Packet::PingRequest(header) | Packet::PingResponse(header) => {
             dest.put_u8(header.packet_type() as u8 | header.flags());
@@ -393,6 +417,53 @@ pub(crate) fn check_property(
     }
     properties.insert(property);
     Ok(())
+}
+
+pub(crate) fn encode_u8_property(property_type: PropertyType, value: u8, dest: &mut BytesMut) {
+    dest.put_u8(property_type as u8);
+    dest.put_u8(value);
+}
+
+pub(crate) fn encode_bool_property(property_type: PropertyType, value: bool, dest: &mut BytesMut) {
+    dest.put_u8(property_type as u8);
+    dest.put_u8(value as u8);
+}
+
+pub(crate) fn encode_u16_property(property_type: PropertyType, value: u16, dest: &mut BytesMut) {
+    dest.put_u8(property_type as u8);
+    dest.put_u16(value);
+}
+
+pub(crate) fn encode_u32_property(property_type: PropertyType, value: u32, dest: &mut BytesMut) {
+    dest.put_u8(property_type as u8);
+    dest.put_u32(value);
+}
+
+pub(crate) fn encode_utf8_property(
+    property_type: PropertyType,
+    value: &str,
+    dest: &mut BytesMut,
+) -> Result<(), MQTTCodecError> {
+    dest.put_u8(property_type as u8);
+    encode_utf8_string(value, dest)
+}
+
+pub(crate) fn encode_bin_property(
+    property_type: PropertyType,
+    value: &[u8],
+    dest: &mut BytesMut,
+) -> Result<(), MQTTCodecError> {
+    dest.put_u8(property_type as u8);
+    encode_binary_data(value, dest)
+}
+
+pub(crate) fn encode_var_int_property(
+    property_type: PropertyType,
+    value: u32,
+    dest: &mut BytesMut,
+) {
+    dest.put_u8(property_type as u8);
+    encode_variable_len_integer(value, dest);
 }
 
 pub(crate) fn decode_prop_bool(src: &mut BytesMut) -> Result<bool, MQTTCodecError> {
