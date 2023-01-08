@@ -1,7 +1,5 @@
 use crate::publish::Publish;
-use crate::{
-    ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE,
-};
+use crate::{ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -12,6 +10,8 @@ pub(crate) const PROP_SIZE_U8: u32 = 2;
 pub(crate) const PROP_SIZE_UTF8_STRING: u32 = 3;
 pub(crate) const PROP_SIZE_BINARY: u32 = 3;
 pub(crate) const SIZE_UTF8_STRING: u32 = 2;
+pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
+pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
 
 /// MQTT property type. For more information on the specific property types,
 /// please see the
@@ -314,6 +314,55 @@ impl TryFrom<u8> for Reason {
             0xa1 => Ok(Reason::SubIdUnsupported),
             0xa2 => Ok(Reason::WildcardSubUnsupported),
             value => Err(MQTTCodecError::new(&format!("Invalid reason: {}", value))),
+        }
+    }
+}
+
+#[allow(clippy::enum_variant_names)]
+#[repr(u8)]
+#[derive(Default, Debug, PartialEq, Eq, Copy, Clone)]
+pub enum QoSLevel {
+    #[default]
+    AtMostOnce = 0,
+    AtLeastOnce = 1,
+    ExactlyOnce = 2,
+}
+
+impl TryFrom<u8> for QoSLevel {
+    type Error = MQTTCodecError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(QoSLevel::AtMostOnce),
+            0x01 => Ok(QoSLevel::AtLeastOnce),
+            0x02 => Ok(QoSLevel::ExactlyOnce),
+            value => Err(MQTTCodecError::new(&format!(
+                "{} is not a value QoSLevel",
+                value
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Packet {
+    PingRequest(FixedHeader),
+    PingResponse(FixedHeader),
+    Connect(Connect),
+    ConnAck(ConnAck),
+    Publish(Publish),
+    Disconnect(Disconnect),
+}
+
+impl From<&Packet> for PacketType {
+    fn from(p: &Packet) -> Self {
+        match p {
+            Packet::PingRequest(_) => PacketType::PingReq,
+            Packet::PingResponse(_) => PacketType::PingResp,
+            Packet::Connect(_) => PacketType::Connect,
+            Packet::ConnAck(_) => PacketType::ConnAck,
+            Packet::Publish(_) => PacketType::Publish,
+            Packet::Disconnect(_) => PacketType::Disconnect,
         }
     }
 }
