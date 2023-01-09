@@ -1,18 +1,27 @@
 use bytes::{BufMut, BytesMut};
 
 use crate::{
-    codec::encode_utf8_string, Encode, MQTTCodecError, QoSLevel, Remaining, UserPropertyMap,
+    codec::{encode_utf8_string, variable_byte_int_size},
+    Encode, FixedHeader, MQTTCodecError, QoSLevel, Size, UserPropertyMap,
 };
 
+const VAR_HDR_LEN: u32 = 2;
+
+/// MQTT v5 3.8.3.1 Subscription Options
+/// bits 4 and 5 of the subscription options hold the retain handling flag. 
+/// Retain handling is used to determine how messages published with the
+/// retain flag set to ```true``` are handled when the ```SUBSCRIBE``` packet
+/// is received.
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
-enum RetainHandling {
+pub enum RetainHandling {
     #[default]
     Send,
     SendNew,
     None,
 }
 
+/// MQQT v5 3.8.3 SUBSCRIBE Payload
 #[derive(Debug, Default)]
 pub struct Subscription {
     filter: String,
@@ -50,6 +59,10 @@ impl Subscribe {
         }
     }
 
+    fn add_subscription(&mut self, subscription: Subscription) {
+        self.payload.push(subscription);
+    }
+
     fn encode_payload(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
         if self.payload.is_empty() {
             return Err(MQTTCodecError::new(
@@ -63,22 +76,30 @@ impl Subscribe {
     }
 }
 
-impl Remaining for Subscribe {
+impl Size for Subscribe {
     fn size(&self) -> u32 {
-        todo!()
+        let prop_size = self.property_size();
+        VAR_HDR_LEN + prop_size + variable_byte_int_size(prop_size) + self.payload_size()
     }
 
-    fn property_remaining(&self) -> Option<u32> {
-        todo!()
+    fn property_size(&self) -> u32 {
+        self.sub_id.map_or(0, |id| variable_byte_int_size(id))
+            + self.user_props.as_ref().map_or(0, |p| p.size())
     }
 
-    fn payload_remaining(&self) -> Option<u32> {
-        todo!()
+    fn payload_size(&self) -> u32 {
+        let mut remaining = 0;
+        for s in &self.payload {
+            remaining += s.filter.len() + 3;
+        }
+        remaining as u32
     }
 }
 
 impl Encode for Subscribe {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        let mut hdr = FixedHeader::new(crate::PacketType::Subscribe);
+        hdr.set_remaining(self.size());
         self.encode_payload(dest);
         Ok(())
     }
@@ -88,7 +109,7 @@ impl Encode for Subscribe {
 mod test {
     use bytes::BytesMut;
 
-    use crate::QoSLevel;
+    use crate::{QoSLevel, Size, Subscribe};
 
     use super::{RetainHandling, Subscription};
 
@@ -123,4 +144,23 @@ mod test {
         assert_eq!(EXPECTED_LEN, dest.len());
         assert_eq!(QOS_EXPECTED_FLAG, dest[6]);
     }
+
+    #[test]
+    fn test_payload_size() {
+        const EXPECTED_PAYLOAD_SIZE: u32 = 7;
+        let mut subscribe = Subscribe::new(42);
+        let subscription = Subscription {
+            filter: "test".to_string(),
+            qos: QoSLevel::AtLeastOnce,
+            retain_as_pub: false,
+            no_local: false,
+            handling: RetainHandling::None,
+        };
+        subscribe.add_subscription(subscription);
+        let payload_remaining = subscribe.payload_size();
+        assert!(payload_remaining > 0);
+        assert_eq!(EXPECTED_PAYLOAD_SIZE, payload_remaining);
+    }
+
+
 }

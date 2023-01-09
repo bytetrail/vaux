@@ -4,7 +4,7 @@ use crate::codec::{
 };
 use crate::{
     encode_utf8_string, encode_variable_len_integer, Decode, Encode, MQTTCodecError, PropertyType,
-    QoSLevel, Remaining, UserPropertyMap, PROP_SIZE_U32, PROP_SIZE_U8,
+    QoSLevel, Size, UserPropertyMap, PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
@@ -132,7 +132,7 @@ impl Decode for WillMessage {
 
 impl Encode for WillMessage {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        let property_length = self.property_remaining().unwrap();
+        let property_length = self.property_size();
         encode_variable_len_integer(property_length, dest);
         if self.delay_interval != 0 {
             dest.put_u8(PropertyType::WillDelay as u8);
@@ -167,12 +167,12 @@ impl Encode for WillMessage {
     }
 }
 
-impl Remaining for WillMessage {
+impl Size for WillMessage {
     fn size(&self) -> u32 {
-        self.property_remaining().unwrap() + self.payload_remaining().unwrap()
+        self.property_size() + self.payload_size()
     }
 
-    fn property_remaining(&self) -> Option<u32> {
+    fn property_size(&self) -> u32 {
         let mut remaining = 0;
         if self.delay_interval != DEFAULT_WILL_DELAY {
             remaining += PROP_SIZE_U32;
@@ -196,10 +196,10 @@ impl Remaining for WillMessage {
             remaining += user_property.size();
         }
         remaining += crate::variable_byte_int_size(remaining);
-        Some(remaining)
+        remaining
     }
 
-    fn payload_remaining(&self) -> Option<u32> {
-        Some((self.topic.len() + 2 + self.payload.len() + 2) as u32)
+    fn payload_size(&self) -> u32 {
+        (self.topic.len() + 2 + self.payload.len() + 2) as u32
     }
 }

@@ -24,13 +24,13 @@ pub use crate::{disconnect::Disconnect, fixed::FixedHeader, subscribe::Subscribe
 use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;
 
-pub trait Remaining {
+pub trait Size {
     fn size(&self) -> u32;
-    fn property_remaining(&self) -> Option<u32>;
-    fn payload_remaining(&self) -> Option<u32>;
+    fn property_size(&self) -> u32;
+    fn payload_size(&self) -> u32;
 }
 
-pub trait Encode: Remaining {
+pub trait Encode: Size {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError>;
 }
 
@@ -69,7 +69,7 @@ impl UserPropertyMap {
     }
 }
 
-impl crate::Remaining for UserPropertyMap {
+impl crate::Size for UserPropertyMap {
     fn size(&self) -> u32 {
         let mut remaining: u32 = 0;
         for (key, value) in self.map.iter() {
@@ -81,12 +81,12 @@ impl crate::Remaining for UserPropertyMap {
         remaining
     }
 
-    fn property_remaining(&self) -> Option<u32> {
-        None
+    fn property_size(&self) -> u32 {
+        0
     }
 
-    fn payload_remaining(&self) -> Option<u32> {
-        None
+    fn payload_size(&self) -> u32 {
+        0
     }
 }
 

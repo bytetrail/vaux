@@ -1,8 +1,9 @@
 use bytes::{BufMut, BytesMut};
 
-use crate::{codec::{encode_variable_len_integer, PACKET_RESERVED_BIT1, PACKET_RESERVED_NONE}, Encode, MQTTCodecError, PacketType};
-
-
+use crate::{
+    codec::{encode_variable_len_integer, PACKET_RESERVED_BIT1, PACKET_RESERVED_NONE},
+    Encode, MQTTCodecError, PacketType,
+};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct FixedHeader {
@@ -40,17 +41,17 @@ impl FixedHeader {
     }
 }
 
-impl crate::Remaining for FixedHeader {
+impl crate::Size for FixedHeader {
     fn size(&self) -> u32 {
         self.remaining
     }
 
-    fn property_remaining(&self) -> Option<u32> {
-        None
+    fn property_size(&self) -> u32 {
+        0
     }
 
-    fn payload_remaining(&self) -> Option<u32> {
-        None
+    fn payload_size(&self) -> u32 {
+        0
     }
 }
 
