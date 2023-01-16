@@ -8,11 +8,14 @@ pub mod publish;
 pub mod pubrec;
 pub mod subscribe;
 mod will;
+mod property;
 
 use crate::codec::{
-    encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, PropertyType,
+    encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, 
     PROP_SIZE_U32, PROP_SIZE_U8,
 };
+
+pub use crate::property::PropertyType;
 
 pub use crate::codec::{
     decode, decode_fixed_header, encode, MQTTCodecError, Packet, PacketType, QoSLevel, Reason,

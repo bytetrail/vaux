@@ -1,4 +1,4 @@
-use std::{collections::HashSet, ops::Rem};
+use std::{collections::HashSet};
 
 use bytes::{Buf, BufMut, BytesMut};
 
@@ -7,10 +7,10 @@ use crate::{
         check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
         encode_bin_property, encode_bool_property, encode_u16_property, encode_u32_property,
         encode_utf8_property, encode_utf8_string, encode_var_int_property,
-        encode_variable_len_integer, variable_byte_int_size, PropertyType, PROP_SIZE_BINARY,
+        encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_BINARY,
         PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8, PROP_SIZE_UTF8_STRING, SIZE_UTF8_STRING,
     },
-    Decode, Encode, FixedHeader, MQTTCodecError, PacketType, QoSLevel, Size, UserPropertyMap,
+    Decode, Encode, FixedHeader, MQTTCodecError, PacketType, QoSLevel, Size, UserPropertyMap, PropertyType,
 };
 
 const RETAIN_MASK: u8 = 0b_0000_0001;

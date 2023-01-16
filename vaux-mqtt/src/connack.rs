@@ -1,11 +1,11 @@
 use crate::codec::{
     check_property, decode_binary_data, decode_prop_bool, decode_utf8_string,
     decode_variable_len_integer, encode_binary_data, encode_utf8_string,
-    encode_variable_len_integer, PropertyType, Reason, PROP_SIZE_U16,
+    encode_variable_len_integer, Reason, PROP_SIZE_U16,
 };
 use crate::{
     variable_byte_int_size, Decode, Encode, QoSLevel, Size, UserPropertyMap, PROP_SIZE_U32,
-    PROP_SIZE_U8,
+    PROP_SIZE_U8, PropertyType,
 };
 use crate::{FixedHeader, MQTTCodecError, PacketType};
 use bytes::{Buf, BufMut, BytesMut};
@@ -294,8 +294,7 @@ impl Encode for ConnAck {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::codec::PropertyType;
-    use crate::PropertyType::MaxQoS;
+    use crate::property::PropertyType;
     use crate::{Encode, UserPropertyMap};
     use bytes::BytesMut;
 

@@ -1,10 +1,10 @@
 use crate::codec::{
     check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
-    encode_binary_data, MQTTCodecError, PropertyType, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
+    encode_binary_data, MQTTCodecError, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use crate::{
     encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, Decode, Encode,
-    FixedHeader, PacketType, QoSLevel, Size, UserPropertyMap, WillMessage,
+    FixedHeader, PacketType, QoSLevel, Size, UserPropertyMap, WillMessage, PropertyType,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;

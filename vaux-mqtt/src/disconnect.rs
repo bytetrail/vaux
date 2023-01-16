@@ -5,10 +5,10 @@ use bytes::{Buf, BufMut, BytesMut};
 use crate::{
     codec::{
         check_property, decode_utf8_string, decode_variable_len_integer, encode_utf8_string,
-        encode_variable_len_integer, variable_byte_int_size, PropertyType, PROP_SIZE_U32,
+        encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_U32,
         PROP_SIZE_UTF8_STRING,
     },
-    Decode, Encode, FixedHeader, MQTTCodecError, PacketType, Reason, Size, UserPropertyMap,
+    Decode, Encode, FixedHeader, MQTTCodecError, PacketType, Reason, Size, UserPropertyMap, PropertyType,
 };
 
 const DEFAULT_DISCONNECT_REMAINING: u32 = 1;
