@@ -4,7 +4,7 @@ use crate::codec::{
 };
 use crate::{
     encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, Decode, Encode,
-    FixedHeader, PacketType, QoSLevel, Size, UserPropertyMap, WillMessage, PropertyType,
+    FixedHeader, PacketType, PropertyType, QoSLevel, Size, UserPropertyMap, WillMessage,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;

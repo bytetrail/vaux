@@ -4,8 +4,8 @@ use crate::codec::{
     encode_variable_len_integer, Reason, PROP_SIZE_U16,
 };
 use crate::{
-    variable_byte_int_size, Decode, Encode, QoSLevel, Size, UserPropertyMap, PROP_SIZE_U32,
-    PROP_SIZE_U8, PropertyType,
+    variable_byte_int_size, Decode, Encode, PropertyType, QoSLevel, Size, UserPropertyMap,
+    PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use crate::{FixedHeader, MQTTCodecError, PacketType};
 use bytes::{Buf, BufMut, BytesMut};

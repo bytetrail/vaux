@@ -13,7 +13,6 @@ pub(crate) const SIZE_UTF8_STRING: u32 = 2;
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
 pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
 
-
 /// MQTT Control Packet Type
 /// #[repr(u8)]
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]

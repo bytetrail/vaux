@@ -1,8 +1,10 @@
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
-    codec::{encode_utf8_string, variable_byte_int_size},
-    Encode, FixedHeader, MQTTCodecError, QoSLevel, Size, UserPropertyMap,
+    codec::{
+        decode_utf8_string, decode_variable_len_integer, encode_utf8_string, variable_byte_int_size,
+    },
+    Decode, Encode, FixedHeader, MQTTCodecError, PropertyType, QoSLevel, Size, UserPropertyMap,
 };
 
 const VAR_HDR_LEN: u32 = 2;
@@ -19,6 +21,21 @@ pub enum RetainHandling {
     Send,
     SendNew,
     None,
+}
+
+impl TryFrom<u8> for RetainHandling {
+    type Error = MQTTCodecError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(RetainHandling::Send),
+            0x01 => Ok(RetainHandling::SendNew),
+            0x02 => Ok(RetainHandling::None),
+            v => Err(MQTTCodecError::new(
+                format!("MQTTv5 3.8.3.1 invalid retain option: {}", v).as_str(),
+            )),
+        }
+    }
 }
 
 /// Subscription represents an MQTT v5 3.8.3 SUBSCRIBE Payload. The MQTT v5
@@ -40,6 +57,16 @@ impl Subscription {
             | (self.retain_as as u8) << 3
             | (self.handling as u8) << 4;
         dest.put_u8(flags);
+        Ok(())
+    }
+
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        self.filter = decode_utf8_string(src)?;
+        let flags = src.get_u8();
+        self.qos = QoSLevel::try_from(flags & 0b_0000_0011)?;
+        self.no_local = flags & 0b_0000_0100 == 0b_0000_0100;
+        self.retain_as = flags & 0b_0000_1000 == 0b_0000_1000;
+        self.handling = RetainHandling::try_from(flags & 0b_0011_0000 >> 4)?;
 
         Ok(())
     }
@@ -117,9 +144,59 @@ impl Encode for Subscribe {
         hdr.encode(dest)?;
         dest.put_u16(self.packet_id);
         if let Some(props) = self.user_props.as_ref() {
-            props.encode(dest)?;    
+            props.encode(dest)?;
         }
         self.encode_payload(dest)?;
+        Ok(())
+    }
+}
+
+impl Decode for Subscribe {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        if src.len() < 3 {
+            return Err(MQTTCodecError::new(
+                "MQTTv5 3.8.2 insufficient data for SUBSCRIBE",
+            ));
+        }
+        self.packet_id = src.get_u16();
+        let prop_len = decode_variable_len_integer(src);
+        if src.remaining() < prop_len as usize {
+            return Err(MQTTCodecError::new(
+                "MQTTv5 3.8.2 insufficient data for SUBSCRIBE properties",
+            ));
+        }
+        let read_until = src.remaining() - prop_len as usize;
+        let mut sub_id_prop: bool = false;
+        while src.remaining() > read_until {
+            match PropertyType::try_from(src.get_u8()) {
+                Ok(property_type) => {
+                    if property_type != PropertyType::UserProperty {
+                        match property_type {
+                            PropertyType::SubscriptionId => {
+                                if sub_id_prop {
+                                    return Err(MQTTCodecError::new(
+                                        "MQTTv5 3.8.2.1.2 subscription identifier repeated",
+                                    ));
+                                }
+                                sub_id_prop = true;
+                                self.sub_id = Some(decode_variable_len_integer(src));
+                            }
+                            _ => {
+                                return Err(MQTTCodecError::new(
+                                    "MQTTv5 3.8.2.1 unexpected property",
+                                ))
+                            }
+                        }
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        while src.remaining() != 0 {
+            let mut s = Subscription::default();
+            s.decode(src)?;
+            self.add_subscription(s);
+        }
         Ok(())
     }
 }
@@ -128,7 +205,7 @@ impl Encode for Subscribe {
 mod test {
     use bytes::BytesMut;
 
-    use crate::{QoSLevel, Size, Subscribe, Encode};
+    use crate::{Encode, QoSLevel, Size, Subscribe};
 
     use super::{RetainHandling, Subscription};
 
@@ -202,5 +279,4 @@ mod test {
             }
         }
     }
-
 }
