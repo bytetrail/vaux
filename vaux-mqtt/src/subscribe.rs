@@ -42,14 +42,15 @@ impl TryFrom<u8> for RetainHandling {
 /// 3.8.3.1 options are represented as individual fields in the struct.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Subscription {
-    filter: String,
-    qos: QoSLevel,
-    no_local: bool,
-    retain_as: bool,
-    handling: RetainHandling,
+    pub filter: String,
+    pub qos: QoSLevel,
+    pub no_local: bool,
+    pub retain_as: bool,
+    pub handling: RetainHandling,
 }
 
 impl Subscription {
+
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
         encode_utf8_string(&self.filter, dest)?;
         let flags = self.qos as u8
@@ -75,14 +76,23 @@ impl Subscription {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Subscribe {
     packet_id: u16,
-    sub_id: Option<u32>,
-    user_props: Option<UserPropertyMap>,
+    pub sub_id: Option<u32>,
+    pub user_props: Option<UserPropertyMap>,
     payload: Vec<Subscription>,
 }
 
 impl Subscribe {
+    pub fn packet_id(&self) -> u16 {
+        self.packet_id
+    }
 
-    fn add_subscription(&mut self, subscription: Subscription) {
+    pub fn set_packet_id(&mut self, packet_id: u16) {
+        // TODO replace with codec error
+        assert!(packet_id != 0);
+        self.packet_id = packet_id;
+    }
+
+    pub fn add_subscription(&mut self, subscription: Subscription) {
         self.payload.push(subscription);
     }
 
@@ -192,7 +202,7 @@ impl Decode for Subscribe {
 mod test {
     use bytes::BytesMut;
 
-    use crate::{Encode, QoSLevel, Size, Subscribe, PacketType, subscribe, Decode};
+    use crate::{subscribe, Decode, Encode, PacketType, QoSLevel, Size, Subscribe};
 
     use super::{RetainHandling, Subscription};
 
@@ -267,15 +277,52 @@ mod test {
         }
     }
 
-    #[test] 
+    #[test]
     fn test_basic_decode() {
         const ENCODED_PACKET: [u8; 43] = [
-            0xba, 0xba,                 // packet id
-            0x02,                       // property length
-            0x0b, 0x0A,                 // subscription id
-            0x00, 0x23, 0x2f, 0x66, 0x75, 0x73, 0x69, 0x6f, 0x6e, 0x2f, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x2f, 0x66, 0x72, 
-            0x69, 0x73, 0x63, 0x6f, 0x5f, 0x30, 0x31, 0x2f, 0x73, 0x65, 0x6e, 0x73, 0x6f, 0x72, 0x5f, 0x30, 0x31, 0x33,
-            0b_0001_1101                // subscription flags
+            0xba,
+            0xba, // packet id
+            0x02, // property length
+            0x0b,
+            0x0A, // subscription id
+            0x00,
+            0x23,
+            0x2f,
+            0x66,
+            0x75,
+            0x73,
+            0x69,
+            0x6f,
+            0x6e,
+            0x2f,
+            0x75,
+            0x70,
+            0x64,
+            0x61,
+            0x74,
+            0x65,
+            0x2f,
+            0x66,
+            0x72,
+            0x69,
+            0x73,
+            0x63,
+            0x6f,
+            0x5f,
+            0x30,
+            0x31,
+            0x2f,
+            0x73,
+            0x65,
+            0x6e,
+            0x73,
+            0x6f,
+            0x72,
+            0x5f,
+            0x30,
+            0x31,
+            0x33,
+            0b_0001_1101, // subscription flags
         ];
         const EXPECTED_PACKET_ID: u16 = 0xbaba;
         let mut src = BytesMut::from(&ENCODED_PACKET[..]);
@@ -287,6 +334,5 @@ mod test {
             }
             Err(e) => panic!("unexpected error decoding publish: {}", e),
         }
-
     }
 }

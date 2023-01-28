@@ -9,7 +9,7 @@ use std::{
 };
 
 use bytes::BytesMut;
-use vaux_mqtt::{decode, encode, publish::Publish, Connect, Packet, QoSLevel};
+use vaux_mqtt::{decode, encode, publish::Publish, Connect, Packet, QoSLevel, subscribe::{self, Subscription}, Subscribe};
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 1883;
@@ -195,6 +195,36 @@ impl MQTTClient {
             Err(e) => eprintln!("unexpected send error {:#?}", e),
         }
         Ok(())
+    }
+
+    pub fn subscribe(&mut self, packet_id: u16, topic_filter: &str) -> MQTTResult<()> {
+        let mut subscribe = Subscribe::default();
+        subscribe.set_packet_id(packet_id);
+        let subscription = Subscription{
+            filter: topic_filter.to_string(),
+            ..Default::default()
+        };
+        subscribe.add_subscription(subscription);
+        let mut dest = BytesMut::default();
+        let result = encode(Packet::Subscribe(subscribe.clone()), &mut dest);
+        if let Err(e) = result {
+            assert!(false, "Failed to encode packet: {:?}", e);
+        }
+        match self.connection.as_ref().unwrap().write_all(&dest.to_vec()) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(MQTTError { message: format!("unexpected send error {:#?}", e), kind: ErrorKind::Transport })        
+        }
+    }
+
+    pub fn read_next(&mut self) -> MQTTResult<Option<Packet>> {
+        let mut buffer = [0u8; 1024];
+        match self.connection.as_ref().unwrap().read(&mut buffer) {
+            Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
+                Ok(packet) => Ok(packet),
+                Err(e) => Err(MQTTError { message: e.reason, kind: ErrorKind::Codec }),
+            }
+            Err(e) => Err(MQTTError { message:e.to_string(), kind: ErrorKind::Transport }),
+        }
     }
 
     pub fn disconnect(&mut self) {
