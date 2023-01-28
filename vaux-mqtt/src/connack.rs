@@ -576,8 +576,6 @@ mod test {
                 prop_len += key_len + v.len() as u32 + 3;
             }
         }
-        println!("Property len() {}", prop_len);
-        println!("User property remaining {}", properties.size());
         let expected_len = EXPECTED_MIN_CONNACK_LEN as u32 + prop_len as u32;
         let expected_prop_len = prop_len as u32;
         let mut dest = BytesMut::new();

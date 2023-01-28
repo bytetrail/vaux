@@ -72,7 +72,7 @@ impl Subscription {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Subscribe {
     packet_id: u16,
     sub_id: Option<u32>,
@@ -81,19 +81,6 @@ pub struct Subscribe {
 }
 
 impl Subscribe {
-    pub fn new(packet_id: u16) -> Result<Self, MQTTCodecError> {
-        if packet_id == 0 {
-            return Err(MQTTCodecError::new(
-                "MQTTv5 2.2.1 packet identifier must not be 0",
-            ));
-        }
-        Ok(Subscribe {
-            packet_id,
-            sub_id: None,
-            user_props: None,
-            payload: Vec::new(),
-        })
-    }
 
     fn add_subscription(&mut self, subscription: Subscription) {
         self.payload.push(subscription);
@@ -205,7 +192,7 @@ impl Decode for Subscribe {
 mod test {
     use bytes::BytesMut;
 
-    use crate::{Encode, QoSLevel, Size, Subscribe};
+    use crate::{Encode, QoSLevel, Size, Subscribe, PacketType, subscribe, Decode};
 
     use super::{RetainHandling, Subscription};
 
@@ -244,7 +231,8 @@ mod test {
     #[test]
     fn test_payload_size() {
         const EXPECTED_PAYLOAD_SIZE: u32 = 7;
-        let mut subscribe = Subscribe::new(42).unwrap();
+        let mut subscribe = Subscribe::default();
+        subscribe.packet_id = 42;
         let subscription = Subscription {
             filter: "test".to_string(),
             qos: QoSLevel::AtLeastOnce,
@@ -260,8 +248,7 @@ mod test {
 
     #[test]
     fn test_bad_packet_id() {
-        assert!(Subscribe::new(0).is_err());
-        let mut subscribe = Subscribe::new(42).unwrap();
+        let mut subscribe = Subscribe::default();
         subscribe.packet_id = 0;
         let subscription = Subscription {
             filter: "test".to_string(),
@@ -278,5 +265,28 @@ mod test {
                 assert!(e.reason.starts_with("MQTTv5 2.2.1"));
             }
         }
+    }
+
+    #[test] 
+    fn test_basic_decode() {
+        const ENCODED_PACKET: [u8; 43] = [
+            0xba, 0xba,                 // packet id
+            0x02,                       // property length
+            0x0b, 0x0A,                 // subscription id
+            0x00, 0x23, 0x2f, 0x66, 0x75, 0x73, 0x69, 0x6f, 0x6e, 0x2f, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x2f, 0x66, 0x72, 
+            0x69, 0x73, 0x63, 0x6f, 0x5f, 0x30, 0x31, 0x2f, 0x73, 0x65, 0x6e, 0x73, 0x6f, 0x72, 0x5f, 0x30, 0x31, 0x33,
+            0b_0001_1101                // subscription flags
+        ];
+        const EXPECTED_PACKET_ID: u16 = 0xbaba;
+        let mut src = BytesMut::from(&ENCODED_PACKET[..]);
+        let mut subscribe = Subscribe::default();
+        match subscribe.decode(&mut src) {
+            Ok(_) => {
+                assert_eq!(EXPECTED_PACKET_ID, subscribe.packet_id);
+                assert_eq!(1, subscribe.payload.len());
+            }
+            Err(e) => panic!("unexpected error decoding publish: {}", e),
+        }
+
     }
 }

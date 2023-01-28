@@ -275,7 +275,6 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<Packet>, MQTTCodecError> {
                     Ok(Some(Packet::Publish(publish)))
                 }
                 PacketType::Disconnect => {
-                    println!("DISCONNECT");
                     let mut disconnect = Disconnect::default();
                     disconnect.decode(src)?;
                     Ok(Some(Packet::Disconnect(disconnect)))
