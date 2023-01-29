@@ -1,4 +1,5 @@
 use crate::publish::Publish;
+use crate::subscribe::SubAck;
 use crate::{ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, PropertyType, Subscribe};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
@@ -214,6 +215,7 @@ pub enum Packet {
     Publish(Publish),
     Disconnect(Disconnect),
     Subscribe(Subscribe),
+    SubAck(SubAck,)
 }
 
 impl From<&Packet> for PacketType {
@@ -226,6 +228,7 @@ impl From<&Packet> for PacketType {
             Packet::Publish(_) => PacketType::Publish,
             Packet::Disconnect(_) => PacketType::Disconnect,
             Packet::Subscribe(_) => PacketType::Subscribe,
+            Packet::SubAck(_) => PacketType::SubAck,
         }
     }
 }
@@ -272,6 +275,7 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<Packet>, MQTTCodecError> {
                 }
                 PacketType::Publish => {
                     let mut publish = Publish::new_from_header(packet_header)?;
+                    publish.decode(src)?;
                     Ok(Some(Packet::Publish(publish)))
                 }
                 PacketType::Disconnect => {
@@ -283,6 +287,16 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<Packet>, MQTTCodecError> {
                     let mut connack = ConnAck::default();
                     connack.decode(src)?;
                     Ok(Some(Packet::ConnAck(connack)))
+                }
+                PacketType::Subscribe => {
+                    let mut subscribe = Subscribe::default();
+                    subscribe.decode(src)?;
+                    Ok(Some(Packet::Subscribe(subscribe)))
+                }
+                PacketType::SubAck => {
+                    let mut suback = SubAck::default();
+                    suback.decode(src)?;
+                    Ok(Some(Packet::SubAck(suback)))
                 }
                 _ => Err(MQTTCodecError::new("unsupported packet type")),
             },
@@ -304,6 +318,7 @@ pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MQTTCodecError>
             Ok(())
         }
         Packet::Subscribe(s) => s.encode(dest),
+        Packet::SubAck(s) => s.encode(dest),
     }?;
     Ok(())
 }

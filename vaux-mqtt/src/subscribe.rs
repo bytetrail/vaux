@@ -2,12 +2,14 @@ use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     codec::{
-        decode_utf8_string, decode_variable_len_integer, encode_utf8_string, variable_byte_int_size,
+        decode_utf8_string, decode_variable_len_integer, encode_u16_property, encode_utf8_string,
+        encode_var_int_property, encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_UTF8_STRING,
     },
-    Decode, Encode, FixedHeader, MQTTCodecError, PropertyType, QoSLevel, Size, UserPropertyMap,
+    Decode, Encode, FixedHeader, MQTTCodecError, PropertyType, QoSLevel, Size, UserPropertyMap, Reason,
 };
 
 const VAR_HDR_LEN: u32 = 2;
+const PROP_ID_LEN: u32 = 1;
 
 /// MQTT v5 3.8.3.1 Subscription Options
 /// bits 4 and 5 of the subscription options hold the retain handling flag.
@@ -38,6 +40,84 @@ impl TryFrom<u8> for RetainHandling {
     }
 }
 
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SubAck {
+    packet_id: u16,
+    reason_desc: Option<String>,
+    user_props: Option<UserPropertyMap>,
+    sub_reason: Vec<Reason>,
+}
+
+impl Size for SubAck {
+    fn size(&self) -> u32 {
+        let prop_size = self.property_size();
+        VAR_HDR_LEN + variable_byte_int_size(prop_size) + prop_size + self.payload_size()
+    }
+
+    fn property_size(&self) -> u32 {
+        self.reason_desc.as_ref().map_or(0, |d|  PROP_SIZE_UTF8_STRING + d.len() as u32) 
+        + self.user_props.as_ref().map_or(0, |u| u.property_size())
+    }
+
+    fn payload_size(&self) -> u32 {
+        self.sub_reason.len() as u32
+    }
+}
+
+impl Decode for SubAck {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        if src.remaining() < 4 {
+            return Err(MQTTCodecError::new("MQTTv5 3.9.3 insufficient data for SUBACK"));
+        }
+        self.packet_id = src.get_u16();
+        let prop_len = decode_variable_len_integer(src);
+        if src.remaining() < prop_len as usize{
+            return Err(MQTTCodecError::new("MQTTv5 3.9.3 insufficient data for SUBACK properties"));
+        }
+        let read_until = src.remaining() - prop_len as usize;
+        let mut reason_id_prop: bool = false;
+        while src.remaining() > read_until {
+            match PropertyType::try_from(src.get_u8()) {
+                Ok(property_type) => {
+                    if property_type != PropertyType::UserProperty {
+                        match property_type {
+                            PropertyType::Reason => {
+                                if reason_id_prop {
+                                    return Err(MQTTCodecError::new("MQTTv5 3.9.2.1.2 reason description can appear only once"))
+                                }
+                                self.reason_desc = Some(decode_utf8_string(src)?);
+                                reason_id_prop = true;
+                            }
+                            _ => {
+                                return Err(MQTTCodecError::new(
+                                    "MQTTv5 3.8.2.1 unexpected property",
+                                ))
+                            }
+                        }
+                    } else {
+                        if self.user_props == None {
+                            self.user_props = Some(UserPropertyMap::new());
+                        }
+                        let property_map = self.user_props.as_mut().unwrap();
+                        let key = decode_utf8_string(src)?;
+                        let value = decode_utf8_string(src)?;
+                        property_map.add_property(&key, &value);
+                    }
+                }
+                Err(_) => todo!(),
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Encode for SubAck {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+        todo!()
+    }
+}
+
 /// Subscription represents an MQTT v5 3.8.3 SUBSCRIBE Payload. The MQTT v5
 /// 3.8.3.1 options are represented as individual fields in the struct.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -50,7 +130,6 @@ pub struct Subscription {
 }
 
 impl Subscription {
-
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
         encode_utf8_string(&self.filter, dest)?;
         let flags = self.qos as u8
@@ -116,7 +195,8 @@ impl Size for Subscribe {
     }
 
     fn property_size(&self) -> u32 {
-        self.sub_id.map_or(0, |id| variable_byte_int_size(id))
+        self.sub_id
+            .map_or(0, |id| PROP_ID_LEN + variable_byte_int_size(id))
             + self.user_props.as_ref().map_or(0, |p| p.size())
     }
 
@@ -140,6 +220,10 @@ impl Encode for Subscribe {
         hdr.set_remaining(self.size());
         hdr.encode(dest)?;
         dest.put_u16(self.packet_id);
+        encode_variable_len_integer(self.property_size(), dest);
+        if let Some(sub_id) = self.sub_id {
+            encode_var_int_property(PropertyType::SubscriptionId, sub_id, dest);
+        }
         if let Some(props) = self.user_props.as_ref() {
             props.encode(dest)?;
         }
@@ -184,6 +268,15 @@ impl Decode for Subscribe {
                                 ))
                             }
                         }
+                    } else {
+                        if self.user_props == None {
+                            self.user_props = Some(UserPropertyMap::new());
+                        }
+                        let property_map = self.user_props.as_mut().unwrap();
+                        let key = decode_utf8_string(src)?;
+                        let value = decode_utf8_string(src)?;
+                        property_map.add_property(&key, &value);
+
                     }
                 }
                 Err(e) => return Err(e),
@@ -286,42 +379,12 @@ mod test {
             0x0b,
             0x0A, // subscription id
             0x00,
-            0x23,
-            0x2f,
-            0x66,
-            0x75,
-            0x73,
-            0x69,
-            0x6f,
-            0x6e,
-            0x2f,
-            0x75,
-            0x70,
-            0x64,
-            0x61,
-            0x74,
-            0x65,
-            0x2f,
-            0x66,
-            0x72,
-            0x69,
-            0x73,
-            0x63,
-            0x6f,
-            0x5f,
-            0x30,
-            0x31,
-            0x2f,
-            0x73,
-            0x65,
-            0x6e,
-            0x73,
-            0x6f,
-            0x72,
-            0x5f,
-            0x30,
-            0x31,
-            0x33,
+            0x23, 0x2f, 0x66, 0x75, 0x73, 0x69,
+            0x6f, 0x6e, 0x2f, 0x75, 0x70, 0x64,
+            0x61, 0x74, 0x65, 0x2f, 0x66, 0x72,
+            0x69, 0x73, 0x63, 0x6f, 0x5f, 0x30,
+            0x31, 0x2f, 0x73, 0x65, 0x6e, 0x73,
+            0x6f, 0x72, 0x5f, 0x30, 0x31, 0x33,
             0b_0001_1101, // subscription flags
         ];
         const EXPECTED_PACKET_ID: u16 = 0xbaba;

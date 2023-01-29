@@ -3,13 +3,17 @@ pub mod session;
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    sync::mpsc::{self, Receiver, Sender},
-    thread::{self, spawn},
+    sync::mpsc::{Receiver, Sender},
     time::Duration,
 };
 
 use bytes::BytesMut;
-use vaux_mqtt::{decode, encode, publish::Publish, Connect, Packet, QoSLevel, subscribe::{self, Subscription}, Subscribe};
+use vaux_mqtt::{
+    decode, encode,
+    publish::Publish,
+    subscribe::{Subscription},
+    Connect, Packet, Subscribe,
+};
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 1883;
@@ -200,7 +204,7 @@ impl MQTTClient {
     pub fn subscribe(&mut self, packet_id: u16, topic_filter: &str) -> MQTTResult<()> {
         let mut subscribe = Subscribe::default();
         subscribe.set_packet_id(packet_id);
-        let subscription = Subscription{
+        let subscription = Subscription {
             filter: topic_filter.to_string(),
             ..Default::default()
         };
@@ -210,20 +214,46 @@ impl MQTTClient {
         if let Err(e) = result {
             assert!(false, "Failed to encode packet: {:?}", e);
         }
+        println!("dest {:?}", &dest.to_vec());
         match self.connection.as_ref().unwrap().write_all(&dest.to_vec()) {
             Ok(_) => Ok(()),
-            Err(e) => Err(MQTTError { message: format!("unexpected send error {:#?}", e), kind: ErrorKind::Transport })        
+            Err(e) => Err(MQTTError {
+                message: format!("unexpected send error {:#?}", e),
+                kind: ErrorKind::Transport,
+            }),
         }
     }
 
     pub fn read_next(&mut self) -> MQTTResult<Option<Packet>> {
+        if self
+            .connection
+            .as_mut()
+            .unwrap()
+            .set_read_timeout(Some(Duration::from_millis(2000)))
+            .is_err()
+        {
+            return Err(MQTTError::new(
+                "unable to set connection read timeout",
+                ErrorKind::Transport,
+            ));
+        }
+
         let mut buffer = [0u8; 1024];
         match self.connection.as_ref().unwrap().read(&mut buffer) {
             Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
-                Ok(packet) => Ok(packet),
-                Err(e) => Err(MQTTError { message: e.reason, kind: ErrorKind::Codec }),
-            }
-            Err(e) => Err(MQTTError { message:e.to_string(), kind: ErrorKind::Transport }),
+                Ok(packet) => {
+                   
+                    Ok(packet)                    
+                }
+                Err(e) => Err(MQTTError {
+                    message: e.reason,
+                    kind: ErrorKind::Codec,
+                }),
+            },
+            Err(e) => Err(MQTTError {
+                message: e.to_string(),
+                kind: ErrorKind::Transport,
+            }),
         }
     }
 
