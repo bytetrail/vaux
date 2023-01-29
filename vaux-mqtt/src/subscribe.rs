@@ -2,10 +2,12 @@ use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     codec::{
-        decode_utf8_string, decode_variable_len_integer, encode_u16_property, encode_utf8_string,
-        encode_var_int_property, encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_UTF8_STRING,
+        decode_utf8_string, decode_variable_len_integer, encode_utf8_string,
+        encode_var_int_property, encode_variable_len_integer, variable_byte_int_size,
+        PROP_SIZE_UTF8_STRING,
     },
-    Decode, Encode, FixedHeader, MQTTCodecError, PropertyType, QoSLevel, Size, UserPropertyMap, Reason,
+    Decode, Encode, FixedHeader, MQTTCodecError, PropertyType, QoSLevel, Reason, Size,
+    UserPropertyMap,
 };
 
 const VAR_HDR_LEN: u32 = 2;
@@ -40,7 +42,6 @@ impl TryFrom<u8> for RetainHandling {
     }
 }
 
-
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SubAck {
     packet_id: u16,
@@ -56,8 +57,10 @@ impl Size for SubAck {
     }
 
     fn property_size(&self) -> u32 {
-        self.reason_desc.as_ref().map_or(0, |d|  PROP_SIZE_UTF8_STRING + d.len() as u32) 
-        + self.user_props.as_ref().map_or(0, |u| u.property_size())
+        self.reason_desc
+            .as_ref()
+            .map_or(0, |d| PROP_SIZE_UTF8_STRING + d.len() as u32)
+            + self.user_props.as_ref().map_or(0, |u| u.property_size())
     }
 
     fn payload_size(&self) -> u32 {
@@ -68,12 +71,16 @@ impl Size for SubAck {
 impl Decode for SubAck {
     fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
         if src.remaining() < 4 {
-            return Err(MQTTCodecError::new("MQTTv5 3.9.3 insufficient data for SUBACK"));
+            return Err(MQTTCodecError::new(
+                "MQTTv5 3.9.3 insufficient data for SUBACK",
+            ));
         }
         self.packet_id = src.get_u16();
         let prop_len = decode_variable_len_integer(src);
-        if src.remaining() < prop_len as usize{
-            return Err(MQTTCodecError::new("MQTTv5 3.9.3 insufficient data for SUBACK properties"));
+        if src.remaining() < prop_len as usize {
+            return Err(MQTTCodecError::new(
+                "MQTTv5 3.9.3 insufficient data for SUBACK properties",
+            ));
         }
         let read_until = src.remaining() - prop_len as usize;
         let mut reason_id_prop: bool = false;
@@ -84,7 +91,9 @@ impl Decode for SubAck {
                         match property_type {
                             PropertyType::Reason => {
                                 if reason_id_prop {
-                                    return Err(MQTTCodecError::new("MQTTv5 3.9.2.1.2 reason description can appear only once"))
+                                    return Err(MQTTCodecError::new(
+                                        "MQTTv5 3.9.2.1.2 reason description can appear only once",
+                                    ));
                                 }
                                 self.reason_desc = Some(decode_utf8_string(src)?);
                                 reason_id_prop = true;
@@ -276,7 +285,6 @@ impl Decode for Subscribe {
                         let key = decode_utf8_string(src)?;
                         let value = decode_utf8_string(src)?;
                         property_map.add_property(&key, &value);
-
                     }
                 }
                 Err(e) => return Err(e),
@@ -371,6 +379,7 @@ mod test {
     }
 
     #[test]
+    #[rustfmt::skip]
     fn test_basic_decode() {
         const ENCODED_PACKET: [u8; 43] = [
             0xba,
@@ -378,13 +387,11 @@ mod test {
             0x02, // property length
             0x0b,
             0x0A, // subscription id
-            0x00,
-            0x23, 0x2f, 0x66, 0x75, 0x73, 0x69,
-            0x6f, 0x6e, 0x2f, 0x75, 0x70, 0x64,
-            0x61, 0x74, 0x65, 0x2f, 0x66, 0x72,
-            0x69, 0x73, 0x63, 0x6f, 0x5f, 0x30,
-            0x31, 0x2f, 0x73, 0x65, 0x6e, 0x73,
-            0x6f, 0x72, 0x5f, 0x30, 0x31, 0x33,
+            0x00, 0x23, 0x2f, 0x66, 0x75, 0x73, 0x69, 0x6f, 0x6e, 
+            0x2f, 0x75, 0x70, 0x64, 0x61, 0x74, 0x65, 0x2f, 0x66,
+            0x72, 0x69, 0x73, 0x63, 0x6f, 0x5f, 0x30, 0x31, 0x2f, 
+            0x73, 0x65, 0x6e, 0x73, 0x6f, 0x72, 0x5f, 0x30, 0x31, 
+            0x33,
             0b_0001_1101, // subscription flags
         ];
         const EXPECTED_PACKET_ID: u16 = 0xbaba;

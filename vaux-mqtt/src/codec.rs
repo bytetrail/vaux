@@ -215,7 +215,7 @@ pub enum Packet {
     Publish(Publish),
     Disconnect(Disconnect),
     Subscribe(Subscribe),
-    SubAck(SubAck,)
+    SubAck(SubAck),
 }
 
 impl From<&Packet> for PacketType {

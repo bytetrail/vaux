@@ -9,10 +9,7 @@ use std::{
 
 use bytes::BytesMut;
 use vaux_mqtt::{
-    decode, encode,
-    publish::Publish,
-    subscribe::{Subscription},
-    Connect, Packet, Subscribe,
+    decode, encode, publish::Publish, subscribe::Subscription, Connect, Packet, Subscribe,
 };
 
 const DEFAULT_HOST: &str = "127.0.0.1";
@@ -26,11 +23,12 @@ pub struct MQTTClient {
     receiver: Option<Receiver<MQTTResult<Packet>>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub enum ErrorKind {
     Codec,
     Protocol,
     Connection,
+    Timeout,
     Transport,
 }
 
@@ -46,6 +44,14 @@ impl MQTTError {
             message: message.to_string(),
             kind,
         }
+    }
+
+    pub fn kind(&self) -> ErrorKind{
+        self.kind
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
     }
 }
 
@@ -225,11 +231,34 @@ impl MQTTClient {
     }
 
     pub fn read_next(&mut self) -> MQTTResult<Option<Packet>> {
+        let mut buffer = [0u8; 1024];
+        match self.connection.as_ref().unwrap().read(&mut buffer) {
+            Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
+                Ok(packet) => Ok(packet),
+                Err(e) => Err(MQTTError {
+                    message: e.reason,
+                    kind: ErrorKind::Codec,
+                }),
+            },
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::TimedOut => Err(MQTTError {
+                    message: e.to_string(),
+                    kind: ErrorKind::Timeout,
+                }),
+                _ => Err(MQTTError {
+                    message: e.to_string(),
+                    kind: ErrorKind::Transport,
+                }),
+            },
+        }
+    }
+
+    pub fn set_read_timeout(&mut self, millis: u64) -> MQTTResult<()> {
         if self
             .connection
             .as_mut()
             .unwrap()
-            .set_read_timeout(Some(Duration::from_millis(2000)))
+            .set_read_timeout(Some(Duration::from_millis(millis)))
             .is_err()
         {
             return Err(MQTTError::new(
@@ -237,24 +266,7 @@ impl MQTTClient {
                 ErrorKind::Transport,
             ));
         }
-
-        let mut buffer = [0u8; 1024];
-        match self.connection.as_ref().unwrap().read(&mut buffer) {
-            Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
-                Ok(packet) => {
-                   
-                    Ok(packet)                    
-                }
-                Err(e) => Err(MQTTError {
-                    message: e.reason,
-                    kind: ErrorKind::Codec,
-                }),
-            },
-            Err(e) => Err(MQTTError {
-                message: e.to_string(),
-                kind: ErrorKind::Transport,
-            }),
-        }
+        Ok(())
     }
 
     pub fn disconnect(&mut self) {
