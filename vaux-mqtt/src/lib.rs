@@ -1,3 +1,5 @@
+
+mod buf;
 mod codec;
 mod connack;
 mod connect;
@@ -8,6 +10,7 @@ pub mod puback;
 pub mod publish;
 pub mod pubrec;
 pub mod subscribe;
+pub mod test;
 mod will;
 
 use crate::codec::{

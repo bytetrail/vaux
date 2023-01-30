@@ -303,7 +303,7 @@ impl Decode for Subscribe {
 mod test {
     use bytes::BytesMut;
 
-    use crate::{subscribe, Decode, Encode, PacketType, QoSLevel, Size, Subscribe};
+    use crate::{Decode, Encode, Size, Subscribe, UserPropertyMap, QoSLevel};
 
     use super::{RetainHandling, Subscription};
 
@@ -342,6 +342,7 @@ mod test {
     #[test]
     fn test_payload_size() {
         const EXPECTED_PAYLOAD_SIZE: u32 = 7;
+
         let mut subscribe = Subscribe::default();
         subscribe.packet_id = 42;
         let subscription = Subscription {
@@ -376,6 +377,41 @@ mod test {
                 assert!(e.reason.starts_with("MQTTv5 2.2.1"));
             }
         }
+    }
+
+    #[test] 
+    fn test_encode_properties() {
+        const USER_PROP_KEY: &str = "btf_mgmt";
+        const USER_PROP_VALUE: &str = "management";
+        const USER_PROP_SIZE: usize = 5 + USER_PROP_KEY.len() + USER_PROP_VALUE.len();
+        // USER PROPS + SUB ID PROP 
+        const EXPECTED_PROP_SIZE: u32 = USER_PROP_SIZE as u32 + 3;
+        const EXPECTED_PAYLOAD_SIZE: u32 = 7;
+        const EXPECTED_SIZE: u32 = 5 +  EXPECTED_PAYLOAD_SIZE + EXPECTED_PROP_SIZE;
+        let mut subscribe = Subscribe::default();
+        subscribe.packet_id = 101;
+        let mut usr = UserPropertyMap::new();
+        usr.add_property(USER_PROP_KEY, USER_PROP_VALUE);
+        subscribe.user_props = Some(usr);
+        subscribe.sub_id = Some(4096);
+        let subscription = Subscription {
+            filter: "test".to_string(),
+            qos: QoSLevel::AtLeastOnce,
+            retain_as: false,
+            no_local: false,
+            handling: RetainHandling::None,
+        };
+        subscribe.add_subscription(subscription);
+        assert_eq!(EXPECTED_PROP_SIZE, subscribe.property_size());
+        assert_eq!(EXPECTED_PAYLOAD_SIZE, subscribe.payload_size());
+        let mut dest = BytesMut::new();
+        match subscribe.encode(&mut dest) {
+            Ok(()) => {
+                assert_eq!(EXPECTED_SIZE, dest.len() as u32);
+            },
+            Err(e) => panic!("Unexpected encoding error: {}", e.reason),
+        }
+
     }
 
     #[test]
