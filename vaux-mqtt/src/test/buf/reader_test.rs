@@ -1,6 +1,5 @@
 use crate::buf::reader::Reader;
 
-
 #[test]
 fn test_read_var_int() {
     let encoded = [0x80, 0x01];

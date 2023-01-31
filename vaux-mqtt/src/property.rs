@@ -1,8 +1,8 @@
 use std::fmt::{Display, Formatter};
 
-use bytes::{BytesMut, Buf};
+use bytes::{Buf, BytesMut};
 
-use crate::{MQTTCodecError, Decode};
+use crate::{Decode, MQTTCodecError};
 
 /// MQTT property type. For more information on the specific property types,
 /// please see the
@@ -142,4 +142,3 @@ impl TryFrom<u8> for PropertyType {
         }
     }
 }
-

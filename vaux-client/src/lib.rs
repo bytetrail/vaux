@@ -2,7 +2,7 @@ pub mod session;
 
 use std::{
     io::{Read, Write},
-    net::{SocketAddr, TcpStream},
+    net::{IpAddr, SocketAddr, TcpStream},
     sync::mpsc::{Receiver, Sender},
     time::Duration,
 };
@@ -16,7 +16,8 @@ const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 1883;
 
 pub struct MQTTClient {
-    addr: SocketAddr,
+    addr: IpAddr,
+    port: u16,
     client_id: Option<String>,
     connection: Option<TcpStream>,
     sender: Option<Sender<Packet>>,
@@ -46,7 +47,7 @@ impl MQTTError {
         }
     }
 
-    pub fn kind(&self) -> ErrorKind{
+    pub fn kind(&self) -> ErrorKind {
         self.kind
     }
 
@@ -58,9 +59,10 @@ impl MQTTError {
 pub type MQTTResult<T> = Result<T, MQTTError>;
 
 impl MQTTClient {
-    pub fn new(addr: SocketAddr) -> Self {
+    pub fn new(addr: IpAddr, port: u16) -> Self {
         MQTTClient {
             addr,
+            port,
             client_id: None,
             connection: None,
             sender: None,
@@ -68,9 +70,10 @@ impl MQTTClient {
         }
     }
 
-    pub fn new_with_id(addr: SocketAddr, id: &str) -> Self {
+    pub fn new_with_id(addr: IpAddr, port: u16, id: &str) -> Self {
         MQTTClient {
             addr,
+            port,
             client_id: Some(id.to_owned()),
             connection: None,
             sender: None,
@@ -84,7 +87,7 @@ impl MQTTClient {
             connect.client_id = id.to_owned();
         }
         let connect_packet = Packet::Connect(connect);
-        match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
+        match TcpStream::connect((self.addr, self.port)) {
             Ok(stream) => {
                 self.connection = Some(stream);
                 let mut buffer = [0u8; 128];

@@ -1,20 +1,12 @@
-
 pub struct Reader<'a> {
-    buf: &'a[u8],
+    buf: &'a [u8],
     pos: usize,
     len: usize,
 }
 
-
 impl<'a> Reader<'a> {
-
-    pub fn new(buf: &'a[u8], len: usize) -> Self {
-        Reader {
-            buf,
-            pos: 0,
-            len
-        }
-    
+    pub fn new(buf: &'a [u8], len: usize) -> Self {
+        Reader { buf, pos: 0, len }
     }
 
     /// Reads an MQTT variable length unsigned integer value into a u32.
@@ -23,9 +15,7 @@ impl<'a> Reader<'a> {
         let mut shift = 0;
         let mut next_byte = self.buf[self.pos];
         self.pos += 1;
-        if self.pos >= self.len {
-            
-        }
+        if self.pos >= self.len {}
         let mut decode = true;
         while decode {
             result += ((next_byte & 0x7f) as u32) << shift;
@@ -35,21 +25,9 @@ impl<'a> Reader<'a> {
             } else {
                 next_byte = self.buf[self.pos];
                 self.pos += 1;
-                if self.pos >= self.len {
-
-                }
+                if self.pos >= self.len {}
             }
         }
         result
     }
 }
-
-
-#[cfg(test)]
-mod test {
-    use crate::buf::reader::Reader;
-    
-
-
-}
-

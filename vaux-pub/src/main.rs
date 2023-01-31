@@ -1,10 +1,9 @@
-use std::net::{SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 
 fn main() {
-    let mut client = vaux_client::MQTTClient::new_with_id(
-        SocketAddr::V4(SocketAddrV4::new(0x_7f_00_00_01.into(), 1833)),
-        "vaux-20230101T1500CST",
-    );
+    let addr: Ipv4Addr = "127.0.0.1".parse().expect("unable to create addr");
+    let mut client =
+        vaux_client::MQTTClient::new_with_id(IpAddr::V4(addr), 1833, "vaux-20230101T1500CST");
     match client.connect() {
         Ok(_) => {
             println!("connected");

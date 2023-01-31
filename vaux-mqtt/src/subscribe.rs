@@ -303,7 +303,7 @@ impl Decode for Subscribe {
 mod test {
     use bytes::BytesMut;
 
-    use crate::{Decode, Encode, Size, Subscribe, UserPropertyMap, QoSLevel};
+    use crate::{Decode, Encode, QoSLevel, Size, Subscribe, UserPropertyMap};
 
     use super::{RetainHandling, Subscription};
 
@@ -379,15 +379,15 @@ mod test {
         }
     }
 
-    #[test] 
+    #[test]
     fn test_encode_properties() {
         const USER_PROP_KEY: &str = "btf_mgmt";
         const USER_PROP_VALUE: &str = "management";
         const USER_PROP_SIZE: usize = 5 + USER_PROP_KEY.len() + USER_PROP_VALUE.len();
-        // USER PROPS + SUB ID PROP 
+        // USER PROPS + SUB ID PROP
         const EXPECTED_PROP_SIZE: u32 = USER_PROP_SIZE as u32 + 3;
         const EXPECTED_PAYLOAD_SIZE: u32 = 7;
-        const EXPECTED_SIZE: u32 = 5 +  EXPECTED_PAYLOAD_SIZE + EXPECTED_PROP_SIZE;
+        const EXPECTED_SIZE: u32 = 5 + EXPECTED_PAYLOAD_SIZE + EXPECTED_PROP_SIZE;
         let mut subscribe = Subscribe::default();
         subscribe.packet_id = 101;
         let mut usr = UserPropertyMap::new();
@@ -408,10 +408,9 @@ mod test {
         match subscribe.encode(&mut dest) {
             Ok(()) => {
                 assert_eq!(EXPECTED_SIZE, dest.len() as u32);
-            },
+            }
             Err(e) => panic!("Unexpected encoding error: {}", e.reason),
         }
-
     }
 
     #[test]
