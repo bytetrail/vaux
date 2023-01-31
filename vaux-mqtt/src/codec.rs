@@ -1,7 +1,6 @@
 use crate::publish::Publish;
-use crate::{
-    ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, Packet, PACKET_RESERVED_NONE,
-};
+use crate::subscribe::SubAck;
+use crate::{ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, PropertyType, Subscribe};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -12,145 +11,8 @@ pub(crate) const PROP_SIZE_U8: u32 = 2;
 pub(crate) const PROP_SIZE_UTF8_STRING: u32 = 3;
 pub(crate) const PROP_SIZE_BINARY: u32 = 3;
 pub(crate) const SIZE_UTF8_STRING: u32 = 2;
-
-/// MQTT property type. For more information on the specific property types,
-/// please see the
-/// [MQTT Specification](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901027).
-/// All of the types below are MQTT protocol types.
-/// Identifier | Name | Type
-/// -----------+------+-----
-/// 0x01 | Payload Format Indicator | byte
-/// 0x02 | Message Expiry Interval | 4 byte Integer
-/// 0x03 | Content Type | UTF-8 string
-/// 0x08 | Response Topic | UTF-8 string
-/// 0x09 | Correlation Data | binary data
-/// 0x0b | Subscription Identifier | Variable Length Integer
-/// 0x11 | Session Expiry Interval | 4 byte Integer
-/// 0x12 | Assigned Client Identifier | UTF-8 string
-/// 0x13 | Server Keep Alive | 2 byte integer
-/// 0x15 | Authentication Method | UTF-8 string
-/// 0x16 | Authentication Data | binary data
-/// 0x17 | Request Problem Information | byte
-/// 0x18 | Will Delay Interval | 4 byte integer
-/// 0x19 | Request Response Information | byte
-/// 0x1a | Response Information | UTF-8 string
-/// 0x1c | Server Reference | UTF-8 string
-/// 0x1f | Reason String | UTF-8 string
-/// 0x21 | Receive Maximum | 2 byte integer
-/// 0x22 | Topic Alias Maximum | 2 byte integer
-/// 0x23 | Topic Alias | 2 byte integer
-/// 0x24 | Maximum QoS | byte
-/// 0x25 | Retain Available | byte
-/// 0x26 | User Property | UTF-8 string pair
-/// 0x27 | Maximum Packet Size | 4 byte integer
-/// 0x28 | Wildcard Subscription Available | byte
-/// 0x29 | Subscription Identifier Available | byte
-/// 0x2a | Shared Subscription Available | byte
-#[repr(u8)]
-#[derive(Hash, Debug, Copy, Clone, PartialEq, Eq)]
-pub enum PropertyType {
-    PayloadFormat = 0x01,
-    MessageExpiry = 0x02,
-    ContentType = 0x03,
-    ResponseTopic = 0x08,
-    CorrelationData = 0x09,
-    SubscriptionId = 0x0b,
-    SessionExpiryInt = 0x11,
-    AssignedClientId = 0x12,
-    KeepAlive = 0x13,
-    AuthMethod = 0x15,
-    AuthData = 0x16,
-    ReqProblemInfo = 0x17,
-    WillDelay = 0x18,
-    ReqRespInfo = 0x19,
-    RespInfo = 0x1a,
-    ServerRef = 0x1c,
-    Reason = 0x1f,
-    RecvMax = 0x21,
-    TopicAliasMax = 0x22,
-    TopicAlias = 0x23,
-    MaxQoS = 0x24,
-    RetainAvail = 0x25,
-    UserProperty = 0x26,
-    MaxPacketSize = 0x27,
-    WildcardSubAvail = 0x28,
-    SubIdAvail = 0x29,
-    ShardSubAvail = 0x2a,
-}
-
-impl Display for PropertyType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PropertyType::PayloadFormat => write!(f, "\"Payload Format Indicator\""),
-            PropertyType::MessageExpiry => write!(f, "\"Message Expiry Interval\""),
-            PropertyType::ContentType => write!(f, "\"Content Type\""),
-            PropertyType::ResponseTopic => write!(f, "\"Response Topic\""),
-            PropertyType::CorrelationData => write!(f, "\"Correlation Data\""),
-            PropertyType::SubscriptionId => write!(f, "\"Subscription Identifier\""),
-            PropertyType::SessionExpiryInt => write!(f, "\"Session Expiry Interval\""),
-            PropertyType::AssignedClientId => write!(f, "\"Assigned Client Identifier\""),
-            PropertyType::KeepAlive => write!(f, "\"Server Keep Alive\""),
-            PropertyType::AuthMethod => write!(f, "\"Authentication Method\""),
-            PropertyType::AuthData => write!(f, "\"Authentication Data\""),
-            PropertyType::ReqProblemInfo => write!(f, "\"Request Problem Information\""),
-            PropertyType::WillDelay => write!(f, "\"Will Delay Interval\""),
-            PropertyType::ReqRespInfo => write!(f, "\"Request Response Information\""),
-            PropertyType::RespInfo => write!(f, "\"Response Information\""),
-            PropertyType::ServerRef => write!(f, "\"Server Reference\""),
-            PropertyType::Reason => write!(f, "\"Reason String\""),
-            PropertyType::RecvMax => write!(f, "\"Receive Maximum\""),
-            PropertyType::TopicAliasMax => write!(f, "\"Topic Alias Maximum\""),
-            PropertyType::TopicAlias => write!(f, "\"Topic Alias\""),
-            PropertyType::MaxQoS => write!(f, "\"Maximum QoS\""),
-            PropertyType::RetainAvail => write!(f, "\"Retain Available\""),
-            PropertyType::UserProperty => write!(f, "\"User Property\""),
-            PropertyType::MaxPacketSize => write!(f, "\"Maximum Packet Size\""),
-            PropertyType::WildcardSubAvail => write!(f, "\"Wildcard Substitution Available\""),
-            PropertyType::SubIdAvail => write!(f, "\"Subscription Identifier Available\""),
-            PropertyType::ShardSubAvail => write!(f, "\"Shared Subscription Available\""),
-        }
-    }
-}
-
-impl TryFrom<u8> for PropertyType {
-    type Error = MQTTCodecError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0x01 => Ok(PropertyType::PayloadFormat),
-            0x02 => Ok(PropertyType::MessageExpiry),
-            0x03 => Ok(PropertyType::ContentType),
-            0x08 => Ok(PropertyType::ResponseTopic),
-            0x09 => Ok(PropertyType::CorrelationData),
-            0x0b => Ok(PropertyType::SubscriptionId),
-            0x11 => Ok(PropertyType::SessionExpiryInt),
-            0x12 => Ok(PropertyType::AssignedClientId),
-            0x13 => Ok(PropertyType::KeepAlive),
-            0x15 => Ok(PropertyType::AuthMethod),
-            0x16 => Ok(PropertyType::AuthData),
-            0x17 => Ok(PropertyType::ReqProblemInfo),
-            0x18 => Ok(PropertyType::WillDelay),
-            0x19 => Ok(PropertyType::ReqRespInfo),
-            0x1a => Ok(PropertyType::RespInfo),
-            0x1c => Ok(PropertyType::ServerRef),
-            0x1f => Ok(PropertyType::Reason),
-            0x21 => Ok(PropertyType::RecvMax),
-            0x22 => Ok(PropertyType::TopicAliasMax),
-            0x23 => Ok(PropertyType::TopicAlias),
-            0x24 => Ok(PropertyType::MaxQoS),
-            0x25 => Ok(PropertyType::RetainAvail),
-            0x26 => Ok(PropertyType::UserProperty),
-            0x27 => Ok(PropertyType::MaxPacketSize),
-            0x28 => Ok(PropertyType::WildcardSubAvail),
-            0x29 => Ok(PropertyType::SubIdAvail),
-            0x2a => Ok(PropertyType::ShardSubAvail),
-            p => Err(MQTTCodecError::new(&format!(
-                "MQTTv5 2.2.2.2 invalid property type identifier: {}",
-                p
-            ))),
-        }
-    }
-}
+pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
+pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
 
 /// MQTT Control Packet Type
 /// #[repr(u8)]
@@ -318,6 +180,59 @@ impl TryFrom<u8> for Reason {
     }
 }
 
+#[allow(clippy::enum_variant_names)]
+#[repr(u8)]
+#[derive(Default, Debug, PartialEq, Eq, Copy, Clone)]
+pub enum QoSLevel {
+    #[default]
+    AtMostOnce = 0,
+    AtLeastOnce = 1,
+    ExactlyOnce = 2,
+}
+
+impl TryFrom<u8> for QoSLevel {
+    type Error = MQTTCodecError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(QoSLevel::AtMostOnce),
+            0x01 => Ok(QoSLevel::AtLeastOnce),
+            0x02 => Ok(QoSLevel::ExactlyOnce),
+            value => Err(MQTTCodecError::new(&format!(
+                "{} is not a value QoSLevel",
+                value
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Packet {
+    PingRequest(FixedHeader),
+    PingResponse(FixedHeader),
+    Connect(Connect),
+    ConnAck(ConnAck),
+    Publish(Publish),
+    Disconnect(Disconnect),
+    Subscribe(Subscribe),
+    SubAck(SubAck),
+}
+
+impl From<&Packet> for PacketType {
+    fn from(p: &Packet) -> Self {
+        match p {
+            Packet::PingRequest(_) => PacketType::PingReq,
+            Packet::PingResponse(_) => PacketType::PingResp,
+            Packet::Connect(_) => PacketType::Connect,
+            Packet::ConnAck(_) => PacketType::ConnAck,
+            Packet::Publish(_) => PacketType::Publish,
+            Packet::Disconnect(_) => PacketType::Disconnect,
+            Packet::Subscribe(_) => PacketType::Subscribe,
+            Packet::SubAck(_) => PacketType::SubAck,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct MQTTCodecError {
     pub reason: String,
@@ -360,10 +275,10 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<Packet>, MQTTCodecError> {
                 }
                 PacketType::Publish => {
                     let mut publish = Publish::new_from_header(packet_header)?;
+                    publish.decode(src)?;
                     Ok(Some(Packet::Publish(publish)))
                 }
                 PacketType::Disconnect => {
-                    println!("DISCONNECT");
                     let mut disconnect = Disconnect::default();
                     disconnect.decode(src)?;
                     Ok(Some(Packet::Disconnect(disconnect)))
@@ -372,6 +287,16 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<Packet>, MQTTCodecError> {
                     let mut connack = ConnAck::default();
                     connack.decode(src)?;
                     Ok(Some(Packet::ConnAck(connack)))
+                }
+                PacketType::Subscribe => {
+                    let mut subscribe = Subscribe::default();
+                    subscribe.decode(src)?;
+                    Ok(Some(Packet::Subscribe(subscribe)))
+                }
+                PacketType::SubAck => {
+                    let mut suback = SubAck::default();
+                    suback.decode(src)?;
+                    Ok(Some(Packet::SubAck(suback)))
                 }
                 _ => Err(MQTTCodecError::new("unsupported packet type")),
             },
@@ -385,13 +310,15 @@ pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MQTTCodecError>
     match packet {
         Packet::Connect(c) => c.encode(dest),
         Packet::ConnAck(c) => c.encode(dest),
-        Packet::Publish(p) => p.encode(dest),
         Packet::Disconnect(d) => d.encode(dest),
+        Packet::Publish(p) => p.encode(dest),
         Packet::PingRequest(header) | Packet::PingResponse(header) => {
             dest.put_u8(header.packet_type() as u8 | header.flags());
             dest.put_u8(0x_00);
             Ok(())
         }
+        Packet::Subscribe(s) => s.encode(dest),
+        Packet::SubAck(s) => s.encode(dest),
     }?;
     Ok(())
 }

@@ -5,10 +5,10 @@ use bytes::{Buf, BufMut, BytesMut};
 use crate::{
     codec::{
         check_property, decode_utf8_string, decode_variable_len_integer, encode_utf8_string,
-        encode_variable_len_integer, variable_byte_int_size, PropertyType, PROP_SIZE_U32,
-        PROP_SIZE_UTF8_STRING,
+        encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_U32, PROP_SIZE_UTF8_STRING,
     },
-    Decode, Encode, FixedHeader, MQTTCodecError, PacketType, Reason, Remaining, UserPropertyMap,
+    Decode, Encode, FixedHeader, MQTTCodecError, PacketType, PropertyType, Reason, Size,
+    UserPropertyMap,
 };
 
 const DEFAULT_DISCONNECT_REMAINING: u32 = 1;
@@ -77,18 +77,18 @@ impl Disconnect {
     }
 }
 
-impl Remaining for Disconnect {
+impl Size for Disconnect {
     fn size(&self) -> u32 {
-        let remaining = self.property_remaining();
-        if remaining.is_none() && self.reason == Reason::Success {
+        let remaining = self.property_size();
+        if remaining == 0 && self.reason == Reason::Success {
             0
         } else {
-            let len = variable_byte_int_size(remaining.unwrap());
-            DEFAULT_DISCONNECT_REMAINING + len + remaining.unwrap()
+            let len = variable_byte_int_size(remaining);
+            DEFAULT_DISCONNECT_REMAINING + len + remaining
         }
     }
 
-    fn property_remaining(&self) -> Option<u32> {
+    fn property_size(&self) -> u32 {
         let mut remaining: u32 = 0;
         if self.session_expiry.is_some() {
             remaining += PROP_SIZE_U32;
@@ -102,19 +102,19 @@ impl Remaining for Disconnect {
             .server_ref
             .as_ref()
             .map_or(0, |r| PROP_SIZE_UTF8_STRING + r.len() as u32);
-        Some(remaining)
+        remaining
     }
 
     /// The Disconnect packet does not have a payload. None is returned
-    fn payload_remaining(&self) -> Option<u32> {
-        None
+    fn payload_size(&self) -> u32 {
+        0
     }
 }
 
 impl Encode for Disconnect {
     fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
         let mut header = FixedHeader::new(PacketType::Disconnect);
-        let prop_remaining = self.property_remaining().unwrap();
+        let prop_remaining = self.property_size();
         header.remaining = DEFAULT_DISCONNECT_REMAINING + variable_byte_int_size(prop_remaining);
         if self.reason == Reason::Success && prop_remaining == 0 {
             header.remaining = 0;
@@ -124,8 +124,9 @@ impl Encode for Disconnect {
         header.encode(dest)?;
         let reason = self.reason as u8;
         dest.put_u8(reason);
-        if let Some(prop_len) = self.property_remaining() {
-            encode_variable_len_integer(prop_len, dest);
+        let prop_size = self.property_size();
+        if prop_size > 0 {
+            encode_variable_len_integer(prop_size, dest);
             if let Some(expiry) = self.session_expiry {
                 dest.put_u32(expiry);
             }

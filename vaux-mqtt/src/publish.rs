@@ -1,4 +1,4 @@
-use std::{collections::HashSet, ops::Rem};
+use std::collections::HashSet;
 
 use bytes::{Buf, BufMut, BytesMut};
 
@@ -7,10 +7,11 @@ use crate::{
         check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
         encode_bin_property, encode_bool_property, encode_u16_property, encode_u32_property,
         encode_utf8_property, encode_utf8_string, encode_var_int_property,
-        encode_variable_len_integer, variable_byte_int_size, PropertyType, PROP_SIZE_BINARY,
-        PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8, PROP_SIZE_UTF8_STRING, SIZE_UTF8_STRING,
+        encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_BINARY, PROP_SIZE_U16,
+        PROP_SIZE_U32, PROP_SIZE_U8, PROP_SIZE_UTF8_STRING, SIZE_UTF8_STRING,
     },
-    Decode, Encode, FixedHeader, MQTTCodecError, PacketType, QoSLevel, Remaining, UserPropertyMap,
+    Decode, Encode, FixedHeader, MQTTCodecError, PacketType, PropertyType, QoSLevel, Size,
+    UserPropertyMap,
 };
 
 const RETAIN_MASK: u8 = 0b_0000_0001;
@@ -104,7 +105,7 @@ impl Publish {
     }
 }
 
-impl Remaining for Publish {
+impl Size for Publish {
     fn size(&self) -> u32 {
         let mut remaining = if let Some(topic_name) = self.topic_name.as_ref() {
             SIZE_UTF8_STRING + topic_name.len() as u32
@@ -117,12 +118,12 @@ impl Remaining for Publish {
         } else {
             2
         };
-        let payload_size = self.payload_remaining().unwrap();
-        let prop_remaining = self.property_remaining().unwrap();
+        let payload_size = self.payload_size();
+        let prop_remaining = self.property_size();
         remaining + payload_size + prop_remaining + variable_byte_int_size(prop_remaining)
     }
 
-    fn property_remaining(&self) -> Option<u32> {
+    fn property_size(&self) -> u32 {
         let mut remaining = if self.payload_utf8 { PROP_SIZE_U8 } else { 0 };
         remaining += self.message_expiry.map_or(0, |_| PROP_SIZE_U32)
             + self.topic_alias.map_or(0, |_| PROP_SIZE_U16)
@@ -145,14 +146,14 @@ impl Remaining for Publish {
                 remaining += variable_byte_int_size(*id) + 1;
             }
         }
-        return Some(remaining);
+        return remaining;
     }
 
-    fn payload_remaining(&self) -> Option<u32> {
+    fn payload_size(&self) -> u32 {
         if let Some(payload) = &self.payload {
-            Some(payload.len() as u32)
+            payload.len() as u32
         } else {
-            Some(0)
+            0
         }
     }
 }
@@ -161,7 +162,7 @@ impl Encode for Publish {
     fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MQTTCodecError> {
         let mut header = FixedHeader::new(PacketType::Publish);
         let size = self.size();
-        let property_remaining = self.property_remaining().unwrap();
+        let property_remaining = self.property_size();
         header.set_remaining(size);
         header.encode(dest)?;
         if self.topic_name.is_none() && self.topic_alias.is_none() {

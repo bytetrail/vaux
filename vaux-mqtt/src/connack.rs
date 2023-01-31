@@ -1,11 +1,11 @@
 use crate::codec::{
     check_property, decode_binary_data, decode_prop_bool, decode_utf8_string,
     decode_variable_len_integer, encode_binary_data, encode_utf8_string,
-    encode_variable_len_integer, PropertyType, Reason, PROP_SIZE_U16,
+    encode_variable_len_integer, Reason, PROP_SIZE_U16,
 };
 use crate::{
-    variable_byte_int_size, Decode, Encode, QoSLevel, Remaining, UserPropertyMap, PROP_SIZE_U32,
-    PROP_SIZE_U8,
+    variable_byte_int_size, Decode, Encode, PropertyType, QoSLevel, Size, UserPropertyMap,
+    PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use crate::{FixedHeader, MQTTCodecError, PacketType};
 use bytes::{Buf, BufMut, BytesMut};
@@ -131,13 +131,13 @@ impl Default for ConnAck {
     }
 }
 
-impl crate::Remaining for ConnAck {
+impl crate::Size for ConnAck {
     fn size(&self) -> u32 {
         // variable header is 3 bytes
-        3 + self.property_remaining().unwrap()
+        3 + self.property_size()
     }
 
-    fn property_remaining(&self) -> Option<u32> {
+    fn property_size(&self) -> u32 {
         let mut remaining = if self.expiry_interval.is_some() {
             PROP_SIZE_U32
         } else {
@@ -186,12 +186,12 @@ impl crate::Remaining for ConnAck {
             + self.server_ref.as_ref().map_or(0, |r| 3 + r.len() as u32)
             + self.auth_method.as_ref().map_or(0, |a| 3 + a.len() as u32)
             + self.auth_data.as_ref().map_or(0, |a| 3 + a.len() as u32);
-        Some(remaining)
+        remaining
     }
 
     /// Implementation of PacketSize. CONNACK packet does not have a payload.
-    fn payload_remaining(&self) -> Option<u32> {
-        None
+    fn payload_size(&self) -> u32 {
+        0
     }
 }
 
@@ -209,7 +209,7 @@ impl Decode for ConnAck {
 impl Encode for ConnAck {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
         let mut header = FixedHeader::new(PacketType::ConnAck);
-        let prop_remaining = self.property_remaining().unwrap();
+        let prop_remaining = self.property_size();
         header.set_remaining(
             VARIABLE_HEADER_LEN + prop_remaining + variable_byte_int_size(prop_remaining),
         );
@@ -294,8 +294,7 @@ impl Encode for ConnAck {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::codec::PropertyType;
-    use crate::PropertyType::MaxQoS;
+    use crate::property::PropertyType;
     use crate::{Encode, UserPropertyMap};
     use bytes::BytesMut;
 
@@ -577,8 +576,6 @@ mod test {
                 prop_len += key_len + v.len() as u32 + 3;
             }
         }
-        println!("Property len() {}", prop_len);
-        println!("User property remaining {}", properties.size());
         let expected_len = EXPECTED_MIN_CONNACK_LEN as u32 + prop_len as u32;
         let expected_prop_len = prop_len as u32;
         let mut dest = BytesMut::new();
@@ -747,7 +744,7 @@ mod test {
         let result = connack.encode(dest);
         assert!(result.is_ok());
         assert_eq!(expected_len, dest.len() as u32);
-        assert_eq!(expected_prop_len, connack.property_remaining().unwrap());
+        assert_eq!(expected_prop_len, connack.property_size());
         assert_eq!(expected_prop_len as u8, dest[4]);
         assert_eq!(property as u8, dest[5]);
     }

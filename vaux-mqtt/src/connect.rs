@@ -1,10 +1,10 @@
 use crate::codec::{
     check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
-    encode_binary_data, MQTTCodecError, PropertyType, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
+    encode_binary_data, MQTTCodecError, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use crate::{
     encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, Decode, Encode,
-    FixedHeader, PacketType, QoSLevel, Remaining, UserPropertyMap, WillMessage,
+    FixedHeader, PacketType, PropertyType, QoSLevel, Size, UserPropertyMap, WillMessage,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
@@ -228,14 +228,14 @@ impl Connect {
     }
 }
 
-impl crate::Remaining for Connect {
+impl crate::Size for Connect {
     fn size(&self) -> u32 {
-        let property_remaining = self.property_remaining().unwrap();
+        let property_remaining = self.property_size();
         let len = variable_byte_int_size(property_remaining);
-        DEFAULT_CONNECT_REMAINING + len + property_remaining + self.payload_remaining().unwrap()
+        DEFAULT_CONNECT_REMAINING + len + property_remaining + self.payload_size()
     }
 
-    fn property_remaining(&self) -> Option<u32> {
+    fn property_size(&self) -> u32 {
         let mut property_remaining = 0;
         if self.session_expiry_interval != None {
             property_remaining += PROP_SIZE_U32;
@@ -267,10 +267,10 @@ impl crate::Remaining for Connect {
         if let Some(auth_data) = self.auth_data.as_ref() {
             property_remaining += 3 + auth_data.len() as u32;
         }
-        Some(property_remaining)
+        property_remaining
     }
 
-    fn payload_remaining(&self) -> Option<u32> {
+    fn payload_size(&self) -> u32 {
         let mut remaining = 2 + self.client_id.len() as u32;
         if let Some(will_message) = &self.will_message {
             remaining += will_message.size();
@@ -281,15 +281,15 @@ impl crate::Remaining for Connect {
         if let Some(password) = &self.password {
             remaining += password.len() as u32 + 2;
         }
-        Some(remaining)
+        remaining
     }
 }
 
 impl Encode for Connect {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
         let mut header = FixedHeader::new(PacketType::Connect);
-        let prop_remaining = self.property_remaining().unwrap();
-        let payload_remaining = self.payload_remaining().unwrap();
+        let prop_remaining = self.property_size();
+        let payload_remaining = self.payload_size();
         header.set_remaining(
             DEFAULT_CONNECT_REMAINING
                 + prop_remaining
@@ -385,7 +385,7 @@ impl Default for Connect {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{Remaining, UserPropertyMap};
+    use crate::{Size, UserPropertyMap};
 
     const CONNECT_MIN_REMAINING: u32 = 13;
     const PROP_ENCODE: u32 = 5;
@@ -624,7 +624,7 @@ mod test {
         assert_eq!(expected_len, dest.len() as u32, "Packet Size");
         assert_eq!(
             expected_prop_len,
-            connect.property_remaining().unwrap(),
+            connect.property_size(),
             "Encoded Property Length"
         );
         assert_eq!(expected_prop_len as u8, dest[12], "Property Length");
