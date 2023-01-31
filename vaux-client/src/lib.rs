@@ -2,18 +2,15 @@ pub mod session;
 
 use std::{
     io::{Read, Write},
-    net::{IpAddr, SocketAddr, TcpStream},
+    net::{IpAddr, TcpStream},
     sync::mpsc::{Receiver, Sender},
     time::Duration,
 };
 
 use bytes::BytesMut;
 use vaux_mqtt::{
-    decode, encode, publish::Publish, subscribe::Subscription, Connect, Packet, Subscribe,
+    decode, encode, publish::Publish, Subscription, Connect, Packet, Subscribe, UserPropertyMap,
 };
-
-const DEFAULT_HOST: &str = "127.0.0.1";
-const DEFAULT_PORT: u16 = 1883;
 
 pub struct MQTTClient {
     addr: IpAddr,
@@ -103,7 +100,6 @@ impl MQTTClient {
                                 if let Some(packet) = p {
                                     match packet {
                                         Packet::ConnAck(connack) => {
-                                            println!("CONNACK: {:#?}", connack);
                                             if self.client_id.is_none() {
                                                 self.client_id = connack.assigned_client_id;
                                             }
@@ -152,15 +148,24 @@ impl MQTTClient {
         }
     }
 
+    pub fn send_binary(&mut self, topic: &str, data: &[u8], props: Option<&UserPropertyMap>) -> MQTTResult<()> {
+        self.send(topic, false, data, props)
+    }
+
+    pub fn send_utf8(&mut self, topic: &str, message: &str, props: Option<&UserPropertyMap>) -> MQTTResult<()> {
+        self.send(topic, true, message.as_bytes(), props)
+    }
+
     /// Basic send of a UTF8 encoded payload. The message is sent with QoS
     /// Level 0 and a payload format indicated a UTF8. No additional properties
     /// are set. A disconnect message can occur due to errors. This method uses
     /// a simple blocking read with a timeout for test purposes.
-    pub fn send(&mut self, topic: &str, message: &str) -> MQTTResult<()> {
+    pub fn send(&mut self, topic: &str, utf8: bool, data: &[u8], props: Option<&UserPropertyMap>) -> MQTTResult<()> {
         let mut publish = Publish::default();
-        publish.payload_utf8 = true;
+        publish.payload_utf8 = utf8;
         publish.topic_name = Some(topic.to_string());
-        publish.payload = Some(Vec::from(message.as_bytes()));
+        publish.payload = Some(Vec::from(data));
+        publish.user_props = props.cloned();
 
         let mut buffer = [0u8; 128];
         let mut dest = BytesMut::default();
@@ -223,7 +228,6 @@ impl MQTTClient {
         if let Err(e) = result {
             assert!(false, "Failed to encode packet: {:?}", e);
         }
-        println!("dest {:?}", &dest.to_vec());
         match self.connection.as_ref().unwrap().write_all(&dest.to_vec()) {
             Ok(_) => Ok(()),
             Err(e) => Err(MQTTError {
@@ -234,7 +238,7 @@ impl MQTTClient {
     }
 
     pub fn read_next(&mut self) -> MQTTResult<Option<Packet>> {
-        let mut buffer = [0u8; 1024];
+        let mut buffer = [0u8; 4096];
         match self.connection.as_ref().unwrap().read(&mut buffer) {
             Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
                 Ok(packet) => Ok(packet),

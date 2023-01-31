@@ -25,7 +25,7 @@ pub use crate::codec::{
 pub use crate::connack::ConnAck;
 pub use crate::connect::Connect;
 pub use crate::will::WillMessage;
-pub use crate::{disconnect::Disconnect, fixed::FixedHeader, subscribe::Subscribe};
+pub use crate::{disconnect::Disconnect, fixed::FixedHeader, subscribe::Subscribe, subscribe::Subscription};
 use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;
 
