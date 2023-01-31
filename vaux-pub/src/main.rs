@@ -7,7 +7,7 @@ fn main() {
     match client.connect() {
         Ok(_) => {
             println!("connected");
-            match client.send("hello-vaux", "vaux says, \"Hello, MQTT!\"") {
+            match client.send_utf8("hello-vaux", "vaux says, \"Hello, MQTT!\"", None) {
                 Ok(_) => println!("sent"),
                 Err(e) => eprintln!("{:#?}", e),
             }
