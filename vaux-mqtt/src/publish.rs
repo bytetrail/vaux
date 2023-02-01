@@ -32,7 +32,7 @@ pub struct Publish {
     pub user_props: Option<UserPropertyMap>,
     pub sub_id: Option<Vec<u32>>,
     pub content_type: Option<String>,
-    pub payload: Option<Vec<u8>>,
+    payload: Option<Vec<u8>>,
 }
 
 impl Publish {
@@ -61,6 +61,15 @@ impl Publish {
             content_type: None,
             payload: None,
         })
+    }
+
+
+    pub fn set_payload(&mut self, data: Vec<u8>) {
+        self.payload = Some(data);
+    }
+
+    pub fn take_payload(&mut self) -> Option<Vec<u8>> {
+        self.payload.take()
     }
 
     pub fn set_packet_id(&mut self, id: u16) -> Result<(), MQTTCodecError> {

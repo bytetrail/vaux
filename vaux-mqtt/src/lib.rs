@@ -59,6 +59,18 @@ impl UserPropertyMap {
         &self.map
     }
 
+    pub fn set_property(&mut self,  key: &str, value: &str) {
+        if self.map.contains_key(key) {
+            let v = self.map.get_mut(key).unwrap();
+            v.clear();
+            v.push(value.to_string());
+        } else {
+            let mut v: Vec<String> = Vec::new();
+            v.push(value.to_string());
+            self.map.insert(key.to_string(), v);
+        }
+    }
+
     pub fn add_property(&mut self, key: &str, value: &str) {
         if self.map.contains_key(key) {
             self.map.get_mut(key).unwrap().push(value.to_string());
@@ -72,6 +84,11 @@ impl UserPropertyMap {
     pub fn contains_key(&self, key: &str) -> bool {
         self.map.contains_key(key)
     }
+
+    pub fn get(&self, key: &str) -> Option<&Vec<String>> {
+        self.map.get(key)
+    }
+
 }
 
 impl crate::Size for UserPropertyMap {

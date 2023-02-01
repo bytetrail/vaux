@@ -164,7 +164,7 @@ impl MQTTClient {
         let mut publish = Publish::default();
         publish.payload_utf8 = utf8;
         publish.topic_name = Some(topic.to_string());
-        publish.payload = Some(Vec::from(data));
+        publish.set_payload(Vec::from(data));
         publish.user_props = props.cloned();
 
         let mut buffer = [0u8; 128];
