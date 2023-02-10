@@ -2,11 +2,13 @@ use crate::codec::{
     check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
     encode_binary_data, MQTTCodecError, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
 };
+use crate::property::{PropertyEncode, PropertySize};
 use crate::{
     encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, Decode, Encode,
     FixedHeader, PacketType, PropertyType, QoSLevel, Size, UserPropertyMap, WillMessage,
 };
 use bytes::{Buf, BufMut, BytesMut};
+use prop_macro::{PropertyEncode, PropertySize};
 use std::collections::HashSet;
 
 const MQTT_PROTOCOL_NAME_LEN: u16 = 0x00_04;
@@ -25,7 +27,7 @@ const DEFAULT_RECEIVE_MAX: u16 = 0xffff;
 /// Default remaining size for connect packet
 const DEFAULT_CONNECT_REMAINING: u32 = 10;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(PropertyEncode, PropertySize, Debug, Clone, Eq, PartialEq)]
 pub struct Connect {
     pub clean_start: bool,
     pub keep_alive: u16,
@@ -167,7 +169,7 @@ impl Connect {
                                 self.auth_method = Some(result);
                             }
                             PropertyType::AuthData => {
-                                if self.auth_method != None {
+                                if self.auth_method.is_some() {
                                     self.auth_data = Some(decode_binary_data(src)?);
                                 } else {
                                     // MQTT protocol not specific that auth method must appear before
@@ -187,7 +189,7 @@ impl Connect {
                             }
                         }
                     } else {
-                        if self.user_props == None {
+                        if self.user_props.is_none() {
                             self.user_props = Some(UserPropertyMap::new());
                         }
                         let property_map = self.user_props.as_mut().unwrap();
@@ -214,7 +216,7 @@ impl Connect {
         password: bool,
     ) -> Result<(), MQTTCodecError> {
         self.client_id = decode_utf8_string(src)?;
-        if self.will_message != None {
+        if self.will_message.is_some() {
             let will_message = self.will_message.as_mut().unwrap();
             will_message.decode(src)?;
         }
@@ -237,17 +239,17 @@ impl crate::Size for Connect {
 
     fn property_size(&self) -> u32 {
         let mut property_remaining = 0;
-        if self.session_expiry_interval != None {
+        if self.session_expiry_interval.is_some() {
             property_remaining += PROP_SIZE_U32;
         }
         // protocol defaults to 65536 if not included
         if self.receive_max != DEFAULT_RECEIVE_MAX {
             property_remaining += PROP_SIZE_U16;
         }
-        if self.max_packet_size != None {
+        if self.max_packet_size.is_some() {
             property_remaining += PROP_SIZE_U32;
         }
-        if self.topic_alias_max != None {
+        if self.topic_alias_max.is_some() {
             property_remaining += PROP_SIZE_U16;
         }
         // protocol defaults to false if not included
@@ -629,5 +631,11 @@ mod test {
         );
         assert_eq!(expected_prop_len as u8, dest[12], "Property Length");
         assert_eq!(property as u8, dest[13], "Property Type");
+    }
+
+    #[test]
+    fn test_property_derives() {
+        let connect = Connect::default();
+        let size = Connect::property_size_internal();
     }
 }

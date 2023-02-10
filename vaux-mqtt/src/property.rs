@@ -1,8 +1,6 @@
 use std::fmt::{Display, Formatter};
 
-use bytes::{Buf, BytesMut};
-
-use crate::{Decode, MQTTCodecError};
+use crate::{buffer::Buffer, MQTTCodecError, QoSLevel};
 
 /// MQTT property type. For more information on the specific property types,
 /// please see the
@@ -141,4 +139,109 @@ impl TryFrom<u8> for PropertyType {
             ))),
         }
     }
+}
+
+#[repr(u8)]
+pub enum PayloadFormat {
+    Bin = 0x00,
+    Utf8 = 0x01,
+}
+
+impl TryFrom<u8> for PayloadFormat {
+    type Error = MQTTCodecError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(PayloadFormat::Bin),
+            0x01 => Ok(PayloadFormat::Utf8),
+            _ => Err(MQTTCodecError::new("invalid payload format")),
+        }
+    }
+}
+
+
+#[repr(u8)]
+pub enum Property {
+    PayloadFormat(PayloadFormat) = 0x01,
+    MessageExpiry(u32) = 0x02,
+    ContentType(String) = 0x03,
+    ResponseTopic(String) = 0x08,
+    CorrelationData(Vec<u8>) = 0x09,
+    SubscriptionId(u32) = 0x0b,
+    SessionExpiryInt(u32) = 0x11,
+    AssignedClientId(String) = 0x12,
+    KeepAlive(u16) = 0x13,
+    AuthMethod(String) = 0x15,
+    AuthData(Vec<u8>) = 0x16,
+    ReqProblemInfo(u8) = 0x17,
+    WillDelay(u32) = 0x18,
+    ReqRespInfo(u8) = 0x19,
+    RespInfo(String) = 0x1a,
+    ServerRef(String) = 0x1c,
+    Reason(String) = 0x1f,
+    RecvMax(u16) = 0x21,
+    TopicAliasMax(u16) = 0x22,
+    TopicAlias(u16) = 0x23,
+    MaxQoS(QoSLevel) = 0x24,
+    RetainAvail(bool) = 0x25,
+    UserProperty(String, String) = 0x26,
+    MaxPacketSize(u32) = 0x27,
+    WildcardSubAvail(bool) = 0x28,
+    SubIdAvail(bool) = 0x29,
+    ShardSubAvail(bool) = 0x2a,
+}
+
+
+impl Property {
+    pub fn decode(src: &mut Buffer) -> Result<Property, MQTTCodecError> {
+        match PropertyType::try_from(src.get_u8()) {
+            Ok(prop_type) => match prop_type {
+                PropertyType::PayloadFormat => Ok(Property::PayloadFormat(
+                    PayloadFormat::try_from(src.get_u8())?,
+                )),
+                PropertyType::MessageExpiry => Ok(Property::MessageExpiry(src.get_u32())),
+                PropertyType::ContentType => Ok(Property::ContentType(src.get_utf8()?)),
+                PropertyType::ResponseTopic => Ok(Property::ResponseTopic(src.get_utf8()?)),
+                PropertyType::CorrelationData => Ok(Property::CorrelationData(src.get_bin()?)),
+                PropertyType::SubscriptionId => Ok(Property::SubscriptionId(src.get_var_u32())),
+                PropertyType::SessionExpiryInt => Ok(Property::SessionExpiryInt(src.get_u32())),
+                PropertyType::AssignedClientId => Ok(Property::AssignedClientId(src.get_utf8()?)),
+                PropertyType::KeepAlive => Ok(Property::KeepAlive(src.get_u16())),
+                PropertyType::AuthMethod => Ok(Property::AuthMethod(src.get_utf8()?)),
+                PropertyType::AuthData => Ok(Property::AuthData(src.get_bin()?)),
+                PropertyType::ReqProblemInfo => Ok(Property::ReqProblemInfo(src.get_u8())),
+                PropertyType::WillDelay => Ok(Property::WillDelay(src.get_u32())),
+                PropertyType::ReqRespInfo => Ok(Property::ReqRespInfo(src.get_u8())),
+                PropertyType::RespInfo => Ok(Property::RespInfo(src.get_utf8()?)),
+                PropertyType::ServerRef => Ok(Property::ServerRef(src.get_utf8()?)),
+                PropertyType::Reason => Ok(Property::Reason(src.get_utf8()?)),
+                PropertyType::RecvMax => Ok(Property::RecvMax(src.get_u16())),
+                PropertyType::TopicAliasMax => Ok(Property::TopicAliasMax(src.get_u16())),
+                PropertyType::TopicAlias => Ok(Property::TopicAlias(src.get_u16())),
+                PropertyType::MaxQoS => Ok(Property::MaxQoS(QoSLevel::try_from(src.get_u8())?)),
+                PropertyType::RetainAvail => Ok(Property::RetainAvail(src.get_bool())),
+                PropertyType::UserProperty => {
+                    let k = src.get_utf8()?;
+                    let v = src.get_utf8()?;
+                    Ok(Property::UserProperty(k, v))
+                }
+                PropertyType::MaxPacketSize => Ok(Property::MaxPacketSize(src.get_u32())),
+                PropertyType::WildcardSubAvail => Ok(Property::WildcardSubAvail(src.get_bool())),
+                PropertyType::SubIdAvail => Ok(Property::SubIdAvail(src.get_bool())),
+                PropertyType::ShardSubAvail => Ok(Property::ShardSubAvail(src.get_bool())),
+            },
+            Err(_) => todo!(),
+        }
+    }
+}
+
+
+
+
+pub trait PropertyEncode {
+    fn property_encode() -> Result<(), MQTTCodecError>;
+}
+
+pub trait PropertySize {
+    fn property_size_internal() -> u32;
 }

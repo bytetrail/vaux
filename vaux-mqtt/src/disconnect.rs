@@ -60,7 +60,7 @@ impl Disconnect {
                             }
                         }
                     } else {
-                        if self.user_props == None {
+                        if self.user_props.is_none() {
                             self.user_props = Some(UserPropertyMap::new());
                         }
                         let property_map = self.user_props.as_mut().unwrap();

@@ -101,7 +101,7 @@ impl Decode for WillMessage {
                         self.correlation_data = Some(decode_binary_data(src)?);
                     }
                     PropertyType::UserProperty => {
-                        if self.user_property == None {
+                        if self.user_property.is_none() {
                             self.user_property = Some(UserPropertyMap::new());
                         }
                         let property_map = self.user_property.as_mut().unwrap();
@@ -180,7 +180,7 @@ impl Size for WillMessage {
         if self.payload_utf8 {
             remaining += PROP_SIZE_U8;
         }
-        if self.expiry_interval != None {
+        if self.expiry_interval.is_none() {
             remaining += PROP_SIZE_U32;
         }
         if let Some(content_type) = &self.content_type {

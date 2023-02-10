@@ -50,7 +50,7 @@ impl ConnAck {
                         check_property(property_type, &mut properties)?;
                         self.decode_property(property_type, src)?;
                     } else {
-                        if self.user_properties == None {
+                        if self.user_properties.is_none() {
                             self.user_properties = Some(UserPropertyMap::new());
                         }
                         let property_map = self.user_properties.as_mut().unwrap();
@@ -214,8 +214,7 @@ impl Encode for ConnAck {
             VARIABLE_HEADER_LEN + prop_remaining + variable_byte_int_size(prop_remaining),
         );
         header.encode(dest)?;
-        let connack_flag: u8 = if self.session_present { 0x01 } else { 0x00 };
-        dest.put_u8(connack_flag);
+        dest.put_u8(self.session_present as u8);
         dest.put_u8(self.reason as u8);
         // reserve capacity to avoid intermediate reallocation
         dest.reserve(prop_remaining as usize);
@@ -242,7 +241,7 @@ impl Encode for ConnAck {
         }
         if let Some(client_id) = &self.assigned_client_id {
             dest.put_u8(PropertyType::AssignedClientId as u8);
-            encode_utf8_string(&client_id, dest)?;
+            encode_utf8_string(client_id, dest)?;
         }
         if self.topic_alias_max != 0 {
             dest.put_u8(PropertyType::TopicAliasMax as u8);

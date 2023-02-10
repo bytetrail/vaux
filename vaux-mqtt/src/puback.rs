@@ -17,13 +17,13 @@ impl Size for PubAck {
 }
 
 impl Encode for PubAck {
-    fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
+    fn encode(&self, _dest: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
         todo!()
     }
 }
 
 impl Decode for PubAck {
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
+    fn decode(&mut self, _src: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
         todo!()
     }
 }

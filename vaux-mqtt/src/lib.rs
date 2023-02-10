@@ -1,4 +1,4 @@
-mod buf;
+mod buffer;
 mod codec;
 mod connack;
 mod connect;
@@ -25,7 +25,9 @@ pub use crate::codec::{
 pub use crate::connack::ConnAck;
 pub use crate::connect::Connect;
 pub use crate::will::WillMessage;
-pub use crate::{disconnect::Disconnect, fixed::FixedHeader, subscribe::Subscribe, subscribe::Subscription};
+pub use crate::{
+    disconnect::Disconnect, fixed::FixedHeader, subscribe::Subscribe, subscribe::Subscription,
+};
 use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;
 
@@ -59,14 +61,13 @@ impl UserPropertyMap {
         &self.map
     }
 
-    pub fn set_property(&mut self,  key: &str, value: &str) {
+    pub fn set_property(&mut self, key: &str, value: &str) {
         if self.map.contains_key(key) {
             let v = self.map.get_mut(key).unwrap();
             v.clear();
             v.push(value.to_string());
         } else {
-            let mut v: Vec<String> = Vec::new();
-            v.push(value.to_string());
+            let v: Vec<String> = vec![value.to_string()];
             self.map.insert(key.to_string(), v);
         }
     }
@@ -75,8 +76,7 @@ impl UserPropertyMap {
         if self.map.contains_key(key) {
             self.map.get_mut(key).unwrap().push(value.to_string());
         } else {
-            let mut v: Vec<String> = Vec::new();
-            v.push(value.to_string());
+            let v: Vec<String> = vec![value.to_string()];
             self.map.insert(key.to_string(), v);
         }
     }
@@ -88,7 +88,6 @@ impl UserPropertyMap {
     pub fn get(&self, key: &str) -> Option<&Vec<String>> {
         self.map.get(key)
     }
-
 }
 
 impl crate::Size for UserPropertyMap {
@@ -118,7 +117,7 @@ impl Encode for UserPropertyMap {
             for v in value {
                 dest.put_u8(PropertyType::UserProperty as u8);
                 encode_utf8_string(k, dest)?;
-                encode_utf8_string(&v, dest)?;
+                encode_utf8_string(v, dest)?;
             }
         }
         Ok(())

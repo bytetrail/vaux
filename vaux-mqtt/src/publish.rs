@@ -63,7 +63,6 @@ impl Publish {
         })
     }
 
-
     pub fn set_payload(&mut self, data: Vec<u8>) {
         self.payload = Some(data);
     }
@@ -155,7 +154,7 @@ impl Size for Publish {
                 remaining += variable_byte_int_size(*id) + 1;
             }
         }
-        return remaining;
+        remaining
     }
 
     fn payload_size(&self) -> u32 {
@@ -229,7 +228,7 @@ impl Encode for Publish {
 impl Decode for Publish {
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), MQTTCodecError> {
         let topic_name = decode_utf8_string(src)?;
-        if topic_name.len() == 0 {
+        if topic_name.is_empty() {
             self.topic_name = None;
         } else {
             self.topic_name = Some(topic_name);
@@ -257,7 +256,7 @@ impl Decode for Publish {
                         check_property(property_type, &mut properties)?;
                         self.decode_property(property_type, src)?;
                     } else {
-                        if self.user_props == None {
+                        if self.user_props.is_none() {
                             self.user_props = Some(UserPropertyMap::new());
                         }
                         let property_map = self.user_props.as_mut().unwrap();

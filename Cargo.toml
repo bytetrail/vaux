@@ -5,6 +5,7 @@ members = [
     "vaux-broker",
     "vaux-test",
     "vaux-pub",
-    "vaux-sub"
+    "vaux-sub",
+    "prop-macro"
 ]
 
