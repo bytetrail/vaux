@@ -21,7 +21,6 @@ use self::codec::MQTTCodec;
 pub const DEFAULT_PORT: u16 = 1883;
 pub const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
 const DEFAULT_KEEP_ALIVE: u64 = 30; // 60 seconds
-const WAIT_IDLE_TIME: u64 = 50; // 50 milliseconds wait idle time
 
 #[derive(Debug, Clone)]
 pub struct Broker {

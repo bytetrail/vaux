@@ -14,7 +14,7 @@ fn main() {
     match client.connect() {
         Ok(_) => {
             println!("connected");
-            match client.subscribe(1, "/site_001/dev_001/update") {
+            match client.subscribe(1, "hello-vaux") {
                 Ok(_) => {
                     if client.set_read_timeout(1000).is_err() {
                         eprintln!("Unable to set read timeout");
@@ -28,9 +28,9 @@ fn main() {
                                     Some(packet) => {
                                         packet_count += 1;
                                         match packet {
-                                            Packet::Publish(p) => {
-                                                print!(".");
-                                                std::io::stdout().flush();
+                                            Packet::Publish(mut p) => {
+                                                print!("{:?}", p.take_payload().unwrap());
+                                                std::io::stdout().flush().expect("unable to flush stdout");
                                             }
                                             _ => {}
                                         }

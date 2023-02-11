@@ -1,6 +1,5 @@
 use std::time::{Duration, Instant};
 
-use super::DEFAULT_KEEP_ALIVE;
 
 const DEFAULT_SESSION_EXPIRY_INTERVAL: u64 = 60 * 30; // 30 minute session expiry
 const DEFAULT_SESSION_SCAN_PERIOD: u64 = 60; // scan for expired sessions 1 minute

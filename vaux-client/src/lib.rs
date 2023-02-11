@@ -1,10 +1,7 @@
-pub mod session;
-
 use std::{
     io::{Read, Write},
     net::{IpAddr, TcpStream},
-    sync::mpsc::{Receiver, Sender},
-    time::Duration,
+    time::Duration, default,
 };
 
 use bytes::BytesMut;
@@ -17,12 +14,12 @@ pub struct MQTTClient {
     port: u16,
     client_id: Option<String>,
     connection: Option<TcpStream>,
-    sender: Option<Sender<Packet>>,
-    receiver: Option<Receiver<MQTTResult<Packet>>>,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Default,Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
 pub enum ErrorKind {
+    #[default]
     Codec,
     Protocol,
     Connection,
@@ -30,7 +27,7 @@ pub enum ErrorKind {
     Transport,
 }
 
-#[derive(Debug)]
+#[derive(Default,Debug)]
 pub struct MQTTError {
     message: String,
     kind: ErrorKind,
@@ -62,8 +59,6 @@ impl MQTTClient {
             port,
             client_id: None,
             connection: None,
-            sender: None,
-            receiver: None,
         }
     }
 
@@ -73,8 +68,6 @@ impl MQTTClient {
             port,
             client_id: Some(id.to_owned()),
             connection: None,
-            sender: None,
-            receiver: None,
         }
     }
 
@@ -148,71 +141,40 @@ impl MQTTClient {
         }
     }
 
-    pub fn send_binary(&mut self, topic: &str, data: &[u8], props: Option<&UserPropertyMap>) -> MQTTResult<()> {
-        self.send(topic, false, data, props)
+    pub fn send_binary(&mut self, topic: &str, data: &[u8], props: Option<&UserPropertyMap>) -> MQTTResult<Option<Packet>> {
+        self.publish(topic, false, data, props)
     }
 
-    pub fn send_utf8(&mut self, topic: &str, message: &str, props: Option<&UserPropertyMap>) -> MQTTResult<()> {
-        self.send(topic, true, message.as_bytes(), props)
+    pub fn send_utf8(&mut self, topic: &str, message: &str, props: Option<&UserPropertyMap>) -> MQTTResult<Option<Packet>> {
+        self.publish(topic, true, message.as_bytes(), props)
     }
 
     /// Basic send of a UTF8 encoded payload. The message is sent with QoS
     /// Level 0 and a payload format indicated a UTF8. No additional properties
     /// are set. A disconnect message can occur due to errors. This method uses
     /// a simple blocking read with a timeout for test purposes.
-    pub fn send(&mut self, topic: &str, utf8: bool, data: &[u8], props: Option<&UserPropertyMap>) -> MQTTResult<()> {
+    pub fn publish(&mut self, topic: &str, utf8: bool, data: &[u8], props: Option<&UserPropertyMap>) -> MQTTResult<Option<Packet>> {
         let mut publish = Publish::default();
         publish.payload_utf8 = utf8;
         publish.topic_name = Some(topic.to_string());
         publish.set_payload(Vec::from(data));
         publish.user_props = props.cloned();
 
-        let mut buffer = [0u8; 128];
+        self.send(Packet::Publish(publish))
+    }
+    
+    pub fn send(&mut self, packet: Packet) -> MQTTResult<Option<Packet>> {
         let mut dest = BytesMut::default();
-        let result = encode(Packet::Publish(publish.clone()), &mut dest);
+        let result = encode(packet, &mut dest);
         if let Err(e) = result {
             assert!(false, "Failed to encode packet: {:?}", e);
         }
-        match self.connection.as_ref().unwrap().write_all(&dest.to_vec()) {
-            Ok(_) => {
-                // set minimal timeout for potential disconnect on publish when
-                // no other packet expected
-                if self
-                    .connection
-                    .as_mut()
-                    .unwrap()
-                    .set_read_timeout(Some(Duration::from_millis(200)))
-                    .is_err()
-                {
-                    return Err(MQTTError::new(
-                        "unable to set connection read timeout",
-                        ErrorKind::Transport,
-                    ));
-                }
-                match self.connection.as_ref().unwrap().read(&mut buffer) {
-                    Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
-                        Ok(packet) => {
-                            if let Some(Packet::Disconnect(d)) = packet {
-                                eprintln!("unexpected disconnect:  {}", d.reason);
-                                if let Some(desc) = d.reason_desc {
-                                    eprintln!("description: {}", desc);
-                                }
-                            }
-                        }
-                        Err(e) => eprintln!("{:#?}", e),
-                    },
-                    Err(e) => {
-                        if e.kind() == std::io::ErrorKind::TimedOut {
-                            return Ok(());
-                        } else {
-                            eprintln!("unexpected transport error {:#?}", e);
-                        }
-                    }
-                }
-            }
-            Err(e) => eprintln!("unexpected send error {:#?}", e),
+        if let Err(e) = self.connection.as_ref().unwrap().write_all(&dest.to_vec()) {
+            eprintln!("unexpected send error {:#?}", e);
+            // TODO higher fidelity error handling
+            return Err(MQTTError{kind: ErrorKind::Transport, message: e.to_string()});
         }
-        Ok(())
+        Ok(None)
     }
 
     pub fn subscribe(&mut self, packet_id: u16, topic_filter: &str) -> MQTTResult<()> {
@@ -241,8 +203,12 @@ impl MQTTClient {
         let mut buffer = [0u8; 4096];
         match self.connection.as_ref().unwrap().read(&mut buffer) {
             Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
-                Ok(packet) => Ok(packet),
-                Err(e) => Err(MQTTError {
+                Ok(packet) => {
+                    println!("**** packet in read");
+                    Ok(packet)
+                }
+                Err(e) => 
+                Err(MQTTError {
                     message: e.reason,
                     kind: ErrorKind::Codec,
                 }),

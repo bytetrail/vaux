@@ -170,6 +170,16 @@ pub struct Subscribe {
 }
 
 impl Subscribe {
+
+    pub fn new(packet_id: u16, sub_id: Option<u32>, payload: Vec<Subscription>) -> Self {
+        Self{
+            packet_id,
+            sub_id,
+            user_props: None,
+            payload
+        }
+    }
+
     pub fn packet_id(&self) -> u16 {
         self.packet_id
     }
