@@ -372,7 +372,7 @@ pub(crate) fn encode_utf8_property(
     dest: &mut BytesMut,
 ) -> Result<(), MQTTCodecError> {
     dest.put_u8(property_type as u8);
-    encode_utf8_string(value, dest)
+    put_utf8(value, dest)
 }
 
 pub(crate) fn encode_bin_property(
@@ -381,7 +381,7 @@ pub(crate) fn encode_bin_property(
     dest: &mut BytesMut,
 ) -> Result<(), MQTTCodecError> {
     dest.put_u8(property_type as u8);
-    encode_binary_data(value, dest)
+    put_bin(value, dest)
 }
 
 pub(crate) fn encode_var_int_property(
@@ -390,7 +390,7 @@ pub(crate) fn encode_var_int_property(
     dest: &mut BytesMut,
 ) {
     dest.put_u8(property_type as u8);
-    encode_variable_len_integer(value, dest);
+    put_var_u32(value, dest);
 }
 
 pub(crate) fn decode_prop_bool(src: &mut BytesMut) -> Result<bool, MQTTCodecError> {
@@ -404,7 +404,23 @@ pub(crate) fn decode_prop_bool(src: &mut BytesMut) -> Result<bool, MQTTCodecErro
     }
 }
 
-pub(crate) fn encode_utf8_string(src: &str, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+#[cfg(not(feature = "pedantic"))]
+pub fn get_bool(src: &mut BytesMut) -> Result<bool, MQTTCodecError> {
+    Ok(src.get_u8() != 0)
+}
+
+#[cfg(feature = "pedantic")]
+pub fn get_bool(src: &mut BytesMut) -> Result<bool, MQTTCodecError> {
+    match src.get_u8() {
+        0 => Ok(false),
+        1 => Ok(true),
+        v => {
+            Err(MQTTCodecError::new(&format!("invalid value {} for boolean property", v)))
+        },
+    }
+}
+
+pub(crate) fn put_utf8(src: &str, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
     let len = src.len();
     if len > u16::MAX as usize {
         return Err(MQTTCodecError::new("string exceeds max length"));
@@ -414,7 +430,7 @@ pub(crate) fn encode_utf8_string(src: &str, dest: &mut BytesMut) -> Result<(), M
     Ok(())
 }
 
-pub(crate) fn decode_utf8_string(src: &mut BytesMut) -> Result<String, MQTTCodecError> {
+pub(crate) fn get_utf8(src: &mut BytesMut) -> Result<String, MQTTCodecError> {
     let len = src.get_u16();
     if src.remaining() < len as usize {
         return Err(MQTTCodecError::new("malformed MQTT packet: string length"));
@@ -429,7 +445,7 @@ pub(crate) fn decode_utf8_string(src: &mut BytesMut) -> Result<String, MQTTCodec
     }
 }
 
-pub(crate) fn decode_binary_data(src: &mut BytesMut) -> Result<Vec<u8>, MQTTCodecError> {
+pub(crate) fn get_bin(src: &mut BytesMut) -> Result<Vec<u8>, MQTTCodecError> {
     let mut dest = Vec::new();
     let len = src.get_u16() as usize;
     dest.resize(len, 0);
@@ -439,7 +455,7 @@ pub(crate) fn decode_binary_data(src: &mut BytesMut) -> Result<Vec<u8>, MQTTCode
     Ok(dest)
 }
 
-pub(crate) fn encode_binary_data(src: &[u8], dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+pub(crate) fn put_bin(src: &[u8], dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
     let len = src.len();
     if len > u16::MAX as usize {
         return Err(MQTTCodecError::new("binary data exceeds max length"));
@@ -449,7 +465,7 @@ pub(crate) fn encode_binary_data(src: &[u8], dest: &mut BytesMut) -> Result<(), 
     Ok(())
 }
 
-pub(crate) fn encode_variable_len_integer(val: u32, dest: &mut BytesMut) {
+pub(crate) fn put_var_u32(val: u32, dest: &mut BytesMut) {
     let mut encode = true;
     let mut input_val = val;
     while encode {
@@ -464,7 +480,7 @@ pub(crate) fn encode_variable_len_integer(val: u32, dest: &mut BytesMut) {
     }
 }
 
-pub(crate) fn decode_variable_len_integer(src: &mut BytesMut) -> u32 {
+pub(crate) fn get_var_u32(src: &mut BytesMut) -> u32 {
     let mut result = 0_u32;
     let mut shift = 0;
     let mut next_byte = src.get_u8();
@@ -498,7 +514,7 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQ
     let first_byte = src.get_u8();
     let packet_type = PacketType::from(first_byte);
     let flags = first_byte & 0x0f;
-    let remaining = decode_variable_len_integer(src);
+    let remaining = get_var_u32(src);
     if src.remaining() != remaining as usize {
         // TODO return a protocol error
         return Ok(None);
@@ -545,151 +561,5 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MQ
             remaining,
         })),
         _ => Err(MQTTCodecError::new("unexpected packet type ")),
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    /// Random test of display trait for packet types.
-    fn test_packet_type_display() {
-        let p = PacketType::UnsubAck;
-        assert_eq!("UNSUBACK", format!("{}", p));
-        let p = PacketType::PingReq;
-        assert_eq!("PINGREQ", format!("{}", p));
-    }
-
-    #[test]
-    fn test_control_packet_type_from() {
-        let val = 0x12;
-        assert_eq!(
-            PacketType::Connect,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::Connect
-        );
-        let val = 0x2f;
-        assert_eq!(
-            PacketType::ConnAck,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::ConnAck
-        );
-        let val = 0x35;
-        assert_eq!(
-            PacketType::Publish,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::Publish
-        );
-        let val = 0x47;
-        assert_eq!(
-            PacketType::PubAck,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::PubAck
-        );
-        let val = 0x5f;
-        assert_eq!(
-            PacketType::PubRec,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::PubRec
-        );
-        let val = 0x6f;
-        assert_eq!(
-            PacketType::PubRel,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::PubRel
-        );
-        let val = 0x7f;
-        assert_eq!(
-            PacketType::PubComp,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::PubComp
-        );
-        let val = 0x8f;
-        assert_eq!(
-            PacketType::Subscribe,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::Subscribe
-        );
-        let val = 0x9f;
-        assert_eq!(
-            PacketType::SubAck,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::SubAck
-        );
-        let val = 0xaf;
-        assert_eq!(
-            PacketType::Unsubscribe,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::Unsubscribe
-        );
-        let val = 0xbf;
-        assert_eq!(
-            PacketType::UnsubAck,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::UnsubAck
-        );
-        let val = 0xcf;
-        assert_eq!(
-            PacketType::PingReq,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::PingReq
-        );
-        let val = 0xdf;
-        assert_eq!(
-            PacketType::PingResp,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::PingResp
-        );
-        let val = 0xff;
-        assert_eq!(
-            PacketType::Auth,
-            PacketType::from(val),
-            "expected {:?}",
-            PacketType::Auth
-        );
-    }
-
-    #[test]
-    fn test_encode_var_int() {
-        let test = 128_u32;
-        let mut encoded: BytesMut = BytesMut::with_capacity(6);
-        encode_variable_len_integer(test, &mut encoded);
-        assert_eq!(0x80, encoded[0]);
-        assert_eq!(0x01, encoded[1]);
-        let test = 777;
-        let mut encoded: BytesMut = BytesMut::with_capacity(6);
-        encode_variable_len_integer(test, &mut encoded);
-        assert_eq!(0x89, encoded[0]);
-        assert_eq!(0x06, encoded[1]);
-    }
-
-    #[test]
-    fn test_decode_var_int() {
-        let mut encoded: BytesMut = BytesMut::with_capacity(6);
-        // 0x80
-        encoded.put_u8(0x80);
-        encoded.put_u8(0x01);
-        let val = decode_variable_len_integer(&mut encoded);
-        assert_eq!(128, val);
-        // 777 --- 0x309
-        encoded.clear();
-        encoded.put_u8(0x89);
-        encoded.put_u8(0x06);
-        let val = decode_variable_len_integer(&mut encoded);
-        assert_eq!(777, val);
     }
 }

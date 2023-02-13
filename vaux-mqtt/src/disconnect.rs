@@ -4,8 +4,8 @@ use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     codec::{
-        check_property, decode_utf8_string, decode_variable_len_integer, encode_utf8_string,
-        encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_U32, PROP_SIZE_UTF8_STRING,
+        check_property, get_utf8, get_var_u32, put_utf8, put_var_u32, variable_byte_int_size,
+        PROP_SIZE_U32, PROP_SIZE_UTF8_STRING,
     },
     Decode, Encode, FixedHeader, MQTTCodecError, PacketType, PropertyType, Reason, Size,
     UserPropertyMap,
@@ -34,7 +34,7 @@ impl Disconnect {
     }
 
     fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        let prop_size = decode_variable_len_integer(src);
+        let prop_size = get_var_u32(src);
         let read_until = src.remaining() - prop_size as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
         while src.remaining() > read_until {
@@ -46,12 +46,8 @@ impl Disconnect {
                             PropertyType::SessionExpiryInt => {
                                 self.session_expiry = Some(src.get_u32())
                             }
-                            PropertyType::Reason => {
-                                self.reason_desc = Some(decode_utf8_string(src)?)
-                            }
-                            PropertyType::ServerRef => {
-                                self.server_ref = Some(decode_utf8_string(src)?)
-                            }
+                            PropertyType::Reason => self.reason_desc = Some(get_utf8(src)?),
+                            PropertyType::ServerRef => self.server_ref = Some(get_utf8(src)?),
                             val => {
                                 return Err(MQTTCodecError::new(&format!(
                                     "unexpected property type: {}",
@@ -61,11 +57,11 @@ impl Disconnect {
                         }
                     } else {
                         if self.user_props.is_none() {
-                            self.user_props = Some(UserPropertyMap::new());
+                            self.user_props = Some(UserPropertyMap::default());
                         }
                         let property_map = self.user_props.as_mut().unwrap();
-                        let key = decode_utf8_string(src)?;
-                        let value = decode_utf8_string(src)?;
+                        let key = get_utf8(src)?;
+                        let value = get_utf8(src)?;
                         property_map.add_property(&key, &value);
                     }
                 }
@@ -126,18 +122,18 @@ impl Encode for Disconnect {
         dest.put_u8(reason);
         let prop_size = self.property_size();
         if prop_size > 0 {
-            encode_variable_len_integer(prop_size, dest);
+            put_var_u32(prop_size, dest);
             if let Some(expiry) = self.session_expiry {
                 dest.put_u32(expiry);
             }
             if let Some(reason_desc) = self.reason_desc.as_ref() {
-                encode_utf8_string(reason_desc, dest)?;
+                put_utf8(reason_desc, dest)?;
             }
             if let Some(user_props) = &self.user_props {
                 user_props.encode(dest)?;
             }
             if let Some(server_ref) = self.server_ref.as_ref() {
-                encode_utf8_string(server_ref, dest)?;
+                put_utf8(server_ref, dest)?;
             }
         }
         Ok(())
@@ -153,7 +149,7 @@ impl Decode for Disconnect {
         }
         self.reason = Reason::try_from(src.get_u8())?;
         if src.remaining() > 0 {
-            let property_remaining = decode_variable_len_integer(src);
+            let property_remaining = get_var_u32(src);
             if property_remaining > 0 {
                 self.decode_properties(src)?;
             }

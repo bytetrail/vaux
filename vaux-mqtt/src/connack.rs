@@ -1,7 +1,6 @@
 use crate::codec::{
-    check_property, decode_binary_data, decode_prop_bool, decode_utf8_string,
-    decode_variable_len_integer, encode_binary_data, encode_utf8_string,
-    encode_variable_len_integer, Reason, PROP_SIZE_U16,
+    check_property, get_bin, decode_prop_bool, put_bin, get_utf8,
+    get_var_u32, put_utf8, put_var_u32, Reason, PROP_SIZE_U16,
 };
 use crate::{
     variable_byte_int_size, Decode, Encode, PropertyType, QoSLevel, Size, UserPropertyMap,
@@ -40,7 +39,7 @@ pub struct ConnAck {
 
 impl ConnAck {
     fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        let prop_size = decode_variable_len_integer(src);
+        let prop_size = get_var_u32(src);
         let read_until = src.remaining() - prop_size as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
         while src.remaining() > read_until {
@@ -51,11 +50,11 @@ impl ConnAck {
                         self.decode_property(property_type, src)?;
                     } else {
                         if self.user_properties.is_none() {
-                            self.user_properties = Some(UserPropertyMap::new());
+                            self.user_properties = Some(UserPropertyMap::default());
                         }
                         let property_map = self.user_properties.as_mut().unwrap();
-                        let key = decode_utf8_string(src)?;
-                        let value = decode_utf8_string(src)?;
+                        let key = get_utf8(src)?;
+                        let value = get_utf8(src)?;
                         property_map.add_property(&key, &value);
                     }
                 }
@@ -81,19 +80,17 @@ impl ConnAck {
             PropertyType::MaxQoS => self.max_qos = QoSLevel::try_from(src.get_u8())?,
             PropertyType::RetainAvail => self.retain_avail = decode_prop_bool(src)?,
             PropertyType::MaxPacketSize => self.max_packet_size = Some(src.get_u32()),
-            PropertyType::AssignedClientId => {
-                self.assigned_client_id = Some(decode_utf8_string(src)?)
-            }
+            PropertyType::AssignedClientId => self.assigned_client_id = Some(get_utf8(src)?),
             PropertyType::TopicAliasMax => self.topic_alias_max = src.get_u16(),
-            PropertyType::Reason => self.reason_str = Some(decode_utf8_string(src)?),
+            PropertyType::Reason => self.reason_str = Some(get_utf8(src)?),
             PropertyType::WildcardSubAvail => self.wildcard_sub_avail = decode_prop_bool(src)?,
             PropertyType::SubIdAvail => self.sub_id_avail = decode_prop_bool(src)?,
             PropertyType::ShardSubAvail => self.shared_sub_avail = decode_prop_bool(src)?,
             PropertyType::KeepAlive => self.server_keep_alive = Some(src.get_u16()),
-            PropertyType::RespInfo => self.response_info = Some(decode_utf8_string(src)?),
-            PropertyType::ServerRef => self.server_ref = Some(decode_utf8_string(src)?),
-            PropertyType::AuthMethod => self.auth_method = Some(decode_utf8_string(src)?),
-            PropertyType::AuthData => self.auth_data = Some(decode_binary_data(src)?),
+            PropertyType::RespInfo => self.response_info = Some(get_utf8(src)?),
+            PropertyType::ServerRef => self.server_ref = Some(get_utf8(src)?),
+            PropertyType::AuthMethod => self.auth_method = Some(get_utf8(src)?),
+            PropertyType::AuthData => self.auth_data = Some(get_bin(src)?),
             prop => {
                 return Err(MQTTCodecError::new(&format!(
                     "unexpected property type value: {}",
@@ -218,7 +215,7 @@ impl Encode for ConnAck {
         dest.put_u8(self.reason as u8);
         // reserve capacity to avoid intermediate reallocation
         dest.reserve(prop_remaining as usize);
-        encode_variable_len_integer(prop_remaining, dest);
+        put_var_u32(prop_remaining, dest);
         if let Some(expiry) = self.expiry_interval {
             dest.put_u8(PropertyType::SessionExpiryInt as u8);
             dest.put_u32(expiry);
@@ -241,7 +238,7 @@ impl Encode for ConnAck {
         }
         if let Some(client_id) = &self.assigned_client_id {
             dest.put_u8(PropertyType::AssignedClientId as u8);
-            encode_utf8_string(client_id, dest)?;
+            put_utf8(client_id, dest)?;
         }
         if self.topic_alias_max != 0 {
             dest.put_u8(PropertyType::TopicAliasMax as u8);
@@ -249,7 +246,7 @@ impl Encode for ConnAck {
         }
         if let Some(reason) = &self.reason_str {
             dest.put_u8(PropertyType::Reason as u8);
-            encode_utf8_string(reason, dest)?;
+            put_utf8(reason, dest)?;
         }
         if let Some(user_properties) = &self.user_properties {
             user_properties.encode(dest)?;
@@ -272,19 +269,19 @@ impl Encode for ConnAck {
         }
         if let Some(response) = &self.response_info {
             dest.put_u8(PropertyType::RespInfo as u8);
-            encode_utf8_string(response, dest)?;
+            put_utf8(response, dest)?;
         }
         if let Some(server_ref) = &self.server_ref {
             dest.put_u8(PropertyType::ServerRef as u8);
-            encode_utf8_string(server_ref, dest)?;
+            put_utf8(server_ref, dest)?;
         }
         if let Some(auth_method) = &self.auth_method {
             dest.put_u8(PropertyType::AuthMethod as u8);
-            encode_utf8_string(auth_method, dest)?;
+            put_utf8(auth_method, dest)?;
         }
         if let Some(auth_data) = &self.auth_data {
             dest.put_u8(PropertyType::AuthData as u8);
-            encode_binary_data(auth_data, dest)?;
+            put_bin(auth_data, dest)?;
         }
         Ok(())
     }
@@ -565,7 +562,7 @@ mod test {
 
     #[test]
     fn test_encode_user_properties() {
-        let mut properties = UserPropertyMap::new();
+        let mut properties = UserPropertyMap::default();
         properties.add_property("broker_id", "vaux");
         properties.add_property("broker_version", "0.1.0");
         let mut prop_len = 0;
@@ -591,7 +588,7 @@ mod test {
 
     #[test]
     fn test_decode_user_properties() {
-        let mut properties = UserPropertyMap::new();
+        let mut properties = UserPropertyMap::default();
         properties.add_property("broker_id", "vaux");
         properties.add_property("broker_version", "0.1.0");
         let mut connack = ConnAck::default();

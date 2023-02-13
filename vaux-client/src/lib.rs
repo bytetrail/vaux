@@ -1,12 +1,12 @@
 use std::{
     io::{Read, Write},
     net::{IpAddr, TcpStream},
-    time::Duration, default,
+    time::Duration,
 };
 
 use bytes::BytesMut;
 use vaux_mqtt::{
-    decode, encode, publish::Publish, Subscription, Connect, Packet, Subscribe, UserPropertyMap,
+    decode, encode, publish::Publish, Connect, Packet, Subscribe, Subscription, UserPropertyMap,
 };
 
 pub struct MQTTClient {
@@ -16,7 +16,7 @@ pub struct MQTTClient {
     connection: Option<TcpStream>,
 }
 
-#[derive(Default,Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ErrorKind {
     #[default]
@@ -27,7 +27,7 @@ pub enum ErrorKind {
     Transport,
 }
 
-#[derive(Default,Debug)]
+#[derive(Default, Debug)]
 pub struct MQTTError {
     message: String,
     kind: ErrorKind,
@@ -84,9 +84,9 @@ impl MQTTClient {
                 let mut dest = BytesMut::default();
                 let result = encode(connect_packet, &mut dest);
                 if let Err(e) = result {
-                    assert!(false, "Failed to encode packet: {:?}", e);
+                    panic!("Failed to encode packet: {:?}", e);
                 }
-                match self.connection.as_ref().unwrap().write_all(&dest.to_vec()) {
+                match self.connection.as_ref().unwrap().write_all(&dest) {
                     Ok(_) => match self.connection.as_ref().unwrap().read(&mut buffer) {
                         Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
                             Ok(p) => {
@@ -97,55 +97,60 @@ impl MQTTClient {
                                                 self.client_id = connack.assigned_client_id;
                                             }
                                             // TODO set server properties based on ConnAck
-                                            return Ok(());
+                                            Ok(())
                                         }
                                         Packet::Disconnect(_disconnect) => {
                                             // TODO return the disconnect reason as MQTT error
                                             panic!("disconnect");
                                         }
-                                        _ => {
-                                            return Err(MQTTError::new(
-                                                "unexpected packet type",
-                                                ErrorKind::Protocol,
-                                            ))
-                                        }
+                                        _ => Err(MQTTError::new(
+                                            "unexpected packet type",
+                                            ErrorKind::Protocol,
+                                        )),
                                     }
                                 } else {
-                                    return Err(MQTTError::new(
+                                    Err(MQTTError::new(
                                         "no MQTT packet received",
                                         ErrorKind::Protocol,
-                                    ));
+                                    ))
                                 }
                             }
-                            Err(e) => return Err(MQTTError::new(&e.to_string(), ErrorKind::Codec)),
+                            Err(e) => Err(MQTTError::new(&e.to_string(), ErrorKind::Codec)),
                         },
                         Err(e) => {
                             return Err(MQTTError::new(
-                                &format!("unable to read stream: {}", e.to_string()),
+                                &format!("unable to read stream: {}", e),
                                 ErrorKind::Transport,
                             ))
                         }
                     },
-                    Err(e) => panic!(
-                        "Unable to write packet(s) to test broker: {}",
-                        e.to_string()
-                    ),
+                    Err(e) => panic!("Unable to write packet(s) to test broker: {}", e),
                 }
             }
             Err(e) => {
                 return Err(MQTTError::new(
-                    &format!("unable to connect: {}", e.to_string()),
+                    &format!("unable to connect: {}", e),
                     ErrorKind::Connection,
                 ))
             }
         }
     }
 
-    pub fn send_binary(&mut self, topic: &str, data: &[u8], props: Option<&UserPropertyMap>) -> MQTTResult<Option<Packet>> {
+    pub fn send_binary(
+        &mut self,
+        topic: &str,
+        data: &[u8],
+        props: Option<&UserPropertyMap>,
+    ) -> MQTTResult<Option<Packet>> {
         self.publish(topic, false, data, props)
     }
 
-    pub fn send_utf8(&mut self, topic: &str, message: &str, props: Option<&UserPropertyMap>) -> MQTTResult<Option<Packet>> {
+    pub fn send_utf8(
+        &mut self,
+        topic: &str,
+        message: &str,
+        props: Option<&UserPropertyMap>,
+    ) -> MQTTResult<Option<Packet>> {
         self.publish(topic, true, message.as_bytes(), props)
     }
 
@@ -153,7 +158,13 @@ impl MQTTClient {
     /// Level 0 and a payload format indicated a UTF8. No additional properties
     /// are set. A disconnect message can occur due to errors. This method uses
     /// a simple blocking read with a timeout for test purposes.
-    pub fn publish(&mut self, topic: &str, utf8: bool, data: &[u8], props: Option<&UserPropertyMap>) -> MQTTResult<Option<Packet>> {
+    pub fn publish(
+        &mut self,
+        topic: &str,
+        utf8: bool,
+        data: &[u8],
+        props: Option<&UserPropertyMap>,
+    ) -> MQTTResult<Option<Packet>> {
         let mut publish = Publish::default();
         publish.payload_utf8 = utf8;
         publish.topic_name = Some(topic.to_string());
@@ -162,17 +173,20 @@ impl MQTTClient {
 
         self.send(Packet::Publish(publish))
     }
-    
+
     pub fn send(&mut self, packet: Packet) -> MQTTResult<Option<Packet>> {
         let mut dest = BytesMut::default();
         let result = encode(packet, &mut dest);
         if let Err(e) = result {
-            assert!(false, "Failed to encode packet: {:?}", e);
+            panic!("Failed to encode packet: {:?}", e);
         }
-        if let Err(e) = self.connection.as_ref().unwrap().write_all(&dest.to_vec()) {
+        if let Err(e) = self.connection.as_ref().unwrap().write_all(&dest) {
             eprintln!("unexpected send error {:#?}", e);
             // TODO higher fidelity error handling
-            return Err(MQTTError{kind: ErrorKind::Transport, message: e.to_string()});
+            return Err(MQTTError {
+                kind: ErrorKind::Transport,
+                message: e.to_string(),
+            });
         }
         Ok(None)
     }
@@ -188,9 +202,9 @@ impl MQTTClient {
         let mut dest = BytesMut::default();
         let result = encode(Packet::Subscribe(subscribe.clone()), &mut dest);
         if let Err(e) = result {
-            assert!(false, "Failed to encode packet: {:?}", e);
+            panic!("Failed to encode packet: {:?}", e);
         }
-        match self.connection.as_ref().unwrap().write_all(&dest.to_vec()) {
+        match self.connection.as_ref().unwrap().write_all(&dest) {
             Ok(_) => Ok(()),
             Err(e) => Err(MQTTError {
                 message: format!("unexpected send error {:#?}", e),
@@ -203,12 +217,8 @@ impl MQTTClient {
         let mut buffer = [0u8; 4096];
         match self.connection.as_ref().unwrap().read(&mut buffer) {
             Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
-                Ok(packet) => {
-                    println!("**** packet in read");
-                    Ok(packet)
-                }
-                Err(e) => 
-                Err(MQTTError {
+                Ok(packet) => Ok(packet),
+                Err(e) => Err(MQTTError {
                     message: e.reason,
                     kind: ErrorKind::Codec,
                 }),

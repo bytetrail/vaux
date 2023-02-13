@@ -1,4 +1,3 @@
-mod buffer;
 mod codec;
 mod connack;
 mod connect;
@@ -13,7 +12,7 @@ pub mod test;
 mod will;
 
 use crate::codec::{
-    encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_U32,
+    put_utf8, put_var_u32, variable_byte_int_size, PROP_SIZE_U32,
     PROP_SIZE_U8,
 };
 
@@ -45,18 +44,12 @@ pub trait Decode {
     fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError>;
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
 pub struct UserPropertyMap {
     map: HashMap<String, Vec<String>>,
 }
 
 impl UserPropertyMap {
-    pub fn new() -> Self {
-        Self {
-            map: HashMap::new(),
-        }
-    }
-
     pub fn map(&self) -> &HashMap<String, Vec<String>> {
         &self.map
     }
@@ -116,8 +109,8 @@ impl Encode for UserPropertyMap {
         for (k, value) in self.map.iter() {
             for v in value {
                 dest.put_u8(PropertyType::UserProperty as u8);
-                encode_utf8_string(k, dest)?;
-                encode_utf8_string(v, dest)?;
+                put_utf8(k, dest)?;
+                put_utf8(v, dest)?;
             }
         }
         Ok(())

@@ -1,11 +1,12 @@
 use crate::codec::{
-    check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
-    encode_binary_data, MQTTCodecError, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
+    check_property, get_bin, encode_bin_property, put_bin,
+    encode_u16_property, encode_u32_property, encode_u8_property, encode_utf8_property, get_utf8,
+    get_var_u32, MQTTCodecError, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use crate::property::{PropertyEncode, PropertySize};
 use crate::{
-    encode_utf8_string, encode_variable_len_integer, variable_byte_int_size, Decode, Encode,
-    FixedHeader, PacketType, PropertyType, QoSLevel, Size, UserPropertyMap, WillMessage,
+    put_utf8, put_var_u32, variable_byte_int_size, Decode, Encode, FixedHeader, PacketType,
+    PropertyType, QoSLevel, Size, UserPropertyMap, WillMessage,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use prop_macro::{PropertyEncode, PropertySize};
@@ -15,14 +16,14 @@ const MQTT_PROTOCOL_NAME_LEN: u16 = 0x00_04;
 const MQTT_PROTOCOL_U32: u32 = 0x4d515454;
 const MQTT_PROTOCOL_VERSION: u8 = 0x05;
 
-const CONNECT_FLAG_USERNAME: u8 = 0b_1000_0000;
-const CONNECT_FLAG_PASSWORD: u8 = 0b_0100_0000;
-const CONNECT_FLAG_WILL_RETAIN: u8 = 0b_0010_0000;
-const CONNECT_FLAG_WILL_QOS: u8 = 0b_0001_1000;
-const CONNECT_FLAG_WILL: u8 = 0b_0000_0100;
-const CONNECT_FLAG_CLEAN_START: u8 = 0b_0000_0010;
+pub(crate) const CONNECT_FLAG_USERNAME: u8 = 0b_1000_0000;
+pub(crate) const CONNECT_FLAG_PASSWORD: u8 = 0b_0100_0000;
+pub(crate) const CONNECT_FLAG_WILL_RETAIN: u8 = 0b_0010_0000;
+pub(crate) const CONNECT_FLAG_WILL_QOS: u8 = 0b_0001_1000;
+pub(crate) const CONNECT_FLAG_WILL: u8 = 0b_0000_0100;
+pub(crate) const CONNECT_FLAG_CLEAN_START: u8 = 0b_0000_0010;
+pub(crate) const CONNECT_FLAG_SHIFT: u8 = 0x03;
 
-const CONNECT_FLAG_SHIFT: u8 = 0x03;
 const DEFAULT_RECEIVE_MAX: u16 = 0xffff;
 /// Default remaining size for connect packet
 const DEFAULT_CONNECT_REMAINING: u32 = 10;
@@ -32,30 +33,21 @@ pub struct Connect {
     pub clean_start: bool,
     pub keep_alive: u16,
     pub session_expiry_interval: Option<u32>,
-    receive_max: u16,
-    max_packet_size: Option<u32>,
-    topic_alias_max: Option<u16>,
-    req_resp_info: bool,
-    problem_info: bool,
-    auth_method: Option<String>,
-    auth_data: Option<Vec<u8>>,
-    will_message: Option<WillMessage>,
-    user_props: Option<UserPropertyMap>,
+    pub receive_max: u16,
+    pub max_packet_size: Option<u32>,
+    pub topic_alias_max: Option<u16>,
+    pub req_resp_info: bool,
+    pub problem_info: bool,
+    pub auth_method: Option<String>,
+    pub auth_data: Option<Vec<u8>>,
+    pub will_message: Option<WillMessage>,
+    pub user_props: Option<UserPropertyMap>,
     pub client_id: String,
-    username: Option<String>,
-    password: Option<Vec<u8>>,
+    pub username: Option<String>,
+    pub password: Option<Vec<u8>>,
 }
 
 impl Connect {
-    fn receive_max(&self) -> u16 {
-        self.receive_max
-    }
-
-    fn set_receive_max(&mut self, receive_max: u16) {
-        assert_ne!(0, receive_max);
-        self.receive_max = receive_max;
-    }
-
     fn encode_flags(&self, dest: &mut BytesMut) {
         let mut flags = 0_u8;
         if self.clean_start {
@@ -115,7 +107,7 @@ impl Connect {
     }
 
     fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        let prop_size = decode_variable_len_integer(src);
+        let prop_size = get_var_u32(src);
         let read_until = src.remaining() - prop_size as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
         while src.remaining() > read_until {
@@ -165,12 +157,12 @@ impl Connect {
                                 }
                             },
                             PropertyType::AuthMethod => {
-                                let result = decode_utf8_string(src)?;
+                                let result = get_utf8(src)?;
                                 self.auth_method = Some(result);
                             }
                             PropertyType::AuthData => {
                                 if self.auth_method.is_some() {
-                                    self.auth_data = Some(decode_binary_data(src)?);
+                                    self.auth_data = Some(get_bin(src)?);
                                 } else {
                                     // MQTT protocol not specific that auth method must appear before
                                     // auth data. This implementation imposes order and may be incorrect
@@ -190,11 +182,11 @@ impl Connect {
                         }
                     } else {
                         if self.user_props.is_none() {
-                            self.user_props = Some(UserPropertyMap::new());
+                            self.user_props = Some(UserPropertyMap::default());
                         }
                         let property_map = self.user_props.as_mut().unwrap();
-                        let key = decode_utf8_string(src)?;
-                        let value = decode_utf8_string(src)?;
+                        let key = get_utf8(src)?;
+                        let value = get_utf8(src)?;
                         property_map.add_property(&key, &value);
                     }
                 }
@@ -215,16 +207,16 @@ impl Connect {
         username: bool,
         password: bool,
     ) -> Result<(), MQTTCodecError> {
-        self.client_id = decode_utf8_string(src)?;
+        self.client_id = get_utf8(src)?;
         if self.will_message.is_some() {
             let will_message = self.will_message.as_mut().unwrap();
             will_message.decode(src)?;
         }
         if username {
-            self.username = Some(decode_utf8_string(src)?);
+            self.username = Some(get_utf8(src)?);
         }
         if password {
-            self.password = Some(decode_binary_data(src)?);
+            self.password = Some(get_bin(src)?);
         }
         Ok(())
     }
@@ -304,53 +296,46 @@ impl Encode for Connect {
         dest.put_u8(MQTT_PROTOCOL_VERSION);
         self.encode_flags(dest);
         dest.put_u16(self.keep_alive);
-        encode_variable_len_integer(prop_remaining, dest);
+        put_var_u32(prop_remaining, dest);
         if let Some(expiry) = self.session_expiry_interval {
             dest.put_u8(PropertyType::SessionExpiryInt as u8);
             dest.put_u32(expiry);
         }
         if self.receive_max != DEFAULT_RECEIVE_MAX {
-            dest.put_u8(PropertyType::RecvMax as u8);
-            dest.put_u16(self.receive_max);
+            encode_u16_property(PropertyType::RecvMax, self.receive_max, dest);
         }
         if let Some(max_packet_size) = self.max_packet_size {
-            dest.put_u8(PropertyType::MaxPacketSize as u8);
-            dest.put_u32(max_packet_size);
+            encode_u32_property(PropertyType::MaxPacketSize, max_packet_size, dest);
         }
         if let Some(topic_alias_max) = self.topic_alias_max {
-            dest.put_u8(PropertyType::TopicAliasMax as u8);
-            dest.put_u16(topic_alias_max);
+            encode_u16_property(PropertyType::TopicAliasMax, topic_alias_max, dest);
         }
         if self.req_resp_info {
-            dest.put_u8(PropertyType::ReqRespInfo as u8);
-            dest.put_u8(1);
+            encode_u8_property(PropertyType::ReqRespInfo, 1, dest);
         }
         if !self.problem_info {
-            dest.put_u8(PropertyType::ReqProblemInfo as u8);
-            dest.put_u8(1);
+            encode_u8_property(PropertyType::ReqProblemInfo, 1, dest);
         }
         if let Some(user_properties) = &self.user_props {
             user_properties.encode(dest)?;
         }
         if let Some(auth_method) = &self.auth_method {
-            dest.put_u8(PropertyType::AuthMethod as u8);
-            encode_utf8_string(auth_method, dest)?;
+            encode_utf8_property(PropertyType::AuthMethod, auth_method, dest)?;
         }
         if let Some(auth_data) = &self.auth_data {
-            dest.put_u8(PropertyType::AuthData as u8);
-            encode_binary_data(auth_data, dest)?;
+            encode_bin_property(PropertyType::AuthData, auth_data, dest)?;
         }
         // payload
-        encode_utf8_string(&self.client_id, dest)?;
+        put_utf8(&self.client_id, dest)?;
         // connect payload
         if let Some(will_message) = &self.will_message {
             will_message.encode(dest)?;
         }
         if let Some(username) = &self.username {
-            encode_utf8_string(username, dest)?;
+            put_utf8(username, dest)?;
         }
         if let Some(password) = &self.password {
-            encode_binary_data(password, dest)?;
+            put_bin(password, dest)?;
         }
         Ok(())
     }
@@ -381,261 +366,5 @@ impl Default for Connect {
             username: None,
             password: None,
         }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::{Size, UserPropertyMap};
-
-    const CONNECT_MIN_REMAINING: u32 = 13;
-    const PROP_ENCODE: u32 = 5;
-
-    #[test]
-    fn test_encode_flags() {
-        let mut connect = Connect::default();
-        connect.clean_start = true;
-        let mut dest = BytesMut::new();
-        let result = connect.encode(&mut dest);
-        assert!(result.is_ok());
-        assert_eq!(dest[9], CONNECT_FLAG_CLEAN_START);
-        let mut dest = BytesMut::new();
-        let password = vec![1, 2, 3, 4, 5];
-        connect.password = Some(password);
-        let result = connect.encode(&mut dest);
-        assert!(result.is_ok());
-        assert_eq!(dest[9], CONNECT_FLAG_CLEAN_START | CONNECT_FLAG_PASSWORD);
-    }
-
-    #[test]
-    fn test_encode_will() {
-        let mut connect = Connect::default();
-        let will = WillMessage::new(QoSLevel::AtLeastOnce, true);
-        connect.will_message = Some(will);
-        let mut dest = BytesMut::new();
-        let result = connect.encode(&mut dest);
-        assert!(result.is_ok());
-        assert!(dest[9] & CONNECT_FLAG_WILL > 0);
-        assert!(dest[9] & CONNECT_FLAG_WILL_RETAIN > 0);
-        let qos_bits = (dest[9] & CONNECT_FLAG_WILL_QOS) >> CONNECT_FLAG_SHIFT;
-        let qos_result = QoSLevel::try_from(qos_bits);
-        assert!(qos_result.is_ok());
-        let qos = qos_result.unwrap();
-        assert_eq!(QoSLevel::AtLeastOnce, qos);
-    }
-
-    #[test]
-    fn test_encode_keep_alive() {
-        let mut connect = Connect::default();
-        connect.keep_alive = 0xcafe;
-        let mut dest = BytesMut::new();
-        let result = connect.encode(&mut dest);
-        assert!(result.is_ok());
-        assert_eq!(0xcafe, ((dest[10] as u16) << 8) + dest[11] as u16);
-    }
-
-    #[test]
-    fn test_encode_session_expiry() {
-        let mut connect = Connect::default();
-        connect.session_expiry_interval = Some(0xcafe);
-        let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 5, PropertyType::SessionExpiryInt);
-    }
-
-    #[test]
-    fn test_encode_receive_max() {
-        let mut connect = Connect::default();
-        connect.receive_max = 0xcafe;
-        let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 3, PropertyType::RecvMax);
-    }
-
-    #[test]
-    fn test_encode_max_packet_size() {
-        let mut connect = Connect::default();
-        connect.max_packet_size = Some(0xcafe);
-        let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 5, PropertyType::MaxPacketSize);
-    }
-
-    #[test]
-    fn test_encode_topic_alias_max() {
-        let mut connect = Connect::default();
-        connect.topic_alias_max = Some(0xcafe);
-        let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 3, PropertyType::TopicAliasMax);
-    }
-
-    #[test]
-    fn test_encode_req_resp_info() {
-        let mut connect = Connect::default();
-        connect.req_resp_info = true;
-        let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 2, PropertyType::ReqRespInfo);
-    }
-
-    #[test]
-    fn test_encode_req_problem_info() {
-        let mut connect = Connect::default();
-        connect.problem_info = false;
-        let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 2, PropertyType::ReqProblemInfo);
-    }
-
-    #[test]
-    fn test_encode_auth_method() {
-        let mut connect = Connect::default();
-        connect.auth_method = Some("Authenticate".to_string());
-        let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 15, PropertyType::AuthMethod);
-    }
-
-    #[test]
-    fn test_encode_auth_data() {
-        let mut connect = Connect::default();
-        connect.auth_data = Some(vec![0, 1, 2, 3, 4, 5]);
-        let mut dest = BytesMut::new();
-        test_property(connect, &mut dest, 9, PropertyType::AuthData);
-    }
-
-    #[test]
-    fn test_encode_client_id() {
-        let mut connect = Connect::default();
-        connect.client_id = "123-456-789".to_string();
-        let mut dest = BytesMut::new();
-        let result = connect.encode(&mut dest);
-        assert!(result.is_ok());
-        assert_eq!(26, dest.len() as u32, "Packet Size");
-        assert_eq!('1', dest[15] as char)
-    }
-
-    #[test]
-    fn test_default_remaining() {
-        let connect = Connect::default();
-        let remaining = connect.size();
-        assert_eq!(
-            CONNECT_MIN_REMAINING, remaining,
-            "[Default] expected {} remaining size",
-            CONNECT_MIN_REMAINING
-        );
-        let mut dest = BytesMut::new();
-        let result = connect.encode(&mut dest);
-        assert!(result.is_ok());
-        assert_eq!(
-            CONNECT_MIN_REMAINING as usize,
-            dest.len() - 2,
-            "Expected minimum size {}",
-            CONNECT_MIN_REMAINING
-        );
-    }
-
-    #[test]
-    fn test_receive_max_remaining() {
-        let mut connect = Connect::default();
-        connect.receive_max = 1024;
-        let remaining = connect.size();
-        let expected = CONNECT_MIN_REMAINING + 3;
-        assert_eq!(
-            expected, remaining,
-            "[Receive Max] expected {} remaining size",
-            expected
-        );
-    }
-
-    #[test]
-    fn test_problem_info_remaining() {
-        let mut connect = Connect::default();
-        connect.problem_info = false;
-        let remaining = connect.size();
-        let expected = CONNECT_MIN_REMAINING + PROP_SIZE_U8;
-        assert_eq!(
-            expected, remaining,
-            "[Problem Info false] expected {} remaining size",
-            expected
-        );
-        connect.problem_info = true;
-        let remaining = connect.size();
-        assert_eq!(
-            CONNECT_MIN_REMAINING, remaining,
-            "[Problem Info true] {} remaining size",
-            CONNECT_MIN_REMAINING
-        );
-    }
-
-    #[test]
-    fn test_user_property_remaining() {
-        let mut connect = Connect::default();
-
-        let mut user_properties = UserPropertyMap::new();
-        let key = "12335";
-        let value = "12345";
-        let expected = CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
-        user_properties.add_property(key, value);
-        connect.user_props = Some(user_properties);
-        let remaining = connect.size();
-        assert_eq!(
-            expected, remaining,
-            "[Single Property] expected {} remaining size",
-            expected
-        );
-
-        let mut user_properties = UserPropertyMap::new();
-        let key = "12335".to_string();
-        let value = "12345".to_string();
-        let mut expected =
-            CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
-        user_properties.add_property(&key, &value);
-        let key = "567890".to_string();
-        let value = "567890".to_string();
-        expected += key.len() as u32 + value.len() as u32 + PROP_ENCODE;
-        user_properties.add_property(&key, &value);
-        connect.user_props = Some(user_properties);
-        let remaining = connect.size();
-        assert_eq!(
-            expected, remaining,
-            "[2 Properties] expected {} remaining size",
-            expected
-        );
-    }
-
-    /// Remaining size calculations for a connect packet with will message present.
-    #[test]
-    fn test_will_message_remaining() {
-        let mut connect = Connect::default();
-        let will_message = WillMessage::new(QoSLevel::AtLeastOnce, true);
-        connect.will_message = Some(will_message);
-        let remaining = connect.size();
-        assert_eq!(
-            CONNECT_MIN_REMAINING + 5,
-            remaining,
-            "[Min Will Message] expected {}",
-            CONNECT_MIN_REMAINING + 5
-        );
-    }
-
-    fn test_property(
-        connect: Connect,
-        dest: &mut BytesMut,
-        expected_prop_len: u32,
-        property: PropertyType,
-    ) {
-        let expected_len = 15 + expected_prop_len;
-        let result = connect.encode(dest);
-        assert!(result.is_ok());
-        assert_eq!(expected_len, dest.len() as u32, "Packet Size");
-        assert_eq!(
-            expected_prop_len,
-            connect.property_size(),
-            "Encoded Property Length"
-        );
-        assert_eq!(expected_prop_len as u8, dest[12], "Property Length");
-        assert_eq!(property as u8, dest[13], "Property Type");
-    }
-
-    #[test]
-    fn test_property_derives() {
-        let connect = Connect::default();
-        let size = Connect::property_size_internal();
     }
 }

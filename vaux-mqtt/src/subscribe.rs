@@ -2,9 +2,8 @@ use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     codec::{
-        decode_utf8_string, decode_variable_len_integer, encode_utf8_string,
-        encode_var_int_property, encode_variable_len_integer, variable_byte_int_size,
-        PROP_SIZE_UTF8_STRING,
+        encode_var_int_property, get_utf8, get_var_u32, put_utf8, put_var_u32,
+        variable_byte_int_size, PROP_SIZE_UTF8_STRING,
     },
     Decode, Encode, FixedHeader, MQTTCodecError, PropertyType, QoSLevel, Reason, Size,
     UserPropertyMap,
@@ -76,7 +75,7 @@ impl Decode for SubAck {
             ));
         }
         self.packet_id = src.get_u16();
-        let prop_len = decode_variable_len_integer(src);
+        let prop_len = get_var_u32(src);
         if src.remaining() < prop_len as usize {
             return Err(MQTTCodecError::new(
                 "MQTTv5 3.9.3 insufficient data for SUBACK properties",
@@ -95,7 +94,7 @@ impl Decode for SubAck {
                                         "MQTTv5 3.9.2.1.2 reason description can appear only once",
                                     ));
                                 }
-                                self.reason_desc = Some(decode_utf8_string(src)?);
+                                self.reason_desc = Some(get_utf8(src)?);
                                 reason_id_prop = true;
                             }
                             _ => {
@@ -106,11 +105,11 @@ impl Decode for SubAck {
                         }
                     } else {
                         if self.user_props.is_none() {
-                            self.user_props = Some(UserPropertyMap::new());
+                            self.user_props = Some(UserPropertyMap::default());
                         }
                         let property_map = self.user_props.as_mut().unwrap();
-                        let key = decode_utf8_string(src)?;
-                        let value = decode_utf8_string(src)?;
+                        let key = get_utf8(src)?;
+                        let value = get_utf8(src)?;
                         property_map.add_property(&key, &value);
                     }
                 }
@@ -122,7 +121,7 @@ impl Decode for SubAck {
 }
 
 impl Encode for SubAck {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn encode(&self, _dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
         todo!()
     }
 }
@@ -140,7 +139,7 @@ pub struct Subscription {
 
 impl Subscription {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        encode_utf8_string(&self.filter, dest)?;
+        put_utf8(&self.filter, dest)?;
         let flags = self.qos as u8
             | (self.no_local as u8) << 2
             | (self.retain_as as u8) << 3
@@ -150,7 +149,7 @@ impl Subscription {
     }
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        self.filter = decode_utf8_string(src)?;
+        self.filter = get_utf8(src)?;
         let flags = src.get_u8();
         self.qos = QoSLevel::try_from(flags & 0b_0000_0011)?;
         self.no_local = flags & 0b_0000_0100 == 0b_0000_0100;
@@ -170,13 +169,12 @@ pub struct Subscribe {
 }
 
 impl Subscribe {
-
     pub fn new(packet_id: u16, sub_id: Option<u32>, payload: Vec<Subscription>) -> Self {
-        Self{
+        Self {
             packet_id,
             sub_id,
             user_props: None,
-            payload
+            payload,
         }
     }
 
@@ -239,7 +237,7 @@ impl Encode for Subscribe {
         hdr.set_remaining(self.size());
         hdr.encode(dest)?;
         dest.put_u16(self.packet_id);
-        encode_variable_len_integer(self.property_size(), dest);
+        put_var_u32(self.property_size(), dest);
         if let Some(sub_id) = self.sub_id {
             encode_var_int_property(PropertyType::SubscriptionId, sub_id, dest);
         }
@@ -259,7 +257,7 @@ impl Decode for Subscribe {
             ));
         }
         self.packet_id = src.get_u16();
-        let prop_len = decode_variable_len_integer(src);
+        let prop_len = get_var_u32(src);
         if src.remaining() < prop_len as usize {
             return Err(MQTTCodecError::new(
                 "MQTTv5 3.8.2 insufficient data for SUBSCRIBE properties",
@@ -279,7 +277,7 @@ impl Decode for Subscribe {
                                     ));
                                 }
                                 sub_id_prop = true;
-                                self.sub_id = Some(decode_variable_len_integer(src));
+                                self.sub_id = Some(get_var_u32(src));
                             }
                             _ => {
                                 return Err(MQTTCodecError::new(
@@ -289,11 +287,11 @@ impl Decode for Subscribe {
                         }
                     } else {
                         if self.user_props.is_none() {
-                            self.user_props = Some(UserPropertyMap::new());
+                            self.user_props = Some(UserPropertyMap::default());
                         }
                         let property_map = self.user_props.as_mut().unwrap();
-                        let key = decode_utf8_string(src)?;
-                        let value = decode_utf8_string(src)?;
+                        let key = get_utf8(src)?;
+                        let value = get_utf8(src)?;
                         property_map.add_property(&key, &value);
                     }
                 }
@@ -329,14 +327,14 @@ mod test {
         sub.handling = RetainHandling::None;
 
         let mut dest = BytesMut::new();
-        sub.encode(&mut dest);
+        assert!(sub.encode(&mut dest).is_ok());
         assert_eq!(EXPECTED_LEN, dest.len());
         assert_eq!(EXPECTED_FLAG, dest[6]);
 
         const SEND_EXPECTED_FLAG: u8 = 0b_0001_1110;
         sub.handling = RetainHandling::SendNew;
         let mut dest = BytesMut::new();
-        sub.encode(&mut dest);
+        assert!(sub.encode(&mut dest).is_ok());
         assert_eq!(EXPECTED_LEN, dest.len());
         assert_eq!(SEND_EXPECTED_FLAG, dest[6]);
 
@@ -344,7 +342,8 @@ mod test {
         sub.qos = QoSLevel::AtLeastOnce;
         sub.handling = RetainHandling::Send;
         let mut dest = BytesMut::new();
-        sub.encode(&mut dest);
+
+        assert!(sub.encode(&mut dest).is_ok());
         assert_eq!(EXPECTED_LEN, dest.len());
         assert_eq!(QOS_EXPECTED_FLAG, dest[6]);
     }
@@ -400,7 +399,7 @@ mod test {
         const EXPECTED_SIZE: u32 = 5 + EXPECTED_PAYLOAD_SIZE + EXPECTED_PROP_SIZE;
         let mut subscribe = Subscribe::default();
         subscribe.packet_id = 101;
-        let mut usr = UserPropertyMap::new();
+        let mut usr = UserPropertyMap::default();
         usr.add_property(USER_PROP_KEY, USER_PROP_VALUE);
         subscribe.user_props = Some(usr);
         subscribe.sub_id = Some(4096);

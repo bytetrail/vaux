@@ -1,8 +1,8 @@
 use std::net::Ipv4Addr;
 
+use std::io::Write;
 use vaux_client::ErrorKind;
 use vaux_mqtt::Packet;
-use std::io::Write;
 
 fn main() {
     let addr: Ipv4Addr = "127.0.0.1".parse().expect("unable to create addr");
@@ -24,22 +24,16 @@ fn main() {
                     loop {
                         match client.read_next() {
                             Ok(next) => {
-                                match next {
-                                    Some(packet) => {
-                                        packet_count += 1;
-                                        match packet {
-                                            Packet::Publish(mut p) => {
-                                                print!("{:?}", p.take_payload().unwrap());
-                                                std::io::stdout().flush().expect("unable to flush stdout");
-                                            }
-                                            _ => {}
-                                        }
-                                        if packet_count == 80 {
-                                            println!();
-                                            packet_count = 0;
-                                        }
+                                if let Some(packet) = next {
+                                    packet_count += 1;
+                                    if let Packet::Publish(mut p) = packet {
+                                        print!("{:?}", p.take_payload().unwrap());
+                                        std::io::stdout().flush().expect("unable to flush stdout");
                                     }
-                                    None => {}
+                                    if packet_count == 80 {
+                                        println!();
+                                        packet_count = 0;
+                                    }
                                 }
                             }
                             Err(e) => match e.kind() {

@@ -1,10 +1,7 @@
-use crate::codec::{
-    check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
-    encode_binary_data,
-};
+use crate::codec::{check_property, get_bin, put_bin, get_utf8, get_var_u32};
 use crate::{
-    encode_utf8_string, encode_variable_len_integer, Decode, Encode, MQTTCodecError, PropertyType,
-    QoSLevel, Size, UserPropertyMap, PROP_SIZE_U32, PROP_SIZE_U8,
+    put_utf8, put_var_u32, Decode, Encode, MQTTCodecError, PropertyType, QoSLevel, Size,
+    UserPropertyMap, PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
@@ -60,7 +57,7 @@ impl Decode for WillMessage {
     /// not attempt to decode the flags QOS and Retain as these are present in the
     /// CONNECT flags variable length header prior to the will message properties
     fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
-        let prop_size = decode_variable_len_integer(src);
+        let prop_size = get_var_u32(src);
         let read_until = src.remaining() - prop_size as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
         while src.remaining() > read_until {
@@ -89,24 +86,24 @@ impl Decode for WillMessage {
                     }
                     PropertyType::ContentType => {
                         check_property(PropertyType::ContentType, &mut properties)?;
-                        self.content_type = Some(decode_utf8_string(src)?);
+                        self.content_type = Some(get_utf8(src)?);
                     }
                     PropertyType::ResponseTopic => {
                         check_property(PropertyType::ResponseTopic, &mut properties)?;
-                        self.response_topic = Some(decode_utf8_string(src)?);
+                        self.response_topic = Some(get_utf8(src)?);
                         self.is_request = true;
                     }
                     PropertyType::CorrelationData => {
                         check_property(PropertyType::CorrelationData, &mut properties)?;
-                        self.correlation_data = Some(decode_binary_data(src)?);
+                        self.correlation_data = Some(get_bin(src)?);
                     }
                     PropertyType::UserProperty => {
                         if self.user_property.is_none() {
-                            self.user_property = Some(UserPropertyMap::new());
+                            self.user_property = Some(UserPropertyMap::default());
                         }
                         let property_map = self.user_property.as_mut().unwrap();
-                        let key = decode_utf8_string(src)?;
-                        let value = decode_utf8_string(src)?;
+                        let key = get_utf8(src)?;
+                        let value = get_utf8(src)?;
                         property_map.add_property(&key, &value);
                     }
                     err => {
@@ -124,8 +121,8 @@ impl Decode for WillMessage {
                 }
             };
         }
-        self.topic = decode_utf8_string(src)?;
-        self.payload = decode_binary_data(src)?;
+        self.topic = get_utf8(src)?;
+        self.payload = get_bin(src)?;
         Ok(())
     }
 }
@@ -133,7 +130,7 @@ impl Decode for WillMessage {
 impl Encode for WillMessage {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
         let property_length = self.property_size();
-        encode_variable_len_integer(property_length, dest);
+        put_var_u32(property_length, dest);
         if self.delay_interval != 0 {
             dest.put_u8(PropertyType::WillDelay as u8);
             dest.put_u32(self.delay_interval);
@@ -148,21 +145,21 @@ impl Encode for WillMessage {
         }
         if let Some(content_type) = &self.content_type {
             dest.put_u8(PropertyType::ContentType as u8);
-            encode_utf8_string(content_type, dest)?;
+            put_utf8(content_type, dest)?;
         }
         if let Some(response_topic) = &self.response_topic {
             dest.put_u8(PropertyType::ResponseTopic as u8);
-            encode_utf8_string(response_topic, dest)?;
+            put_utf8(response_topic, dest)?;
         }
         if let Some(correlation_data) = &self.correlation_data {
             dest.put_u8(PropertyType::CorrelationData as u8);
-            encode_binary_data(correlation_data, dest)?;
+            put_bin(correlation_data, dest)?;
         }
         if let Some(user_properties) = &self.user_property {
             user_properties.encode(dest)?;
         }
-        encode_utf8_string(&self.topic, dest)?;
-        encode_binary_data(&self.payload, dest)?;
+        put_utf8(&self.topic, dest)?;
+        put_bin(&self.payload, dest)?;
         Ok(())
     }
 }

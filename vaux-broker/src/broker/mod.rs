@@ -88,7 +88,7 @@ impl Broker {
                 let mut active_session: Option<Arc<RwLock<Session>>> = None;
                 let mut ack = ConnAck::default();
                 // handle the client id
-                if packet.client_id.len() == 0 {
+                if packet.client_id.is_empty() {
                     session_id = Uuid::new_v4().to_string();
                     ack.assigned_client_id = Some(session_id.clone());
                 } else {

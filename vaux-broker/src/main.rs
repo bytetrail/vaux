@@ -46,7 +46,7 @@ async fn main() {
     } else {
         Ipv4Addr::from_str(DEFAULT_LISTEN_ADDR).unwrap()
     };
-    let listen_port = args.port.or(Some(DEFAULT_PORT)).unwrap();
+    let listen_port = args.port.unwrap_or(DEFAULT_PORT);
     let listen_addr = SocketAddr::try_from((listen_addr, listen_port)).unwrap();
 
     let mut broker = Broker::new(listen_addr);

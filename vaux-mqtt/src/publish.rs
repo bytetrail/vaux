@@ -4,11 +4,10 @@ use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     codec::{
-        check_property, decode_binary_data, decode_utf8_string, decode_variable_len_integer,
-        encode_bin_property, encode_bool_property, encode_u16_property, encode_u32_property,
-        encode_utf8_property, encode_utf8_string, encode_var_int_property,
-        encode_variable_len_integer, variable_byte_int_size, PROP_SIZE_BINARY, PROP_SIZE_U16,
-        PROP_SIZE_U32, PROP_SIZE_U8, PROP_SIZE_UTF8_STRING, SIZE_UTF8_STRING,
+        check_property, get_bin, encode_bin_property, encode_bool_property,
+        encode_u16_property, encode_u32_property, encode_utf8_property, encode_var_int_property,
+        get_utf8, get_var_u32, put_utf8, put_var_u32, variable_byte_int_size, PROP_SIZE_BINARY,
+        PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8, PROP_SIZE_UTF8_STRING, SIZE_UTF8_STRING,
     },
     Decode, Encode, FixedHeader, MQTTCodecError, PacketType, PropertyType, QoSLevel, Size,
     UserPropertyMap,
@@ -90,18 +89,15 @@ impl Publish {
             PropertyType::PayloadFormat => self.payload_utf8 = src.get_u8() == 1,
             PropertyType::MessageExpiry => self.message_expiry = Some(src.get_u32()),
             PropertyType::TopicAlias => self.topic_alias = Some(src.get_u16()),
-            PropertyType::ResponseTopic => self.response_topic = Some(decode_utf8_string(src)?),
-            PropertyType::CorrelationData => self.correlation_data = Some(decode_binary_data(src)?),
+            PropertyType::ResponseTopic => self.response_topic = Some(get_utf8(src)?),
+            PropertyType::CorrelationData => self.correlation_data = Some(get_bin(src)?),
             PropertyType::SubscriptionId => {
                 if self.sub_id.is_none() {
                     self.sub_id = Some(Vec::new());
                 }
-                self.sub_id
-                    .as_mut()
-                    .unwrap()
-                    .push(decode_variable_len_integer(src));
+                self.sub_id.as_mut().unwrap().push(get_var_u32(src));
             }
-            PropertyType::ContentType => self.content_type = Some(decode_utf8_string(src)?),
+            PropertyType::ContentType => self.content_type = Some(get_utf8(src)?),
             prop => {
                 return Err(MQTTCodecError::new(&format!(
                     "MQTTv5 3.3.2.3 unexpected property type value: {}",
@@ -179,8 +175,8 @@ impl Encode for Publish {
             ));
         }
         match self.topic_name.as_ref() {
-            Some(topic_name) => encode_utf8_string(topic_name, dest)?,
-            None => encode_utf8_string("", dest)?,
+            Some(topic_name) => put_utf8(topic_name, dest)?,
+            None => put_utf8("", dest)?,
         };
         if self.qos != QoSLevel::AtMostOnce {
             if let Some(packet_id) = self.packet_id {
@@ -191,7 +187,7 @@ impl Encode for Publish {
                 ));
             }
         }
-        encode_variable_len_integer(property_remaining, dest);
+        put_var_u32(property_remaining, dest);
         if self.payload_utf8 {
             encode_bool_property(PropertyType::PayloadFormat, self.payload_utf8, dest);
         }
@@ -227,7 +223,7 @@ impl Encode for Publish {
 
 impl Decode for Publish {
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), MQTTCodecError> {
-        let topic_name = decode_utf8_string(src)?;
+        let topic_name = get_utf8(src)?;
         if topic_name.is_empty() {
             self.topic_name = None;
         } else {
@@ -236,7 +232,7 @@ impl Decode for Publish {
         if self.qos != QoSLevel::AtMostOnce {
             self.packet_id = Some(src.get_u16());
         }
-        let property_len = decode_variable_len_integer(src);
+        let property_len = get_var_u32(src);
         if property_len > src.remaining() as u32 {
             return Err(MQTTCodecError::new(
                 "MQTTv5 2.2.2.1 property length exceeds packet size",
@@ -257,11 +253,11 @@ impl Decode for Publish {
                         self.decode_property(property_type, src)?;
                     } else {
                         if self.user_props.is_none() {
-                            self.user_props = Some(UserPropertyMap::new());
+                            self.user_props = Some(UserPropertyMap::default());
                         }
                         let property_map = self.user_props.as_mut().unwrap();
-                        let key = decode_utf8_string(src)?;
-                        let value = decode_utf8_string(src)?;
+                        let key = get_utf8(src)?;
+                        let value = get_utf8(src)?;
                         property_map.add_property(&key, &value);
                     }
                 }

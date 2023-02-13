@@ -1,7 +1,7 @@
 use bytes::{BufMut, BytesMut};
 
 use crate::{
-    codec::{encode_variable_len_integer, PACKET_RESERVED_BIT1, PACKET_RESERVED_NONE},
+    codec::{put_var_u32, PACKET_RESERVED_BIT1, PACKET_RESERVED_NONE},
     Encode, MQTTCodecError, PacketType,
 };
 
@@ -58,7 +58,7 @@ impl crate::Size for FixedHeader {
 impl Encode for FixedHeader {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
         dest.put_u8(self.packet_type as u8 | self.flags);
-        encode_variable_len_integer(self.remaining, dest);
+        put_var_u32(self.remaining, dest);
         Ok(())
     }
 }
