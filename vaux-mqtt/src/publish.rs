@@ -4,9 +4,9 @@ use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     codec::{
-        check_property, get_bin, encode_bin_property, encode_bool_property,
-        encode_u16_property, encode_u32_property, encode_utf8_property, encode_var_int_property,
-        get_utf8, get_var_u32, put_utf8, put_var_u32, variable_byte_int_size, PROP_SIZE_BINARY,
+        check_property, encode_bin_property, encode_bool_property, encode_u16_property,
+        encode_u32_property, encode_utf8_property, encode_var_int_property, get_bin, get_utf8,
+        get_var_u32, put_utf8, put_var_u32, variable_byte_int_size, PROP_SIZE_BINARY,
         PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8, PROP_SIZE_UTF8_STRING, SIZE_UTF8_STRING,
     },
     Decode, Encode, FixedHeader, MQTTCodecError, PacketType, PropertyType, QoSLevel, Size,

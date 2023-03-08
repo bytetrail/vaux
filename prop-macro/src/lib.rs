@@ -1,8 +1,6 @@
 use proc_macro::{self, TokenStream};
 use quote::quote;
-use syn::{
-    parse_macro_input, Data, DataStruct, DeriveInput, Fields, Generics, Ident,
-};
+use syn::{parse_macro_input, Data, DataStruct, DeriveInput, Fields, Generics, Ident};
 
 #[proc_macro_derive(PropertyEncode)]
 pub fn property_encode(input: TokenStream) -> TokenStream {

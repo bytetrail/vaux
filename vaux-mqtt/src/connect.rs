@@ -1,7 +1,7 @@
 use crate::codec::{
-    check_property, get_bin, encode_bin_property, put_bin,
-    encode_u16_property, encode_u32_property, encode_u8_property, encode_utf8_property, get_utf8,
-    get_var_u32, MQTTCodecError, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
+    check_property, encode_bin_property, encode_u16_property, encode_u32_property,
+    encode_u8_property, encode_utf8_property, get_bin, get_utf8, get_var_u32, put_bin,
+    MQTTCodecError, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use crate::property::{PropertyEncode, PropertySize};
 use crate::{
