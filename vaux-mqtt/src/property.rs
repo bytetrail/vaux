@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use bytes::{BytesMut, Buf};
 
-use crate::{MQTTCodecError, QoSLevel, codec::{get_utf8, get_var_u32, get_bin, get_bool}};
+use crate::{MqttCodecError, QoSLevel, codec::{get_utf8, get_var_u32, get_bin, get_bool}};
 
 /// MQTT property type. For more information on the specific property types,
 /// please see the
@@ -104,7 +104,7 @@ impl Display for PropertyType {
 }
 
 impl TryFrom<u8> for PropertyType {
-    type Error = MQTTCodecError;
+    type Error = MqttCodecError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
@@ -135,7 +135,7 @@ impl TryFrom<u8> for PropertyType {
             0x28 => Ok(PropertyType::WildcardSubAvail),
             0x29 => Ok(PropertyType::SubIdAvail),
             0x2a => Ok(PropertyType::ShardSubAvail),
-            p => Err(MQTTCodecError::new(&format!(
+            p => Err(MqttCodecError::new(&format!(
                 "MQTTv5 2.2.2.2 invalid property type identifier: {}",
                 p
             ))),
@@ -150,13 +150,13 @@ pub enum PayloadFormat {
 }
 
 impl TryFrom<u8> for PayloadFormat {
-    type Error = MQTTCodecError;
+    type Error = MqttCodecError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0x00 => Ok(PayloadFormat::Bin),
             0x01 => Ok(PayloadFormat::Utf8),
-            _ => Err(MQTTCodecError::new("invalid payload format")),
+            _ => Err(MqttCodecError::new("invalid payload format")),
         }
     }
 }
@@ -195,7 +195,7 @@ pub enum Property {
 impl Property {
     //pub fn decode_all(map: &mut PropertyMap, src: &mut BytesMut) {}
 
-    pub fn decode(src: &mut BytesMut) -> Result<Property, MQTTCodecError> {
+    pub fn decode(src: &mut BytesMut) -> Result<Property, MqttCodecError> {
         match PropertyType::try_from(src.get_u8()) {
             Ok(prop_type) => match prop_type {
                 PropertyType::PayloadFormat => Ok(Property::PayloadFormat(
@@ -238,7 +238,7 @@ impl Property {
 }
 
 pub trait PropertyEncode {
-    fn property_encode() -> Result<(), MQTTCodecError>;
+    fn property_encode() -> Result<(), MqttCodecError>;
 }
 
 pub trait PropertySize {

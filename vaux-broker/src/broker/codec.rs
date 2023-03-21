@@ -1,16 +1,16 @@
 use bytes::{BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 use vaux_mqtt::{
-    decode_fixed_header, ConnAck, Connect, Decode, Disconnect, Encode, MQTTCodecError, Packet,
+    decode_fixed_header, ConnAck, Connect, Decode, Disconnect, Encode, MqttCodecError, Packet,
     PacketType,
 };
 
 #[derive(Debug)]
-pub struct MQTTCodec;
+pub struct MqttCodec;
 
-impl Decoder for MQTTCodec {
+impl Decoder for MqttCodec {
     type Item = Packet;
-    type Error = MQTTCodecError;
+    type Error = MqttCodecError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         match decode_fixed_header(src) {
@@ -34,7 +34,7 @@ impl Decoder for MQTTCodec {
                         disconnect.decode(src)?;
                         Ok(Some(Packet::Disconnect(disconnect)))
                     }
-                    _ => Err(MQTTCodecError::new("unsupported packet type")),
+                    _ => Err(MqttCodecError::new("unsupported packet type")),
                 },
                 None => Ok(None),
             },
@@ -43,8 +43,8 @@ impl Decoder for MQTTCodec {
     }
 }
 
-impl Encoder<Packet> for MQTTCodec {
-    type Error = MQTTCodecError;
+impl Encoder<Packet> for MqttCodec {
+    type Error = MqttCodecError;
 
     fn encode(&mut self, packet: Packet, dest: &mut BytesMut) -> Result<(), Self::Error> {
         match packet {
@@ -56,7 +56,7 @@ impl Encoder<Packet> for MQTTCodec {
                 dest.put_u8(0x_00);
                 Ok(())
             }
-            _ => return Err(MQTTCodecError::new("unsupported packet type")),
+            _ => return Err(MqttCodecError::new("unsupported packet type")),
         }?;
         Ok(())
     }

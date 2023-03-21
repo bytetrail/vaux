@@ -1,6 +1,6 @@
 use crate::codec::{check_property, get_bin, put_bin, get_utf8, get_var_u32};
 use crate::{
-    put_utf8, put_var_u32, Decode, Encode, MQTTCodecError, PropertyType, QoSLevel, Size,
+    put_utf8, put_var_u32, Decode, Encode, MqttCodecError, PropertyType, QoSLevel, Size,
     UserPropertyMap, PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use bytes::{Buf, BufMut, BytesMut};
@@ -56,7 +56,7 @@ impl Decode for WillMessage {
     /// Implementation of decode for will message. The will message decode does
     /// not attempt to decode the flags QOS and Retain as these are present in the
     /// CONNECT flags variable length header prior to the will message properties
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
         let prop_size = get_var_u32(src);
         let read_until = src.remaining() - prop_size as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
@@ -73,7 +73,7 @@ impl Decode for WillMessage {
                             0 => self.payload_utf8 = false,
                             1 => self.payload_utf8 = true,
                             err => {
-                                return Err(MQTTCodecError::new(&format!(
+                                return Err(MqttCodecError::new(&format!(
                                     "unexpected will message payload format value: {}",
                                     err
                                 )))
@@ -107,14 +107,14 @@ impl Decode for WillMessage {
                         property_map.add_property(&key, &value);
                     }
                     err => {
-                        return Err(MQTTCodecError::new(&format!(
+                        return Err(MqttCodecError::new(&format!(
                             "unexpected will property id: {}",
                             err
                         )))
                     }
                 },
                 Err(e) => {
-                    return Err(MQTTCodecError::new(&format!(
+                    return Err(MqttCodecError::new(&format!(
                         "unknown property type: {:?}",
                         e
                     )))
@@ -128,7 +128,7 @@ impl Decode for WillMessage {
 }
 
 impl Encode for WillMessage {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         let property_length = self.property_size();
         put_var_u32(property_length, dest);
         if self.delay_interval != 0 {

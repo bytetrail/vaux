@@ -5,7 +5,7 @@ use crate::{
         encode_var_int_property, get_utf8, get_var_u32, put_utf8, put_var_u32,
         variable_byte_int_size, PROP_SIZE_UTF8_STRING,
     },
-    Decode, Encode, FixedHeader, MQTTCodecError, PropertyType, QoSLevel, Reason, Size,
+    Decode, Encode, FixedHeader, MqttCodecError, PropertyType, QoSLevel, Reason, Size,
     UserPropertyMap,
 };
 
@@ -27,15 +27,15 @@ pub enum RetainHandling {
 }
 
 impl TryFrom<u8> for RetainHandling {
-    type Error = MQTTCodecError;
+    type Error = MqttCodecError;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0x00 => Ok(RetainHandling::Send),
             0x01 => Ok(RetainHandling::SendNew),
             0x02 => Ok(RetainHandling::None),
-            v => Err(MQTTCodecError::new(
-                format!("MQTTv5 3.8.3.1 invalid retain option: {}", v).as_str(),
+            v => Err(MqttCodecError::new(
+                format!("Mqttv5 3.8.3.1 invalid retain option: {}", v).as_str(),
             )),
         }
     }
@@ -68,16 +68,16 @@ impl Size for SubAck {
 }
 
 impl Decode for SubAck {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
         if src.remaining() < 4 {
-            return Err(MQTTCodecError::new(
+            return Err(MqttCodecError::new(
                 "MQTTv5 3.9.3 insufficient data for SUBACK",
             ));
         }
         self.packet_id = src.get_u16();
         let prop_len = get_var_u32(src);
         if src.remaining() < prop_len as usize {
-            return Err(MQTTCodecError::new(
+            return Err(MqttCodecError::new(
                 "MQTTv5 3.9.3 insufficient data for SUBACK properties",
             ));
         }
@@ -90,7 +90,7 @@ impl Decode for SubAck {
                         match property_type {
                             PropertyType::Reason => {
                                 if reason_id_prop {
-                                    return Err(MQTTCodecError::new(
+                                    return Err(MqttCodecError::new(
                                         "MQTTv5 3.9.2.1.2 reason description can appear only once",
                                     ));
                                 }
@@ -98,7 +98,7 @@ impl Decode for SubAck {
                                 reason_id_prop = true;
                             }
                             _ => {
-                                return Err(MQTTCodecError::new(
+                                return Err(MqttCodecError::new(
                                     "MQTTv5 3.8.2.1 unexpected property",
                                 ))
                             }
@@ -121,12 +121,12 @@ impl Decode for SubAck {
 }
 
 impl Encode for SubAck {
-    fn encode(&self, _dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn encode(&self, _dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         todo!()
     }
 }
 
-/// Subscription represents an MQTT v5 3.8.3 SUBSCRIBE Payload. The MQTT v5
+/// Subscription represents an MQTT v5 3.8.3 SUBSCRIBE Payload. The Mqtt v5
 /// 3.8.3.1 options are represented as individual fields in the struct.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Subscription {
@@ -138,7 +138,7 @@ pub struct Subscription {
 }
 
 impl Subscription {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         put_utf8(&self.filter, dest)?;
         let flags = self.qos as u8
             | (self.no_local as u8) << 2
@@ -148,7 +148,7 @@ impl Subscription {
         Ok(())
     }
 
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
         self.filter = get_utf8(src)?;
         let flags = src.get_u8();
         self.qos = QoSLevel::try_from(flags & 0b_0000_0011)?;
@@ -192,9 +192,9 @@ impl Subscribe {
         self.payload.push(subscription);
     }
 
-    fn encode_payload(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn encode_payload(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         if self.payload.is_empty() {
-            return Err(MQTTCodecError::new(
+            return Err(MqttCodecError::new(
                 "MQTTv5 3.8.3 subscribe payload must exist",
             ));
         }
@@ -227,9 +227,9 @@ impl Size for Subscribe {
 }
 
 impl Encode for Subscribe {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         if self.packet_id == 0 {
-            return Err(MQTTCodecError::new(
+            return Err(MqttCodecError::new(
                 "MQTTv5 2.2.1 packet identifier must not be 0",
             ));
         }
@@ -250,16 +250,16 @@ impl Encode for Subscribe {
 }
 
 impl Decode for Subscribe {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
         if src.len() < 3 {
-            return Err(MQTTCodecError::new(
+            return Err(MqttCodecError::new(
                 "MQTTv5 3.8.2 insufficient data for SUBSCRIBE",
             ));
         }
         self.packet_id = src.get_u16();
         let prop_len = get_var_u32(src);
         if src.remaining() < prop_len as usize {
-            return Err(MQTTCodecError::new(
+            return Err(MqttCodecError::new(
                 "MQTTv5 3.8.2 insufficient data for SUBSCRIBE properties",
             ));
         }
@@ -272,7 +272,7 @@ impl Decode for Subscribe {
                         match property_type {
                             PropertyType::SubscriptionId => {
                                 if sub_id_prop {
-                                    return Err(MQTTCodecError::new(
+                                    return Err(MqttCodecError::new(
                                         "MQTTv5 3.8.2.1.2 subscription identifier repeated",
                                     ));
                                 }
@@ -280,7 +280,7 @@ impl Decode for Subscribe {
                                 self.sub_id = Some(get_var_u32(src));
                             }
                             _ => {
-                                return Err(MQTTCodecError::new(
+                                return Err(MqttCodecError::new(
                                     "MQTTv5 3.8.2.1 unexpected property",
                                 ))
                             }

@@ -7,7 +7,7 @@ use crate::{
         check_property, get_utf8, get_var_u32, put_utf8, put_var_u32, variable_byte_int_size,
         PROP_SIZE_U32, PROP_SIZE_UTF8_STRING,
     },
-    Decode, Encode, FixedHeader, MQTTCodecError, PacketType, PropertyType, Reason, Size,
+    Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyType, Reason, Size,
     UserPropertyMap,
 };
 
@@ -33,7 +33,7 @@ impl Disconnect {
         }
     }
 
-    fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
         let prop_size = get_var_u32(src);
         let read_until = src.remaining() - prop_size as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
@@ -49,7 +49,7 @@ impl Disconnect {
                             PropertyType::Reason => self.reason_desc = Some(get_utf8(src)?),
                             PropertyType::ServerRef => self.server_ref = Some(get_utf8(src)?),
                             val => {
-                                return Err(MQTTCodecError::new(&format!(
+                                return Err(MqttCodecError::new(&format!(
                                     "unexpected property type: {}",
                                     val
                                 )))
@@ -108,7 +108,7 @@ impl Size for Disconnect {
 }
 
 impl Encode for Disconnect {
-    fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
+    fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), crate::MqttCodecError> {
         let mut header = FixedHeader::new(PacketType::Disconnect);
         let prop_remaining = self.property_size();
         header.remaining = DEFAULT_DISCONNECT_REMAINING + variable_byte_int_size(prop_remaining);
@@ -141,8 +141,8 @@ impl Encode for Disconnect {
 }
 
 impl Decode for Disconnect {
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), crate::MQTTCodecError> {
-        // MQTT v5 specification 3.14.2.1
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), crate::MqttCodecError> {
+        // Mqtt v5 specification 3.14.2.1
         if src.remaining() == 0 {
             self.reason = Reason::Success;
             return Ok(());

@@ -14,9 +14,9 @@ use tokio::time::timeout;
 use tokio_util::codec::Framed;
 use uuid::Uuid;
 use vaux_mqtt::Packet::PingResponse;
-use vaux_mqtt::{ConnAck, Disconnect, FixedHeader, MQTTCodecError, Packet, PacketType, Reason};
+use vaux_mqtt::{ConnAck, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, Reason};
 
-use self::codec::MQTTCodec;
+use self::codec::MqttCodec;
 
 pub const DEFAULT_PORT: u16 = 1883;
 pub const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
@@ -82,7 +82,7 @@ impl Broker {
         session_pool: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let session_id: String;
-        let mut framed = Framed::new(stream, MQTTCodec {});
+        let mut framed = Framed::new(stream, MqttCodec {});
         let session = match framed.next().await {
             Some(Ok(Packet::Connect(packet))) => {
                 let mut active_session: Option<Arc<RwLock<Session>>> = None;
@@ -137,7 +137,7 @@ impl Broker {
                 let header = Disconnect::new(Reason::ProtocolErr);
                 let disconnect = Packet::Disconnect(header);
                 framed.send(disconnect).await?;
-                return Err(Box::new(MQTTCodecError::new("connect packet not received")));
+                return Err(Box::new(MqttCodecError::new("connect packet not received")));
             }
         };
         if let Some(session) = session {
@@ -163,7 +163,7 @@ impl Broker {
                                         break;
                                     }
                                     req => {
-                                        return Err(Box::new(MQTTCodecError::new(
+                                        return Err(Box::new(MqttCodecError::new(
                                             format!("unexpected packet type: {:?}", req).as_str(),
                                         )));
                                     }

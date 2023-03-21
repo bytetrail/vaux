@@ -1,15 +1,15 @@
 use crate::codec::{
     check_property, get_bin, encode_bin_property, put_bin,
     encode_u16_property, encode_u32_property, encode_u8_property, encode_utf8_property, get_utf8,
-    get_var_u32, MQTTCodecError, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
+    get_var_u32, MqttCodecError, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
 };
-use crate::property::{PropertyEncode, PropertySize};
+use crate::property::PropertySize;
 use crate::{
     put_utf8, put_var_u32, variable_byte_int_size, Decode, Encode, FixedHeader, PacketType,
     PropertyType, QoSLevel, Size, UserPropertyMap, WillMessage,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use prop_macro::{PropertyEncode, PropertySize};
+use prop_macro::{PropertySize};
 use std::collections::HashSet;
 
 const MQTT_PROTOCOL_NAME_LEN: u16 = 0x00_04;
@@ -28,7 +28,7 @@ const DEFAULT_RECEIVE_MAX: u16 = 0xffff;
 /// Default remaining size for connect packet
 const DEFAULT_CONNECT_REMAINING: u32 = 10;
 
-#[derive(PropertyEncode, PropertySize, Debug, Clone, Eq, PartialEq)]
+#[derive(PropertySize, Debug, Clone, Eq, PartialEq)]
 pub struct Connect {
     pub clean_start: bool,
     pub keep_alive: u16,
@@ -69,20 +69,20 @@ impl Connect {
         dest.put_u8(flags);
     }
 
-    pub fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    pub fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
         let len = src.get_u16();
         if len != 0x04 {
-            return Err(MQTTCodecError::new(
+            return Err(MqttCodecError::new(
                 format!("invalid protocol name length: {}", len).as_str(),
             ));
         }
         let mqtt_str = src.get_u32();
         if mqtt_str != MQTT_PROTOCOL_U32 {
-            return Err(MQTTCodecError::new("unsupported protocol"));
+            return Err(MqttCodecError::new("unsupported protocol"));
         }
         let protocol_version = src.get_u8();
         if protocol_version != MQTT_PROTOCOL_VERSION {
-            return Err(MQTTCodecError::new(
+            return Err(MqttCodecError::new(
                 format!("unsupported protocol version: {}", protocol_version).as_str(),
             ));
         }
@@ -97,7 +97,7 @@ impl Connect {
             if let Ok(qos) = QoSLevel::try_from(qos) {
                 self.will_message = Some(WillMessage::new(qos, will_retain));
             } else {
-                return Err(MQTTCodecError::new("invalid Will QoS level"));
+                return Err(MqttCodecError::new("invalid Will QoS level"));
             }
         }
         self.keep_alive = src.get_u16();
@@ -106,7 +106,7 @@ impl Connect {
         Ok(())
     }
 
-    fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
         let prop_size = get_var_u32(src);
         let read_until = src.remaining() - prop_size as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
@@ -132,7 +132,7 @@ impl Connect {
                                 0 => self.req_resp_info = false,
                                 1 => self.req_resp_info = true,
                                 v => {
-                                    return Err(MQTTCodecError::new(
+                                    return Err(MqttCodecError::new(
                                         format!(
                                             "invalid value {} for {}",
                                             v,
@@ -146,7 +146,7 @@ impl Connect {
                                 0 => self.problem_info = false,
                                 1 => self.problem_info = true,
                                 v => {
-                                    return Err(MQTTCodecError::new(
+                                    return Err(MqttCodecError::new(
                                         format!(
                                             "invalid value {} for {}",
                                             v,
@@ -164,9 +164,9 @@ impl Connect {
                                 if self.auth_method.is_some() {
                                     self.auth_data = Some(get_bin(src)?);
                                 } else {
-                                    // MQTT protocol not specific that auth method must appear before
+                                    // Mqtt protocol not specific that auth method must appear before
                                     // auth data. This implementation imposes order and may be incorrect
-                                    return Err(MQTTCodecError::new(&format!(
+                                    return Err(MqttCodecError::new(&format!(
                                         "Property: {} provided without providing {}",
                                         PropertyType::AuthData,
                                         PropertyType::AuthMethod
@@ -174,7 +174,7 @@ impl Connect {
                                 }
                             }
                             val => {
-                                return Err(MQTTCodecError::new(&format!(
+                                return Err(MqttCodecError::new(&format!(
                                     "unexpected property type value: {}",
                                     val
                                 )))
@@ -193,7 +193,7 @@ impl Connect {
                 Err(e) => return Err(e),
             };
             if src.remaining() < read_until {
-                return Err(MQTTCodecError::new(
+                return Err(MqttCodecError::new(
                     "property size does not match expected length",
                 ));
             }
@@ -206,7 +206,7 @@ impl Connect {
         src: &mut BytesMut,
         username: bool,
         password: bool,
-    ) -> Result<(), MQTTCodecError> {
+    ) -> Result<(), MqttCodecError> {
         self.client_id = get_utf8(src)?;
         if self.will_message.is_some() {
             let will_message = self.will_message.as_mut().unwrap();
@@ -280,7 +280,7 @@ impl crate::Size for Connect {
 }
 
 impl Encode for Connect {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         let mut header = FixedHeader::new(PacketType::Connect);
         let prop_remaining = self.property_size();
         let payload_remaining = self.payload_size();
@@ -342,7 +342,7 @@ impl Encode for Connect {
 }
 
 impl Decode for Connect {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
         self.decode(src)
     }
 }

@@ -9,7 +9,7 @@ use crate::{
         get_utf8, get_var_u32, put_utf8, put_var_u32, variable_byte_int_size, PROP_SIZE_BINARY,
         PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8, PROP_SIZE_UTF8_STRING, SIZE_UTF8_STRING,
     },
-    Decode, Encode, FixedHeader, MQTTCodecError, PacketType, PropertyType, QoSLevel, Size,
+    Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyType, QoSLevel, Size,
     UserPropertyMap,
 };
 
@@ -35,13 +35,13 @@ pub struct Publish {
 }
 
 impl Publish {
-    pub fn new_from_header(hdr: FixedHeader) -> Result<Self, MQTTCodecError> {
+    pub fn new_from_header(hdr: FixedHeader) -> Result<Self, MqttCodecError> {
         let qos = QoSLevel::try_from(hdr.flags)?;
         let retain = hdr.flags & RETAIN_MASK != 0;
         let dup = hdr.flags & DUP_MASK != 0;
         if dup && qos == QoSLevel::AtMostOnce {
-            return Err(MQTTCodecError::new(
-                "[MQTT 3.1.1.1] DUP must be 0 for QOS level \"At most once\"",
+            return Err(MqttCodecError::new(
+                "[Mqtt 3.1.1.1] DUP must be 0 for QOS level \"At most once\"",
             ));
         }
         Ok(Publish {
@@ -70,10 +70,10 @@ impl Publish {
         self.payload.take()
     }
 
-    pub fn set_packet_id(&mut self, id: u16) -> Result<(), MQTTCodecError> {
+    pub fn set_packet_id(&mut self, id: u16) -> Result<(), MqttCodecError> {
         if self.qos == QoSLevel::AtMostOnce {
-            return Err(MQTTCodecError::new(
-                "MQTTv53.3.2.2 QOS level must not be At Most Once",
+            return Err(MqttCodecError::new(
+                "Mqttv53.3.2.2 QOS level must not be At Most Once",
             ));
         }
         self.packet_id = Some(id);
@@ -84,7 +84,7 @@ impl Publish {
         &mut self,
         property_type: PropertyType,
         src: &mut BytesMut,
-    ) -> Result<(), MQTTCodecError> {
+    ) -> Result<(), MqttCodecError> {
         match property_type {
             PropertyType::PayloadFormat => self.payload_utf8 = src.get_u8() == 1,
             PropertyType::MessageExpiry => self.message_expiry = Some(src.get_u32()),
@@ -99,8 +99,8 @@ impl Publish {
             }
             PropertyType::ContentType => self.content_type = Some(get_utf8(src)?),
             prop => {
-                return Err(MQTTCodecError::new(&format!(
-                    "MQTTv5 3.3.2.3 unexpected property type value: {}",
+                return Err(MqttCodecError::new(&format!(
+                    "Mqttv5 3.3.2.3 unexpected property type value: {}",
                     prop
                 )))
             }
@@ -163,14 +163,14 @@ impl Size for Publish {
 }
 
 impl Encode for Publish {
-    fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MQTTCodecError> {
+    fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
         let mut header = FixedHeader::new(PacketType::Publish);
         let size = self.size();
         let property_remaining = self.property_size();
         header.set_remaining(size);
         header.encode(dest)?;
         if self.topic_name.is_none() && self.topic_alias.is_none() {
-            return Err(MQTTCodecError::new(
+            return Err(MqttCodecError::new(
                 "MQTTv5 3.3.2.1 must have topic name or topic alias",
             ));
         }
@@ -182,7 +182,7 @@ impl Encode for Publish {
             if let Some(packet_id) = self.packet_id {
                 dest.put_u16(packet_id);
             } else {
-                return Err(MQTTCodecError::new(
+                return Err(MqttCodecError::new(
                     "MQTTv5 3.3.2.2 packet identifier must be included for QOS 1 or 2",
                 ));
             }
@@ -222,7 +222,7 @@ impl Encode for Publish {
 }
 
 impl Decode for Publish {
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), MQTTCodecError> {
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
         let topic_name = get_utf8(src)?;
         if topic_name.is_empty() {
             self.topic_name = None;
@@ -234,12 +234,12 @@ impl Decode for Publish {
         }
         let property_len = get_var_u32(src);
         if property_len > src.remaining() as u32 {
-            return Err(MQTTCodecError::new(
+            return Err(MqttCodecError::new(
                 "MQTTv5 2.2.2.1 property length exceeds packet size",
             ));
         }
         if property_len == 1 {
-            return Err(MQTTCodecError::new(
+            return Err(MqttCodecError::new(
                 "MQTTv5 2.2.2.1 invalid property length",
             ));
         }
@@ -267,7 +267,7 @@ impl Decode for Publish {
         if src.remaining() > 0 {
             match src.get(src.len() - src.remaining()..src.remaining()) {
                 Some(p) => self.payload = Some(Vec::from(p)),
-                None => return Err(MQTTCodecError::new("unable to decode payload")),
+                None => return Err(MqttCodecError::new("unable to decode payload")),
             }
         }
         Ok(())

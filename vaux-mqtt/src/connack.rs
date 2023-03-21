@@ -6,7 +6,7 @@ use crate::{
     variable_byte_int_size, Decode, Encode, PropertyType, QoSLevel, Size, UserPropertyMap,
     PROP_SIZE_U32, PROP_SIZE_U8,
 };
-use crate::{FixedHeader, MQTTCodecError, PacketType};
+use crate::{FixedHeader, MqttCodecError, PacketType};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 
@@ -38,7 +38,7 @@ pub struct ConnAck {
 }
 
 impl ConnAck {
-    fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
         let prop_size = get_var_u32(src);
         let read_until = src.remaining() - prop_size as usize;
         let mut properties: HashSet<PropertyType> = HashSet::new();
@@ -58,10 +58,10 @@ impl ConnAck {
                         property_map.add_property(&key, &value);
                     }
                 }
-                Err(_) => return Err(MQTTCodecError::new("invalid property type")),
+                Err(_) => return Err(MqttCodecError::new("invalid property type")),
             };
             if src.remaining() < read_until {
-                return Err(MQTTCodecError::new(
+                return Err(MqttCodecError::new(
                     "property size does not match expected length",
                 ));
             }
@@ -73,7 +73,7 @@ impl ConnAck {
         &mut self,
         property_type: PropertyType,
         src: &mut BytesMut,
-    ) -> Result<(), MQTTCodecError> {
+    ) -> Result<(), MqttCodecError> {
         match property_type {
             PropertyType::SessionExpiryInt => self.expiry_interval = Some(src.get_u32()),
             PropertyType::RecvMax => self.receive_max = src.get_u16(),
@@ -92,7 +92,7 @@ impl ConnAck {
             PropertyType::AuthMethod => self.auth_method = Some(get_utf8(src)?),
             PropertyType::AuthData => self.auth_data = Some(get_bin(src)?),
             prop => {
-                return Err(MQTTCodecError::new(&format!(
+                return Err(MqttCodecError::new(&format!(
                     "unexpected property type value: {}",
                     prop
                 )))
@@ -193,7 +193,7 @@ impl crate::Size for ConnAck {
 }
 
 impl Decode for ConnAck {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
         self.session_present = (0x01 & src.get_u8()) > 0;
         if let Ok(reason) = src.get_u8().try_into() {
             self.reason = reason;
@@ -204,7 +204,7 @@ impl Decode for ConnAck {
 }
 
 impl Encode for ConnAck {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         let mut header = FixedHeader::new(PacketType::ConnAck);
         let prop_remaining = self.property_size();
         header.set_remaining(

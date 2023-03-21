@@ -1,9 +1,9 @@
-mod codec;
-mod connack;
-mod connect;
+pub mod codec;
+pub mod connack;
+pub mod connect;
 pub mod disconnect;
-mod fixed;
-mod property;
+pub mod fixed;
+pub mod property;
 pub mod puback;
 pub mod publish;
 pub mod pubrec;
@@ -19,7 +19,7 @@ use crate::codec::{
 pub use crate::property::PropertyType;
 
 pub use crate::codec::{
-    decode, decode_fixed_header, encode, MQTTCodecError, Packet, PacketType, QoSLevel, Reason,
+    decode, decode_fixed_header, encode, MqttCodecError, Packet, PacketType, QoSLevel, Reason,
 };
 pub use crate::connack::ConnAck;
 pub use crate::connect::Connect;
@@ -37,11 +37,11 @@ pub trait Size {
 }
 
 pub trait Encode: Size {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError>;
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError>;
 }
 
 pub trait Decode {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MQTTCodecError>;
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError>;
 }
 
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
@@ -105,7 +105,7 @@ impl crate::Size for UserPropertyMap {
 }
 
 impl Encode for UserPropertyMap {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MQTTCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         for (k, value) in self.map.iter() {
             for v in value {
                 dest.put_u8(PropertyType::UserProperty as u8);

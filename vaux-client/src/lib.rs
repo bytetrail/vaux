@@ -118,7 +118,7 @@ impl MQTTClient {
                             Err(e) => Err(MQTTError::new(&e.to_string(), ErrorKind::Codec)),
                         },
                         Err(e) => {
-                            return Err(MQTTError::new(
+                            Err(MQTTError::new(
                                 &format!("unable to read stream: {}", e),
                                 ErrorKind::Transport,
                             ))
@@ -128,7 +128,7 @@ impl MQTTClient {
                 }
             }
             Err(e) => {
-                return Err(MQTTError::new(
+                Err(MQTTError::new(
                     &format!("unable to connect: {}", e),
                     ErrorKind::Connection,
                 ))
