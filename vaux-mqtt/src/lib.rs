@@ -11,10 +11,7 @@ pub mod subscribe;
 pub mod test;
 mod will;
 
-use crate::codec::{
-    put_utf8, put_var_u32, variable_byte_int_size, PROP_SIZE_U32,
-    PROP_SIZE_U8,
-};
+use crate::codec::{put_utf8, put_var_u32, variable_byte_int_size, PROP_SIZE_U32, PROP_SIZE_U8};
 
 pub use crate::property::PropertyType;
 

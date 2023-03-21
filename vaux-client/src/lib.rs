@@ -224,7 +224,7 @@ impl MQTTClient {
                 }),
             },
             Err(e) => match e.kind() {
-                std::io::ErrorKind::TimedOut => Err(MQTTError {
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => Err(MQTTError {
                     message: e.to_string(),
                     kind: ErrorKind::Timeout,
                 }),

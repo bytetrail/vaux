@@ -1,8 +1,11 @@
 use bytes::BytesMut;
 
-#[allow(unused_imports)]
-use crate::{Size, UserPropertyMap, WillMessage, QoSLevel, Encode, PropertyType, codec::PROP_SIZE_U8, property::PropertySize};
 use crate::connect::*;
+#[allow(unused_imports)]
+use crate::{
+    codec::PROP_SIZE_U8, property::PropertySize, Encode, PropertyType, QoSLevel, Size,
+    UserPropertyMap, WillMessage,
+};
 
 #[allow(dead_code)]
 const CONNECT_MIN_REMAINING: u32 = 13;
@@ -200,8 +203,7 @@ fn test_user_property_remaining() {
     let mut user_properties = UserPropertyMap::default();
     let key = "12335".to_string();
     let value = "12345".to_string();
-    let mut expected =
-        CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
+    let mut expected = CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
     user_properties.add_property(&key, &value);
     let key = "567890".to_string();
     let value = "567890".to_string();

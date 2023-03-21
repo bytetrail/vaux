@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter};
 
-use bytes::{BytesMut, Buf};
+use bytes::{Buf, BytesMut};
 
 use crate::{MqttCodecError, QoSLevel, codec::{get_utf8, get_var_u32, get_bin, get_bool}};
 

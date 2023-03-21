@@ -1,6 +1,6 @@
 use crate::codec::{
-    check_property, get_bin, decode_prop_bool, put_bin, get_utf8,
-    get_var_u32, put_utf8, put_var_u32, Reason, PROP_SIZE_U16,
+    check_property, decode_prop_bool, get_bin, get_utf8, get_var_u32, put_bin, put_utf8,
+    put_var_u32, Reason, PROP_SIZE_U16,
 };
 use crate::{
     variable_byte_int_size, Decode, Encode, PropertyType, QoSLevel, Size, UserPropertyMap,
