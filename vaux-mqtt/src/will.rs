@@ -1,4 +1,4 @@
-use crate::codec::{check_property, get_bin, get_utf8, get_var_u32, put_bin};
+use crate::codec::{check_property, get_bin, get_utf8, get_var_u32, put_bin, variable_byte_int_size};
 use crate::{
     put_utf8, put_var_u32, Decode, Encode, MqttCodecError, PropertyType, QoSLevel, Size,
     UserPropertyMap, PROP_SIZE_U32, PROP_SIZE_U8,
@@ -166,7 +166,9 @@ impl Encode for WillMessage {
 
 impl Size for WillMessage {
     fn size(&self) -> u32 {
-        self.property_size() + self.payload_size()
+        let property_size = self.property_size();
+        let property_len = variable_byte_int_size(property_size);
+        property_len + property_size + self.payload_size()
     }
 
     fn property_size(&self) -> u32 {
@@ -177,7 +179,7 @@ impl Size for WillMessage {
         if self.payload_utf8 {
             remaining += PROP_SIZE_U8;
         }
-        if self.expiry_interval.is_none() {
+        if self.expiry_interval.is_some() {
             remaining += PROP_SIZE_U32;
         }
         if let Some(content_type) = &self.content_type {
@@ -192,7 +194,6 @@ impl Size for WillMessage {
         if let Some(user_property) = &self.user_property {
             remaining += user_property.size();
         }
-        remaining += crate::variable_byte_int_size(remaining);
         remaining
     }
 
