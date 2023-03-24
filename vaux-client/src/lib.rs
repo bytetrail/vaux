@@ -1,6 +1,6 @@
 use std::{
     io::{Read, Write},
-    net::{IpAddr, TcpStream},
+    net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpStream},
     time::Duration,
 };
 
@@ -9,11 +9,14 @@ use vaux_mqtt::{
     decode, encode, publish::Publish, Connect, Packet, Subscribe, Subscription, UserPropertyMap,
 };
 
+const DEFAULT_TIMEOUT: u64 = 60_000;
+
+#[derive(Debug)]
 pub struct MqttClient {
-    addr: IpAddr,
-    port: u16,
+    addr: SocketAddr,
     client_id: Option<String>,
     connection: Option<TcpStream>,
+    connected: bool,
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
@@ -54,30 +57,39 @@ pub type Result<T> = core::result::Result<T, MqttError>;
 
 impl MqttClient {
     pub fn new(addr: IpAddr, port: u16) -> Self {
+        let addr = match addr {
+            IpAddr::V4(a) => SocketAddr::V4(SocketAddrV4::new(a, port)),
+            IpAddr::V6(a) => SocketAddr::V6(SocketAddrV6::new(a, port, 0, 0)),
+        };
         MqttClient {
             addr,
-            port,
             client_id: None,
             connection: None,
+            connected: false,
         }
     }
 
     pub fn new_with_id(addr: IpAddr, port: u16, id: &str) -> Self {
-        MqttClient {
-            addr,
-            port,
-            client_id: Some(id.to_owned()),
-            connection: None,
-        }
+        let mut client = Self::new(addr, port);
+        client.client_id = Some(id.to_string());
+        client
+    }
+
+    pub fn connected(&self) -> bool {
+        self.connected
     }
 
     pub fn connect(&mut self) -> Result<()> {
+        self.connect_with_timeout(Duration::from_millis(DEFAULT_TIMEOUT))
+    }
+
+    pub fn connect_with_timeout(&mut self, timeout: Duration) -> Result<()> {
         let mut connect = Connect::default();
         if let Some(id) = self.client_id.as_ref() {
             connect.client_id = id.to_owned();
         }
         let connect_packet = Packet::Connect(connect);
-        match TcpStream::connect((self.addr, self.port)) {
+        match TcpStream::connect_timeout(&self.addr, timeout) {
             Ok(stream) => {
                 self.connection = Some(stream);
                 let mut buffer = [0u8; 128];
@@ -97,6 +109,7 @@ impl MqttClient {
                                                 self.client_id = connack.assigned_client_id;
                                             }
                                             // TODO set server properties based on ConnAck
+                                            self.connected = true;
                                             Ok(())
                                         }
                                         Packet::Disconnect(_disconnect) => {
@@ -125,10 +138,16 @@ impl MqttClient {
                     Err(e) => panic!("Unable to write packet(s) to test broker: {}", e),
                 }
             }
-            Err(e) => Err(MqttError::new(
-                &format!("unable to connect: {}", e),
-                ErrorKind::Connection,
-            )),
+            Err(e) => match e.kind() {
+                std::io::ErrorKind::TimedOut => Err(MqttError {
+                    message: "timeout".to_string(),
+                    kind: ErrorKind::Timeout,
+                }),
+                _ => Err(MqttError::new(
+                    &format!("unable to connect: {}", e),
+                    ErrorKind::Connection,
+                )),
+            },
         }
     }
 
