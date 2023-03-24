@@ -2,7 +2,10 @@ use std::fmt::{Display, Formatter};
 
 use bytes::{Buf, BytesMut};
 
-use crate::{MqttCodecError, QoSLevel, codec::{get_utf8, get_var_u32, get_bin, get_bool}};
+use crate::{
+    codec::{get_bin, get_bool, get_utf8, get_var_u32},
+    MqttCodecError, QoSLevel,
+};
 
 /// MQTT property type. For more information on the specific property types,
 /// please see the

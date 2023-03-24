@@ -1,7 +1,7 @@
 use crate::codec::{
-    check_property, get_bin, encode_bin_property, put_bin,
-    encode_u16_property, encode_u32_property, encode_u8_property, encode_utf8_property, get_utf8,
-    get_var_u32, MqttCodecError, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
+    check_property, encode_bin_property, encode_u16_property, encode_u32_property,
+    encode_u8_property, encode_utf8_property, get_bin, get_utf8, get_var_u32, put_bin,
+    MqttCodecError, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use crate::property::PropertySize;
 use crate::{
@@ -9,7 +9,7 @@ use crate::{
     PropertyType, QoSLevel, Size, UserPropertyMap, WillMessage,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use prop_macro::{PropertySize};
+use prop_macro::PropertySize;
 use std::collections::HashSet;
 
 const MQTT_PROTOCOL_NAME_LEN: u16 = 0x00_04;

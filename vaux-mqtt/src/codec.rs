@@ -414,9 +414,10 @@ pub fn get_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {
     match src.get_u8() {
         0 => Ok(false),
         1 => Ok(true),
-        v => {
-            Err(MqttCodecError::new(&format!("invalid value {} for boolean property", v)))
-        },
+        v => Err(MqttCodecError::new(&format!(
+            "invalid value {} for boolean property",
+            v
+        ))),
     }
 }
 

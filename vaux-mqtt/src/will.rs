@@ -1,4 +1,6 @@
-use crate::codec::{check_property, get_bin, get_utf8, get_var_u32, put_bin, variable_byte_int_size};
+use crate::codec::{
+    check_property, get_bin, get_utf8, get_var_u32, put_bin, variable_byte_int_size,
+};
 use crate::{
     put_utf8, put_var_u32, Decode, Encode, MqttCodecError, PropertyType, QoSLevel, Size,
     UserPropertyMap, PROP_SIZE_U32, PROP_SIZE_U8,

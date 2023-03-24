@@ -9,7 +9,7 @@ use vaux_mqtt::{
     decode, encode, publish::Publish, Connect, Packet, Subscribe, Subscription, UserPropertyMap,
 };
 
-pub struct MQTTClient {
+pub struct MqttClient {
     addr: IpAddr,
     port: u16,
     client_id: Option<String>,
@@ -28,12 +28,12 @@ pub enum ErrorKind {
 }
 
 #[derive(Default, Debug)]
-pub struct MQTTError {
+pub struct MqttError {
     message: String,
     kind: ErrorKind,
 }
 
-impl MQTTError {
+impl MqttError {
     pub fn new(message: &str, kind: ErrorKind) -> Self {
         Self {
             message: message.to_string(),
@@ -50,11 +50,11 @@ impl MQTTError {
     }
 }
 
-pub type MQTTResult<T> = Result<T, MQTTError>;
+pub type Result<T> = core::result::Result<T, MqttError>;
 
-impl MQTTClient {
+impl MqttClient {
     pub fn new(addr: IpAddr, port: u16) -> Self {
-        MQTTClient {
+        MqttClient {
             addr,
             port,
             client_id: None,
@@ -63,7 +63,7 @@ impl MQTTClient {
     }
 
     pub fn new_with_id(addr: IpAddr, port: u16, id: &str) -> Self {
-        MQTTClient {
+        MqttClient {
             addr,
             port,
             client_id: Some(id.to_owned()),
@@ -71,7 +71,7 @@ impl MQTTClient {
         }
     }
 
-    pub fn connect(&mut self) -> MQTTResult<()> {
+    pub fn connect(&mut self) -> Result<()> {
         let mut connect = Connect::default();
         if let Some(id) = self.client_id.as_ref() {
             connect.client_id = id.to_owned();
@@ -103,36 +103,32 @@ impl MQTTClient {
                                             // TODO return the disconnect reason as MQTT error
                                             panic!("disconnect");
                                         }
-                                        _ => Err(MQTTError::new(
+                                        _ => Err(MqttError::new(
                                             "unexpected packet type",
                                             ErrorKind::Protocol,
                                         )),
                                     }
                                 } else {
-                                    Err(MQTTError::new(
+                                    Err(MqttError::new(
                                         "no MQTT packet received",
                                         ErrorKind::Protocol,
                                     ))
                                 }
                             }
-                            Err(e) => Err(MQTTError::new(&e.to_string(), ErrorKind::Codec)),
+                            Err(e) => Err(MqttError::new(&e.to_string(), ErrorKind::Codec)),
                         },
-                        Err(e) => {
-                            Err(MQTTError::new(
-                                &format!("unable to read stream: {}", e),
-                                ErrorKind::Transport,
-                            ))
-                        }
+                        Err(e) => Err(MqttError::new(
+                            &format!("unable to read stream: {}", e),
+                            ErrorKind::Transport,
+                        )),
                     },
                     Err(e) => panic!("Unable to write packet(s) to test broker: {}", e),
                 }
             }
-            Err(e) => {
-                Err(MQTTError::new(
-                    &format!("unable to connect: {}", e),
-                    ErrorKind::Connection,
-                ))
-            }
+            Err(e) => Err(MqttError::new(
+                &format!("unable to connect: {}", e),
+                ErrorKind::Connection,
+            )),
         }
     }
 
@@ -141,7 +137,7 @@ impl MQTTClient {
         topic: &str,
         data: &[u8],
         props: Option<&UserPropertyMap>,
-    ) -> MQTTResult<Option<Packet>> {
+    ) -> Result<Option<Packet>> {
         self.publish(topic, false, data, props)
     }
 
@@ -150,7 +146,7 @@ impl MQTTClient {
         topic: &str,
         message: &str,
         props: Option<&UserPropertyMap>,
-    ) -> MQTTResult<Option<Packet>> {
+    ) -> Result<Option<Packet>> {
         self.publish(topic, true, message.as_bytes(), props)
     }
 
@@ -164,7 +160,7 @@ impl MQTTClient {
         utf8: bool,
         data: &[u8],
         props: Option<&UserPropertyMap>,
-    ) -> MQTTResult<Option<Packet>> {
+    ) -> Result<Option<Packet>> {
         let mut publish = Publish::default();
         publish.payload_utf8 = utf8;
         publish.topic_name = Some(topic.to_string());
@@ -174,7 +170,7 @@ impl MQTTClient {
         self.send(Packet::Publish(publish))
     }
 
-    pub fn send(&mut self, packet: Packet) -> MQTTResult<Option<Packet>> {
+    pub fn send(&mut self, packet: Packet) -> Result<Option<Packet>> {
         let mut dest = BytesMut::default();
         let result = encode(packet, &mut dest);
         if let Err(e) = result {
@@ -183,7 +179,7 @@ impl MQTTClient {
         if let Err(e) = self.connection.as_ref().unwrap().write_all(&dest) {
             eprintln!("unexpected send error {:#?}", e);
             // TODO higher fidelity error handling
-            return Err(MQTTError {
+            return Err(MqttError {
                 kind: ErrorKind::Transport,
                 message: e.to_string(),
             });
@@ -191,7 +187,7 @@ impl MQTTClient {
         Ok(None)
     }
 
-    pub fn subscribe(&mut self, packet_id: u16, topic_filter: &str) -> MQTTResult<()> {
+    pub fn subscribe(&mut self, packet_id: u16, topic_filter: &str) -> Result<()> {
         let mut subscribe = Subscribe::default();
         subscribe.set_packet_id(packet_id);
         let subscription = Subscription {
@@ -206,29 +202,29 @@ impl MQTTClient {
         }
         match self.connection.as_ref().unwrap().write_all(&dest) {
             Ok(_) => Ok(()),
-            Err(e) => Err(MQTTError {
+            Err(e) => Err(MqttError {
                 message: format!("unexpected send error {:#?}", e),
                 kind: ErrorKind::Transport,
             }),
         }
     }
 
-    pub fn read_next(&mut self) -> MQTTResult<Option<Packet>> {
+    pub fn read_next(&mut self) -> Result<Option<Packet>> {
         let mut buffer = [0u8; 4096];
         match self.connection.as_ref().unwrap().read(&mut buffer) {
             Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
                 Ok(packet) => Ok(packet),
-                Err(e) => Err(MQTTError {
+                Err(e) => Err(MqttError {
                     message: e.reason,
                     kind: ErrorKind::Codec,
                 }),
             },
             Err(e) => match e.kind() {
-                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => Err(MQTTError {
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => Err(MqttError {
                     message: e.to_string(),
                     kind: ErrorKind::Timeout,
                 }),
-                _ => Err(MQTTError {
+                _ => Err(MqttError {
                     message: e.to_string(),
                     kind: ErrorKind::Transport,
                 }),
@@ -236,7 +232,7 @@ impl MQTTClient {
         }
     }
 
-    pub fn set_read_timeout(&mut self, millis: u64) -> MQTTResult<()> {
+    pub fn set_read_timeout(&mut self, millis: u64) -> Result<()> {
         if self
             .connection
             .as_mut()
@@ -244,7 +240,7 @@ impl MQTTClient {
             .set_read_timeout(Some(Duration::from_millis(millis)))
             .is_err()
         {
-            return Err(MQTTError::new(
+            return Err(MqttError::new(
                 "unable to set connection read timeout",
                 ErrorKind::Transport,
             ));

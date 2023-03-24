@@ -6,7 +6,7 @@ use vaux_mqtt::Packet;
 
 fn main() {
     let addr: Ipv4Addr = "127.0.0.1".parse().expect("unable to create addr");
-    let mut client = vaux_client::MQTTClient::new_with_id(
+    let mut client = vaux_client::MqttClient::new_with_id(
         std::net::IpAddr::V4(addr),
         1883,
         "vaux-subscriber-001",
