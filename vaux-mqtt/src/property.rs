@@ -1,10 +1,10 @@
 use std::{fmt::{Display, Formatter}, collections::{HashSet, HashMap}};
 
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, BytesMut, BufMut};
 
 use crate::{
-    codec::{get_bin, get_bool, get_utf8, get_var_u32},
-    MqttCodecError, QoSLevel,
+    codec::{get_bin, get_bool, get_utf8, get_var_u32, encode_u8_property, encode_utf8_property, encode_u32_property, encode_u16_property, encode_bool_property, encode_bin_property, put_utf8, encode_var_int_property, variable_byte_int_size, put_var_u32},
+    MqttCodecError, QoSLevel, Decode, Encode, Size,
 };
 
 /// MQTT property type. For more information on the specific property types,
@@ -147,19 +147,19 @@ impl TryFrom<u8> for PropertyType {
 }
 
 
-pub struct PropertySet {
+pub struct PropertyBundle {
     supported: HashSet<PropertyType>,
     properties: HashMap<PropertyType, Property>,
-    user_props: Vec<(String, String)>,
+    user_props: HashMap<String, Vec<String>>,
 }
 
-impl PropertySet {
+impl PropertyBundle {
 
     pub(crate) fn new(supported: HashSet<PropertyType>) -> Self {
         Self {
             supported,
             properties: HashMap::new(),
-            user_props: Vec::new(),
+            user_props: HashMap::new(),
         }
     }
 
@@ -171,19 +171,114 @@ impl PropertySet {
         self.properties.contains_key(prop_type)
     }
 
-    fn set_property(&mut self, prop: Property) {
+    pub fn set_property(&mut self, prop: Property) {
         if let Property::UserProperty(key, value) = prop {
             self.add_user_property(key, value);
+        } else {
+            self.properties.insert((&prop).into(), prop);
         }
-
     }
 
-    fn add_user_property(&mut self, key: String, value: String) {
-
+    pub fn add_user_property(&mut self, key: String, value: String) {
+        if self.user_props.contains_key(&key) {
+            self.user_props.get_mut(&key).unwrap().push(value)
+        } else {
+            let value = vec![value];
+            self.user_props.insert(key, value);
+        }
     }   
-    
 }
 
+impl Size for PropertyBundle {
+    fn size(&self) -> u32 {
+        let mut size = 0_u32;
+        for (_, prop) in &self.properties {
+            match prop {
+                Property::ContentType(p) | 
+                Property::ResponseTopic(p) |
+                Property::AssignedClientId(p) |
+                Property::AuthMethod(p) |
+                Property::RespInfo(p) |
+                Property::ServerRef(p) |
+                Property::Reason(p) => size += p.len() as u32 + 3,
+    
+                Property::SubscriptionId(p) => size += variable_byte_int_size(*p) + 1,
+    
+                Property::MessageExpiry(_) |
+                Property::SessionExpiryInt(_) |
+                Property::WillDelay(_) |
+                Property::MaxPacketSize(_) => size += 5,
+            
+                Property::KeepAlive(_) |
+                Property::RecvMax(_) |
+                Property::TopicAliasMax(_) |
+                Property::TopicAlias(_) => size += 3,
+            
+                Property::PayloadFormat(_) =>  size += 2,
+    
+                Property::ReqProblemInfo(_) |
+                Property::ReqRespInfo(_) => size += 2,
+                Property::MaxQoS(_) => size += 2,
+    
+                Property::RetainAvail(_) |
+                Property::WildcardSubAvail(_) |
+                Property::SubIdAvail(_) |
+                Property::ShardSubAvail(_) => size += 2,
+    
+                Property::CorrelationData(p) |
+                Property::AuthData(p) => size += p.len() as u32 + 3,   
+                // ignore user properties here
+                _ => {},             
+            }
+        }
+
+        for (key, values) in &self.user_props {
+            for value in values {
+                size += value.len() as u32 + 2;
+
+            }
+            size += key.len() as u32 + 3;
+        }
+        size        
+    }
+
+    fn property_size(&self) -> u32 {
+        unimplemented!()
+    }
+
+    fn payload_size(&self) -> u32 {
+        unimplemented!()
+    }
+}
+
+impl Encode for PropertyBundle {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+        put_var_u32(self.size(), dest);
+        for (_, prop) in &self.properties {
+            prop.encode(dest)?;
+        }
+        for (key, values) in &self.user_props {
+            for value in values {
+                Property::UserProperty(key.clone(), value.clone()).encode(dest)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Decode for PropertyBundle {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+        let prop_size = get_var_u32(src) as usize;
+        let remaining = src.remaining();
+        let prop_remaining = remaining - prop_size;
+        while src.remaining() >= prop_remaining {
+            self.set_property(Property::decode(src)?);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum PayloadFormat {
     Bin = 0x00,
@@ -234,7 +329,6 @@ pub enum Property {
 }
 
 impl Property {
-    //pub fn decode_all(map: &mut PropertyMap, src: &mut BytesMut) {}
     pub fn decode(src: &mut BytesMut) -> Result<Property, MqttCodecError> {
         match PropertyType::try_from(src.get_u8()) {
             Ok(prop_type) => match prop_type {
@@ -274,6 +368,52 @@ impl Property {
             },
             Err(_) => todo!(),
         }
+    }
+
+    pub fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
+        match self {
+            Property::ContentType(p) | 
+            Property::ResponseTopic(p) |
+            Property::AssignedClientId(p) |
+            Property::AuthMethod(p) |
+            Property::RespInfo(p) |
+            Property::ServerRef(p) |
+            Property::Reason(p) => encode_utf8_property(self.into(), p, dest)?,
+
+            Property::SubscriptionId(p) => encode_var_int_property(self.into(), *p, dest),
+
+            Property::MessageExpiry(p) |
+            Property::SessionExpiryInt(p) |
+            Property::WillDelay(p) |
+            Property::MaxPacketSize(p) => encode_u32_property(self.into(), *p, dest),
+        
+            Property::KeepAlive(p) |
+            Property::RecvMax(p) |
+            Property::TopicAliasMax(p) |
+            Property::TopicAlias(p) => encode_u16_property(self.into(), *p, dest),
+        
+            Property::PayloadFormat(p) =>  encode_u8_property(self.into(), *p as u8, dest),
+
+            Property::ReqProblemInfo(p) |
+            Property::ReqRespInfo(p) => encode_u8_property(self.into(), *p, dest),
+            Property::MaxQoS(p) => encode_u8_property(self.into(), *p as u8, dest),
+
+            Property::RetainAvail(p) |
+            Property::WildcardSubAvail(p) |
+            Property::SubIdAvail(p) |
+            Property::ShardSubAvail(p) => encode_bool_property(self.into(), *p, dest),
+
+            Property::CorrelationData(p) |
+            Property::AuthData(p) => encode_bin_property(self.into(), p, dest)?,
+
+            Property::UserProperty(k, v) => {
+                dest.put_u8(PropertyType::from(self) as u8);
+                put_utf8(k, dest)?;
+                put_utf8(v, dest)?;
+            }
+                
+        }
+        Ok(())
     }
 }
 
@@ -318,3 +458,5 @@ impl From<&Property> for PropertyType {
         }
     }
 }
+
+
