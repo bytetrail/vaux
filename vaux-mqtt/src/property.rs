@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter};
+use std::{fmt::{Display, Formatter}, collections::{HashSet, HashMap}};
 
 use bytes::{Buf, BytesMut};
 
@@ -146,6 +146,44 @@ impl TryFrom<u8> for PropertyType {
     }
 }
 
+
+pub struct PropertySet {
+    supported: HashSet<PropertyType>,
+    properties: HashMap<PropertyType, Property>,
+    user_props: Vec<(String, String)>,
+}
+
+impl PropertySet {
+
+    pub(crate) fn new(supported: HashSet<PropertyType>) -> Self {
+        Self {
+            supported,
+            properties: HashMap::new(),
+            user_props: Vec::new(),
+        }
+    }
+
+    pub fn supports_property(&self, prop_type: &PropertyType) -> bool {
+        self.supported.contains(prop_type)
+    }
+
+    pub fn has_property(&self, prop_type: &PropertyType) -> bool {
+        self.properties.contains_key(prop_type)
+    }
+
+    fn set_property(&mut self, prop: Property) {
+        if let Property::UserProperty(key, value) = prop {
+            self.add_user_property(key, value);
+        }
+
+    }
+
+    fn add_user_property(&mut self, key: String, value: String) {
+
+    }   
+    
+}
+
 #[repr(u8)]
 pub enum PayloadFormat {
     Bin = 0x00,
@@ -197,7 +235,6 @@ pub enum Property {
 
 impl Property {
     //pub fn decode_all(map: &mut PropertyMap, src: &mut BytesMut) {}
-
     pub fn decode(src: &mut BytesMut) -> Result<Property, MqttCodecError> {
         match PropertyType::try_from(src.get_u8()) {
             Ok(prop_type) => match prop_type {
@@ -246,4 +283,38 @@ pub trait PropertyEncode {
 
 pub trait PropertySize {
     fn property_size_internal() -> u32;
+}
+
+impl From<&Property> for PropertyType {
+    fn from(value: &Property) -> Self {
+        match value {
+            Property::PayloadFormat(_) => PropertyType::PayloadFormat,
+            Property::MessageExpiry(_) => PropertyType::MessageExpiry,
+            Property::ContentType(_) => PropertyType::ContentType,
+            Property::ResponseTopic(_) => PropertyType::ResponseTopic,
+            Property::CorrelationData(_) => PropertyType::CorrelationData,
+            Property::SubscriptionId(_) => PropertyType::SubscriptionId,
+            Property::SessionExpiryInt(_) => PropertyType::SessionExpiryInt,
+            Property::AssignedClientId(_) => PropertyType::AssignedClientId,
+            Property::KeepAlive(_) => PropertyType::KeepAlive,
+            Property::AuthMethod(_) => PropertyType::AuthMethod,
+            Property::AuthData(_) => PropertyType::AuthData,
+            Property::ReqProblemInfo(_) => PropertyType::ReqProblemInfo,
+            Property::WillDelay(_) => PropertyType::WillDelay,
+            Property::ReqRespInfo(_) => PropertyType::ReqRespInfo,
+            Property::RespInfo(_) => PropertyType::RespInfo,
+            Property::ServerRef(_) => PropertyType::ServerRef,
+            Property::Reason(_) => PropertyType::Reason,
+            Property::RecvMax(_) => PropertyType::RecvMax,
+            Property::TopicAliasMax(_) => PropertyType::TopicAliasMax,
+            Property::TopicAlias(_) => PropertyType::TopicAlias,
+            Property::MaxQoS(_) => PropertyType::MaxQoS,
+            Property::RetainAvail(_) => PropertyType::RetainAvail,
+            Property::UserProperty(_, _) => PropertyType::UserProperty,
+            Property::MaxPacketSize(_) => PropertyType::MaxPacketSize,
+            Property::WildcardSubAvail(_) => PropertyType::WildcardSubAvail,
+            Property::SubIdAvail(_) => PropertyType::SubIdAvail,
+            Property::ShardSubAvail(_) => PropertyType::ShardSubAvail,
+        }
+    }
 }
