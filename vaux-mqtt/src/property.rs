@@ -163,6 +163,14 @@ impl PropertyBundle {
         }
     }
 
+    pub fn len(&self) -> usize {
+        let mut len= self.properties.len();
+        for item in &self.user_props {
+            len += item.1.len();
+        }
+        len
+    }
+
     pub fn supports_property(&self, prop_type: &PropertyType) -> bool {
         self.supported.contains(prop_type)
     }

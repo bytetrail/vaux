@@ -62,12 +62,13 @@ impl Encode for PubRec {
         header.set_remaining(self.size());
         header.encode(dest)?;
         dest.put_u16(self.packet_id);
-        if self.reason != Reason::Success {
+        if self.reason == Reason::Success && self.props.len() == 0 {
+            Ok(())
+        }else {
             dest.put_u8(self.reason as u8);
+            self.props.encode(dest)?;
+            Ok(())
         }
-        put_var_u32(self.property_size(), dest);
-        self.props.encode(dest)?;
-        Ok(())
     }
 }
 
@@ -84,4 +85,43 @@ impl Decode for PubRec {
 
         Ok(())
     }
+}
+
+
+
+#[cfg(test)]
+mod test {
+    use bytes::BytesMut;
+
+    use crate::property::Property;
+
+    use super::*;
+    
+    #[test]
+    fn basic_encode() {
+        const EXPECTED_LEN: usize = 4;
+        let mut pubrec = PubRec::new();
+        pubrec.packet_id = 12345;
+        pubrec.reason = Reason::Success;
+        let mut dest = BytesMut::new();
+        let result = pubrec.encode(&mut dest);
+        assert!(result.is_ok());
+        assert_eq!(EXPECTED_LEN,  dest.len());
+    }
+
+    #[test]
+    fn encode_with_reason() {
+        const EXPECTED_LEN: usize = 25;
+        let mut pubrec = PubRec::new();
+        pubrec.packet_id = 12345;
+        pubrec.reason = Reason::UnspecifiedErr;
+        pubrec.properties_mut().set_property(Property::Reason("unable to comply".to_string()));
+
+        let mut dest = BytesMut::new();
+        let result = pubrec.encode(&mut dest);
+        assert!(result.is_ok());
+        assert_eq!(EXPECTED_LEN,  dest.len());
+    }
+
+
 }
