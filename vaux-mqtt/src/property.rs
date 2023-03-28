@@ -146,7 +146,7 @@ impl TryFrom<u8> for PropertyType {
     }
 }
 
-
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropertyBundle {
     supported: HashSet<PropertyType>,
     properties: HashMap<PropertyType, Property>,
@@ -286,7 +286,7 @@ impl Decode for PropertyBundle {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PayloadFormat {
     Bin = 0x00,
@@ -305,6 +305,7 @@ impl TryFrom<u8> for PayloadFormat {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Property {
     PayloadFormat(PayloadFormat) = 0x01,
