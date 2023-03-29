@@ -36,9 +36,9 @@ pub struct Publish {
 
 impl Publish {
     pub fn new_from_header(hdr: FixedHeader) -> Result<Self, MqttCodecError> {
-        let qos = QoSLevel::try_from(hdr.flags)?;
-        let retain = hdr.flags & RETAIN_MASK != 0;
-        let dup = hdr.flags & DUP_MASK != 0;
+        let qos = QoSLevel::try_from(hdr.flags())?;
+        let retain = hdr.flags() & RETAIN_MASK != 0;
+        let dup = hdr.flags() & DUP_MASK != 0;
         if dup && qos == QoSLevel::AtMostOnce {
             return Err(MqttCodecError::new(
                 "[Mqtt 3.1.1.1] DUP must be 0 for QOS level \"At most once\"",
@@ -167,6 +167,7 @@ impl Encode for Publish {
         let mut header = FixedHeader::new(PacketType::Publish);
         let size = self.size();
         let property_remaining = self.property_size();
+        header.set_qos(self.qos);
         header.set_remaining(size);
         header.encode(dest)?;
         if self.topic_name.is_none() && self.topic_alias.is_none() {
@@ -286,11 +287,7 @@ mod test {
         const LEN_PROP_LEN: u32 = 1;
         const EXPECTED_REMAINING: u32 = LEN_TOPIC_NAME_LEN + LEN_TOPIC_NAME + LEN_PROP_LEN;
         const EXPECTED_LEN: u32 = EXPECTED_REMAINING + 2;
-        let hdr = crate::FixedHeader {
-            packet_type: crate::PacketType::Publish,
-            flags: 0b_0000_0000,
-            remaining: 0,
-        };
+        let hdr = crate::FixedHeader::new(PacketType::Publish);
         match Publish::new_from_header(hdr) {
             Ok(mut publish) => {
                 publish.topic_name = Some("topic".to_string());
@@ -319,11 +316,7 @@ mod test {
 
     #[test]
     fn test_fail_topic() {
-        let hdr = crate::FixedHeader {
-            packet_type: crate::PacketType::Publish,
-            flags: 0b_0000_0000,
-            remaining: 0,
-        };
+        let hdr = crate::FixedHeader::new(PacketType::Publish);
         match Publish::new_from_header(hdr) {
             Ok(publish) => {
                 let mut dest = BytesMut::new();
@@ -340,11 +333,7 @@ mod test {
 
     #[test]
     fn test_fail_packet_id() {
-        let hdr = crate::FixedHeader {
-            packet_type: crate::PacketType::Publish,
-            flags: 0b_0000_0000,
-            remaining: 0,
-        };
+        let hdr = crate::FixedHeader::new(PacketType::Publish);
         match Publish::new_from_header(hdr) {
             Ok(publish) => {
                 let mut dest = BytesMut::new();
@@ -366,11 +355,7 @@ mod test {
         const EXPECTED_REMAINING: u32 =
             LEN_TOPIC_NAME_LEN + LEN_TOPIC_NAME + LEN_PROP_LEN + LEN_PAYLOAD;
         const EXPECTED_LEN: u32 = EXPECTED_REMAINING + 2;
-        let hdr = crate::FixedHeader {
-            packet_type: crate::PacketType::Publish,
-            flags: 0b_0000_0000,
-            remaining: 0,
-        };
+        let hdr = crate::FixedHeader::new(PacketType::Publish); 
         match Publish::new_from_header(hdr) {
             Ok(mut publish) => {
                 let mut dest = BytesMut::new();
@@ -426,7 +411,7 @@ mod test {
         const TEST_PACKET_ID: [u8; 9] = [0x00, 0x04, 0x76, 0x61, 0x75, 0x78, 0x01, 0x0e, 0x00];
         let mut src = BytesMut::from(&TEST_PACKET_ID[..]);
         let mut hdr = FixedHeader::new(PacketType::Publish);
-        hdr.flags = 0x01;
+        hdr.set_retain(true);
         hdr.remaining = 0x09;
         let mut publish_packet =
             Publish::new_from_header(hdr.clone()).expect("unable to create packet");
@@ -437,7 +422,7 @@ mod test {
             }
             Err(e) => panic!("unexpected error decoding publish: {}", e),
         }
-        hdr.flags = 0x00;
+        hdr.clear_flags();
         let mut src = BytesMut::from(&TEST_PACKET_ID[..]);
         let mut publish_packet = Publish::new_from_header(hdr).expect("unable to create packet");
         match publish_packet.decode(&mut src) {

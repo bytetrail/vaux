@@ -556,6 +556,7 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
     match packet_type {
         PacketType::Connect
         | PacketType::PubRel
+        | PacketType::PubAck
         | PacketType::Subscribe
         | PacketType::Unsubscribe => {
             if flags != PACKET_RESERVED_NONE {
@@ -563,11 +564,7 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
                     format!("invalid flags for {}: {}", packet_type, flags).as_str(),
                 );
             }
-            Ok(Some(FixedHeader {
-                packet_type,
-                flags,
-                remaining,
-            }))
+            Ok(Some(FixedHeader::new_with_remaining(packet_type, remaining)))
         }
         PacketType::ConnAck
         | PacketType::PubRec
@@ -583,17 +580,13 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
                     format!("invalid flags for {}: {}", packet_type, flags).as_str(),
                 );
             }
-            Ok(Some(FixedHeader {
-                packet_type,
-                flags,
-                remaining,
-            }))
+            Ok(Some(FixedHeader::new_with_remaining(packet_type, remaining)))
         }
-        PacketType::Publish => Ok(Some(FixedHeader {
-            packet_type,
-            flags,
-            remaining,
-        })),
+        PacketType::Publish => {
+            let mut header = FixedHeader::new_with_remaining(packet_type, remaining);
+            header.set_flags(flags)?;
+            Ok(Some(header))
+        }
         _ => Err(MqttCodecError::new("unexpected packet type ")),
     }
 }
