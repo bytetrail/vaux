@@ -16,8 +16,9 @@ pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
 
 /// MQTT Control Packet Type
 /// #[repr(u8)]
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Default, Debug, PartialEq, Eq, Copy, Clone)]
 pub enum PacketType {
+    #[default]
     Connect = 0x10,
     ConnAck = 0x20,
     Publish = 0x30,

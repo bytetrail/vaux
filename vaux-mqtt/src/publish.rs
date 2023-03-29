@@ -13,14 +13,9 @@ use crate::{
     UserPropertyMap,
 };
 
-const RETAIN_MASK: u8 = 0b_0000_0001;
-const DUP_MASK: u8 = 0b_0000_1000;
-
-#[derive(Default, Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Publish {
-    pub dup: bool,
-    pub qos: QoSLevel,
-    pub retain: bool,
+    pub header: FixedHeader,
     pub topic_name: Option<String>,
     pub topic_alias: Option<u16>,
     pub response_topic: Option<String>,
@@ -34,32 +29,53 @@ pub struct Publish {
     payload: Option<Vec<u8>>,
 }
 
-impl Publish {
-    pub fn new_from_header(hdr: FixedHeader) -> Result<Self, MqttCodecError> {
-        let qos = QoSLevel::try_from(hdr.flags())?;
-        let retain = hdr.flags() & RETAIN_MASK != 0;
-        let dup = hdr.flags() & DUP_MASK != 0;
-        if dup && qos == QoSLevel::AtMostOnce {
-            return Err(MqttCodecError::new(
-                "[Mqtt 3.1.1.1] DUP must be 0 for QOS level \"At most once\"",
-            ));
+impl Default for Publish {
+    fn default() -> Self {
+        Self { 
+            header: FixedHeader::new(PacketType::Publish), 
+            topic_name: None, 
+            topic_alias: None, 
+            response_topic: None, 
+            packet_id: None, 
+            payload_utf8: false, 
+            message_expiry: None, 
+            correlation_data: None, 
+            user_props: None, 
+            sub_id: None, 
+            content_type: None, 
+            payload: None 
         }
-        Ok(Publish {
-            dup,
-            qos,
-            retain,
-            topic_name: None,
-            topic_alias: None,
-            response_topic: None,
-            packet_id: None,
-            payload_utf8: false,
-            message_expiry: None,
-            correlation_data: None,
-            user_props: None,
-            sub_id: None,
-            content_type: None,
-            payload: None,
-        })
+    }
+}
+
+impl Publish {
+    pub fn new_from_header(header: FixedHeader) -> Result<Self, MqttCodecError> {
+        match header.packet_type {
+            PacketType::Publish =>         Ok(Publish {
+                header,
+                topic_name: None,
+                topic_alias: None,
+                response_topic: None,
+                packet_id: None,
+                payload_utf8: false,
+                message_expiry: None,
+                correlation_data: None,
+                user_props: None,
+                sub_id: None,
+                content_type: None,
+                payload: None,
+            }),
+        p => Err(MqttCodecError { reason: format!("unable to construct from {}", p) })
+
+        }
+    }
+
+    pub fn qos(&self) -> QoSLevel{
+        self.header.qos()
+    }
+
+    pub fn set_qos(&mut self, qos: QoSLevel) {
+        self.header.set_qos(qos);
     }
 
     pub fn set_payload(&mut self, data: Vec<u8>) {
@@ -71,7 +87,7 @@ impl Publish {
     }
 
     pub fn set_packet_id(&mut self, id: u16) -> Result<(), MqttCodecError> {
-        if self.qos == QoSLevel::AtMostOnce {
+        if self.header.qos() == QoSLevel::AtMostOnce {
             return Err(MqttCodecError::new(
                 "Mqttv53.3.2.2 QOS level must not be At Most Once",
             ));
@@ -117,7 +133,7 @@ impl Size for Publish {
             SIZE_UTF8_STRING
         };
         // packet identifier
-        remaining += if let QoSLevel::AtMostOnce = self.qos {
+        remaining += if let QoSLevel::AtMostOnce = self.header.qos() {
             0
         } else {
             2
@@ -164,10 +180,9 @@ impl Size for Publish {
 
 impl Encode for Publish {
     fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
-        let mut header = FixedHeader::new(PacketType::Publish);
+        let mut header = self.header.clone();
         let size = self.size();
         let property_remaining = self.property_size();
-        header.set_qos(self.qos);
         header.set_remaining(size);
         header.encode(dest)?;
         if self.topic_name.is_none() && self.topic_alias.is_none() {
@@ -179,7 +194,7 @@ impl Encode for Publish {
             Some(topic_name) => put_utf8(topic_name, dest)?,
             None => put_utf8("", dest)?,
         };
-        if self.qos != QoSLevel::AtMostOnce {
+        if self.header.qos() != QoSLevel::AtMostOnce {
             if let Some(packet_id) = self.packet_id {
                 dest.put_u16(packet_id);
             } else {
@@ -230,7 +245,7 @@ impl Decode for Publish {
         } else {
             self.topic_name = Some(topic_name);
         }
-        if self.qos != QoSLevel::AtMostOnce {
+        if self.header.qos() != QoSLevel::AtMostOnce {
             self.packet_id = Some(src.get_u16());
         }
         let property_len = get_var_u32(src);
@@ -411,7 +426,7 @@ mod test {
         const TEST_PACKET_ID: [u8; 9] = [0x00, 0x04, 0x76, 0x61, 0x75, 0x78, 0x01, 0x0e, 0x00];
         let mut src = BytesMut::from(&TEST_PACKET_ID[..]);
         let mut hdr = FixedHeader::new(PacketType::Publish);
-        hdr.set_retain(true);
+        hdr.set_qos(QoSLevel::AtLeastOnce);
         hdr.remaining = 0x09;
         let mut publish_packet =
             Publish::new_from_header(hdr.clone()).expect("unable to create packet");

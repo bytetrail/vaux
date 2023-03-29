@@ -9,7 +9,7 @@ use crate::{
 const QOS_MASK: u8 = 0b_0000_0110;
 const RETAIN_MASK: u8 = 0b_0000_0001;
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
 pub struct FixedHeader {
     pub packet_type: PacketType,
     flags: u8,

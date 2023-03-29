@@ -186,7 +186,7 @@ impl MqttClient {
         publish.topic_name = Some(topic.to_string());
         publish.set_payload(Vec::from(data));
         publish.user_props = props.cloned();
-        publish.qos = QoSLevel::AtLeastOnce;
+        publish.set_qos(QoSLevel::AtLeastOnce);
         publish.packet_id = Some(101);
         self.send(Packet::Publish(publish))
     }

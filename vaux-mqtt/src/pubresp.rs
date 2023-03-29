@@ -153,8 +153,9 @@ impl Decode for PubResp {
         } 
         self.packet_id = src.get_u16();    
         self.reason = Reason::try_from(src.get_u8())?;
-        self.props.decode(src)?;
-
+        if src.remaining() > 0 {
+            self.props.decode(src)?;
+        }
         Ok(())
     }
 }
