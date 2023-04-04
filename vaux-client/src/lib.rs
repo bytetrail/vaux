@@ -7,7 +7,7 @@ use std::{
 use bytes::BytesMut;
 use vaux_mqtt::{
     QoSLevel,
-    decode, encode, publish::Publish, Connect, Packet, Subscribe, Subscription, UserPropertyMap,
+    decode, encode, publish::Publish, Connect, Packet, UserPropertyMap, property::Property, PropertyType,
 };
 
 const DEFAULT_TIMEOUT: u64 = 60_000;
@@ -107,7 +107,18 @@ impl MqttClient {
                                     match packet {
                                         Packet::ConnAck(connack) => {
                                             if self.client_id.is_none() {
-                                                self.client_id = connack.assigned_client_id;
+                                                match connack.properties().get_property(&PropertyType::AssignedClientId) {
+                                                    Some(Property::AssignedClientId(id)) => {
+                                                        self.client_id = Some(id.to_owned());
+                                                    }
+                                                    _ => {
+                                                        // handle error here for required property
+                                                        Err(MqttError::new(
+                                                            "no assigned client id",
+                                                            ErrorKind::Protocol,
+                                                        ))?;
+                                                    }
+                                                }
                                             }
                                             // TODO set server properties based on ConnAck
                                             self.connected = true;

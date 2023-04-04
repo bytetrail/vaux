@@ -4,7 +4,6 @@ pub mod connect;
 pub mod disconnect;
 pub mod fixed;
 pub mod property;
-pub mod puback;
 pub mod publish;
 pub mod pubresp;
 pub mod subscribe;

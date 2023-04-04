@@ -1,4 +1,4 @@
-use std::{fmt::{Display, Formatter}, collections::{HashSet, HashMap}};
+use std::{fmt::{Display, Formatter}, collections::{HashSet, HashMap}, ops::Index};
 
 use bytes::{Buf, BytesMut, BufMut};
 
@@ -146,7 +146,7 @@ impl TryFrom<u8> for PropertyType {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PropertyBundle {
     supported: HashSet<PropertyType>,
     properties: HashMap<PropertyType, Property>,
@@ -179,6 +179,10 @@ impl PropertyBundle {
         self.properties.contains_key(prop_type)
     }
 
+    pub fn get_property(&self, prop_type: &PropertyType) -> Option<&Property> {
+        self.properties.get(prop_type)
+    }
+
     pub fn set_property(&mut self, prop: Property) {
         if let Property::UserProperty(key, value) = prop {
             self.add_user_property(key, value);
@@ -196,6 +200,15 @@ impl PropertyBundle {
         }
     }   
 }
+
+impl Index<PropertyType> for PropertyBundle {
+    type Output = Property;
+
+    fn index(&self, prop_type: PropertyType) -> &Self::Output {
+        &self.properties[&prop_type.into()]
+    }
+}
+
 
 impl Size for PropertyBundle {
     fn size(&self) -> u32 {
@@ -279,8 +292,9 @@ impl Decode for PropertyBundle {
         let prop_size = get_var_u32(src) as usize;
         let remaining = src.remaining();
         let prop_remaining = remaining - prop_size;
-        while src.remaining() >= prop_remaining {
+        while src.remaining() > prop_remaining {
             self.set_property(Property::decode(src)?);
+            println!("remaining: {}", src.remaining());
         }
         Ok(())
     }

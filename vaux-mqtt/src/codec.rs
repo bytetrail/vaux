@@ -427,16 +427,6 @@ pub(crate) fn encode_var_int_property(
     put_var_u32(value, dest);
 }
 
-pub(crate) fn decode_prop_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {
-    match src.get_u8() {
-        0 => Ok(false),
-        1 => Ok(true),
-        value => Err(MqttCodecError::new(&format!(
-            "invalid property value: {}",
-            value
-        ))),
-    }
-}
 
 #[cfg(not(feature = "pedantic"))]
 pub fn get_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {
@@ -588,6 +578,5 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
             header.set_flags(flags)?;
             Ok(Some(header))
         }
-        _ => Err(MqttCodecError::new("unexpected packet type ")),
     }
 }
