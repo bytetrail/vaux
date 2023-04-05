@@ -6,7 +6,8 @@ use std::{
 
 use bytes::BytesMut;
 use vaux_mqtt::{
-    decode, encode, publish::Publish, Connect, Packet, Subscribe, Subscription, UserPropertyMap,
+    QoSLevel,
+    decode, encode, publish::Publish, Connect, Packet, UserPropertyMap, property::Property, PropertyType,
 };
 
 const DEFAULT_TIMEOUT: u64 = 60_000;
@@ -106,7 +107,18 @@ impl MqttClient {
                                     match packet {
                                         Packet::ConnAck(connack) => {
                                             if self.client_id.is_none() {
-                                                self.client_id = connack.assigned_client_id;
+                                                match connack.properties().get_property(&PropertyType::AssignedClientId) {
+                                                    Some(Property::AssignedClientId(id)) => {
+                                                        self.client_id = Some(id.to_owned());
+                                                    }
+                                                    _ => {
+                                                        // handle error here for required property
+                                                        Err(MqttError::new(
+                                                            "no assigned client id",
+                                                            ErrorKind::Protocol,
+                                                        ))?;
+                                                    }
+                                                }
                                             }
                                             // TODO set server properties based on ConnAck
                                             self.connected = true;
@@ -185,7 +197,8 @@ impl MqttClient {
         publish.topic_name = Some(topic.to_string());
         publish.set_payload(Vec::from(data));
         publish.user_props = props.cloned();
-
+        publish.set_qos(QoSLevel::AtLeastOnce);
+        publish.packet_id = Some(101);
         self.send(Packet::Publish(publish))
     }
 
@@ -204,28 +217,6 @@ impl MqttClient {
             });
         }
         Ok(None)
-    }
-
-    pub fn subscribe(&mut self, packet_id: u16, topic_filter: &str) -> Result<()> {
-        let mut subscribe = Subscribe::default();
-        subscribe.set_packet_id(packet_id);
-        let subscription = Subscription {
-            filter: topic_filter.to_string(),
-            ..Default::default()
-        };
-        subscribe.add_subscription(subscription);
-        let mut dest = BytesMut::default();
-        let result = encode(Packet::Subscribe(subscribe.clone()), &mut dest);
-        if let Err(e) = result {
-            panic!("Failed to encode packet: {:?}", e);
-        }
-        match self.connection.as_ref().unwrap().write_all(&dest) {
-            Ok(_) => Ok(()),
-            Err(e) => Err(MqttError {
-                message: format!("unexpected send error {:#?}", e),
-                kind: ErrorKind::Transport,
-            }),
-        }
     }
 
     pub fn read_next(&mut self) -> Result<Option<Packet>> {
