@@ -294,7 +294,6 @@ impl Decode for PropertyBundle {
         let prop_remaining = remaining - prop_size;
         while src.remaining() > prop_remaining {
             self.set_property(Property::decode(src)?);
-            println!("remaining: {}", src.remaining());
         }
         Ok(())
     }
