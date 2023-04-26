@@ -4,9 +4,8 @@ pub mod connect;
 pub mod disconnect;
 pub mod fixed;
 pub mod property;
-pub mod puback;
 pub mod publish;
-pub mod pubrec;
+pub mod pubresp;
 pub mod subscribe;
 pub mod test;
 mod will;
@@ -22,7 +21,9 @@ pub use crate::connack::ConnAck;
 pub use crate::connect::Connect;
 pub use crate::will::WillMessage;
 pub use crate::{
-    disconnect::Disconnect, fixed::FixedHeader, subscribe::Subscribe, subscribe::Subscription,
+    disconnect::Disconnect, fixed::FixedHeader, 
+    pubresp::PubResp,
+    subscribe::Subscribe, subscribe::Subscription,
 };
 use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;

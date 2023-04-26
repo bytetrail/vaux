@@ -91,7 +91,8 @@ impl Broker {
                 // handle the client id
                 if packet.client_id.is_empty() {
                     session_id = Uuid::new_v4().to_string();
-                    ack.assigned_client_id = Some(session_id.clone());
+                    ack.properties_mut().set_property(vaux_mqtt::property::Property::AssignedClientId(
+                        session_id.clone()));
                 } else {
                     session_id = packet.client_id.clone();
                 }
@@ -117,7 +118,8 @@ impl Broker {
                     active_session = Some(session);
                 }
                 if packet.keep_alive > DEFAULT_KEEP_ALIVE as u16 {
-                    ack.server_keep_alive = Some(DEFAULT_KEEP_ALIVE as u16);
+                    ack.properties_mut().set_property(vaux_mqtt::property::Property::KeepAlive(
+                        DEFAULT_KEEP_ALIVE as u16));
                 } else {
                     let mut session = active_session.as_ref().unwrap().write().await;
                     if let Some(expiry) = packet.properties().get_property(&PropertyType::SessionExpiryInt){

@@ -298,8 +298,6 @@ impl IndexMut<PropertyType> for PropertyBundle {
     }
 }
 
-
-
 impl Size for PropertyBundle {
     fn size(&self) -> u32 {
         let mut size = 0_u32;
@@ -408,11 +406,7 @@ impl TryFrom<u8> for PayloadFormat {
     }
 }
 
-
-
 impl Property {
-    //pub fn decode_all(map: &mut PropertyMap, src: &mut BytesMut) {}
-
     pub fn decode(src: &mut BytesMut) -> Result<Property, MqttCodecError> {
         match PropertyType::try_from(src.get_u8()) {
             Ok(prop_type) => match prop_type {

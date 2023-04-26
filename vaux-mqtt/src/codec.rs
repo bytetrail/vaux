@@ -1,6 +1,6 @@
 use crate::publish::Publish;
 use crate::subscribe::SubAck;
-use crate::{ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, PropertyType, Subscribe};
+use crate::{ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, PropertyType, PubResp, Subscribe};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -16,8 +16,9 @@ pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
 
 /// MQTT Control Packet Type
 /// #[repr(u8)]
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Default, Debug, PartialEq, Eq, Copy, Clone)]
 pub enum PacketType {
+    #[default]
     Connect = 0x10,
     ConnAck = 0x20,
     Publish = 0x30,
@@ -85,7 +86,7 @@ pub enum Reason {
     UnsupportedProtocolVersion,
     InvalidClientId,
     AuthenticationErr,
-    Unauthorized,
+    NotAuthorized,
     ServerUnavailable,
     ServerBusy,
     Banned,
@@ -147,7 +148,7 @@ impl TryFrom<u8> for Reason {
             0x84 => Ok(Reason::UnsupportedProtocolVersion),
             0x85 => Ok(Reason::InvalidClientId),
             0x86 => Ok(Reason::AuthenticationErr),
-            0x87 => Ok(Reason::Unauthorized),
+            0x87 => Ok(Reason::NotAuthorized),
             0x88 => Ok(Reason::ServerUnavailable),
             0x89 => Ok(Reason::ServerBusy),
             0x8a => Ok(Reason::Banned),
@@ -213,6 +214,10 @@ pub enum Packet {
     Connect(Connect),
     ConnAck(ConnAck),
     Publish(Publish),
+    PubAck(PubResp),
+    PubComp(PubResp),
+    PubRec(PubResp),
+    PubRel(PubResp),
     Disconnect(Disconnect),
     Subscribe(Subscribe),
     SubAck(SubAck),
@@ -226,6 +231,10 @@ impl From<&Packet> for PacketType {
             Packet::Connect(_) => PacketType::Connect,
             Packet::ConnAck(_) => PacketType::ConnAck,
             Packet::Publish(_) => PacketType::Publish,
+            Packet::PubAck(_) => PacketType::PubAck,
+            Packet::PubComp(_) => PacketType::PubComp,
+            Packet::PubRec(_) => PacketType::PubRec,
+            Packet::PubRel(_) => PacketType::PubRel,
             Packet::Disconnect(_) => PacketType::Disconnect,
             Packet::Subscribe(_) => PacketType::Subscribe,
             Packet::SubAck(_) => PacketType::SubAck,
@@ -278,6 +287,26 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<Packet>, MqttCodecError> {
                     publish.decode(src)?;
                     Ok(Some(Packet::Publish(publish)))
                 }
+                PacketType::PubAck => {
+                    let mut puback = PubResp::new_puback();
+                    puback.decode(src)?;
+                    Ok(Some(Packet::PubAck(puback)))
+                }
+                PacketType::PubComp => {
+                    let mut pubcomp = PubResp::new_pubcomp();
+                    pubcomp.decode(src)?;
+                    Ok(Some(Packet::PubComp(pubcomp)))
+                }
+                PacketType::PubRec => {
+                    let mut pubrec = PubResp::new_pubrec();
+                    pubrec.decode(src)?;
+                    Ok(Some(Packet::PubRec(pubrec)))
+                }
+                PacketType::PubRel => {
+                    let mut pubrel = PubResp::new_pubrel();
+                    pubrel.decode(src)?;
+                    Ok(Some(Packet::PubRel(pubrel)))
+                }
                 PacketType::Disconnect => {
                     let mut disconnect = Disconnect::default();
                     disconnect.decode(src)?;
@@ -312,6 +341,11 @@ pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MqttCodecError>
         Packet::ConnAck(c) => c.encode(dest),
         Packet::Disconnect(d) => d.encode(dest),
         Packet::Publish(p) => p.encode(dest),
+        Packet::PubAck(p) |
+        Packet::PubComp(p) |
+        Packet::PubRec(p) |
+        Packet::PubRel(p) => p.encode(dest),
+
         Packet::PingRequest(header) | Packet::PingResponse(header) => {
             dest.put_u8(header.packet_type() as u8 | header.flags());
             dest.put_u8(0x_00);
@@ -393,16 +427,6 @@ pub(crate) fn encode_var_int_property(
     put_var_u32(value, dest);
 }
 
-pub(crate) fn decode_prop_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {
-    match src.get_u8() {
-        0 => Ok(false),
-        1 => Ok(true),
-        value => Err(MqttCodecError::new(&format!(
-            "invalid property value: {}",
-            value
-        ))),
-    }
-}
 
 #[cfg(not(feature = "pedantic"))]
 pub fn get_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {
@@ -523,6 +547,7 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
     match packet_type {
         PacketType::Connect
         | PacketType::PubRel
+        | PacketType::PubAck
         | PacketType::Subscribe
         | PacketType::Unsubscribe => {
             if flags != PACKET_RESERVED_NONE {
@@ -530,11 +555,7 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
                     format!("invalid flags for {}: {}", packet_type, flags).as_str(),
                 );
             }
-            Ok(Some(FixedHeader {
-                packet_type,
-                flags,
-                remaining,
-            }))
+            Ok(Some(FixedHeader::new_with_remaining(packet_type, remaining)))
         }
         PacketType::ConnAck
         | PacketType::PubRec
@@ -550,17 +571,12 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
                     format!("invalid flags for {}: {}", packet_type, flags).as_str(),
                 );
             }
-            Ok(Some(FixedHeader {
-                packet_type,
-                flags,
-                remaining,
-            }))
+            Ok(Some(FixedHeader::new_with_remaining(packet_type, remaining)))
         }
-        PacketType::Publish => Ok(Some(FixedHeader {
-            packet_type,
-            flags,
-            remaining,
-        })),
-        _ => Err(MqttCodecError::new("unexpected packet type ")),
+        PacketType::Publish => {
+            let mut header = FixedHeader::new_with_remaining(packet_type, remaining);
+            header.set_flags(flags)?;
+            Ok(Some(header))
+        }
     }
 }
