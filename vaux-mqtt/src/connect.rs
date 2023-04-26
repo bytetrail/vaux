@@ -1,12 +1,11 @@
 use crate::codec::{
-    check_property, encode_bin_property, encode_u16_property, encode_u32_property,
-    encode_u8_property, encode_utf8_property, get_bin, get_utf8, get_var_u32, put_bin,
-    MqttCodecError, PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8,
+    get_bin, get_utf8, put_bin,
+    MqttCodecError, 
 };
-use crate::property::PropertySize;
+use crate::property::{PropertySize, PropertyBundle};
 use crate::{
     put_utf8, put_var_u32, variable_byte_int_size, Decode, Encode, FixedHeader, PacketType,
-    PropertyType, QoSLevel, Size, UserPropertyMap, WillMessage,
+    PropertyType, QoSLevel, Size, WillMessage,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use prop_macro::PropertySize;
@@ -24,30 +23,30 @@ pub(crate) const CONNECT_FLAG_WILL: u8 = 0b_0000_0100;
 pub(crate) const CONNECT_FLAG_CLEAN_START: u8 = 0b_0000_0010;
 pub(crate) const CONNECT_FLAG_SHIFT: u8 = 0x03;
 
-const DEFAULT_RECEIVE_MAX: u16 = 0xffff;
 /// Default remaining size for connect packet
 const DEFAULT_CONNECT_REMAINING: u32 = 10;
 
 #[derive(PropertySize, Debug, Clone, Eq, PartialEq)]
 pub struct Connect {
+    props: PropertyBundle,
     pub clean_start: bool,
     pub keep_alive: u16,
-    pub session_expiry_interval: Option<u32>,
-    pub receive_max: u16,
-    pub max_packet_size: Option<u32>,
-    pub topic_alias_max: Option<u16>,
-    pub req_resp_info: bool,
-    pub problem_info: bool,
-    pub auth_method: Option<String>,
-    pub auth_data: Option<Vec<u8>>,
     pub will_message: Option<WillMessage>,
-    pub user_props: Option<UserPropertyMap>,
     pub client_id: String,
     pub username: Option<String>,
     pub password: Option<Vec<u8>>,
 }
 
 impl Connect {
+
+    pub fn properties(&self) -> &PropertyBundle {
+        &self.props
+    }
+
+    pub fn properties_mut(&mut self) -> &mut PropertyBundle {
+        &mut self.props
+    }
+
     fn encode_flags(&self, dest: &mut BytesMut) {
         let mut flags = 0_u8;
         if self.clean_start {
@@ -101,103 +100,10 @@ impl Connect {
             }
         }
         self.keep_alive = src.get_u16();
-        self.decode_properties(src)?;
+        if src.remaining() > 0 {
+            self.props.decode(src)?;
+        }       
         self.decode_payload(src, username, password)?;
-        Ok(())
-    }
-
-    fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
-        let prop_size = get_var_u32(src);
-        let read_until = src.remaining() - prop_size as usize;
-        let mut properties: HashSet<PropertyType> = HashSet::new();
-        while src.remaining() > read_until {
-            match PropertyType::try_from(src.get_u8()) {
-                Ok(property_type) => {
-                    if property_type != PropertyType::UserProperty {
-                        check_property(property_type, &mut properties)?;
-                        match property_type {
-                            PropertyType::SessionExpiryInt => {
-                                self.session_expiry_interval = Some(src.get_u32());
-                            }
-                            PropertyType::RecvMax => {
-                                self.receive_max = src.get_u16();
-                            }
-                            PropertyType::MaxPacketSize => {
-                                self.max_packet_size = Some(src.get_u32());
-                            }
-                            PropertyType::TopicAliasMax => {
-                                self.topic_alias_max = Some(src.get_u16());
-                            }
-                            PropertyType::ReqRespInfo => match src.get_u8() {
-                                0 => self.req_resp_info = false,
-                                1 => self.req_resp_info = true,
-                                v => {
-                                    return Err(MqttCodecError::new(
-                                        format!(
-                                            "invalid value {} for {}",
-                                            v,
-                                            PropertyType::ReqRespInfo
-                                        )
-                                        .as_str(),
-                                    ))
-                                }
-                            },
-                            PropertyType::RespInfo => match src.get_u8() {
-                                0 => self.problem_info = false,
-                                1 => self.problem_info = true,
-                                v => {
-                                    return Err(MqttCodecError::new(
-                                        format!(
-                                            "invalid value {} for {}",
-                                            v,
-                                            PropertyType::RespInfo
-                                        )
-                                        .as_str(),
-                                    ))
-                                }
-                            },
-                            PropertyType::AuthMethod => {
-                                let result = get_utf8(src)?;
-                                self.auth_method = Some(result);
-                            }
-                            PropertyType::AuthData => {
-                                if self.auth_method.is_some() {
-                                    self.auth_data = Some(get_bin(src)?);
-                                } else {
-                                    // Mqtt protocol not specific that auth method must appear before
-                                    // auth data. This implementation imposes order and may be incorrect
-                                    return Err(MqttCodecError::new(&format!(
-                                        "Property: {} provided without providing {}",
-                                        PropertyType::AuthData,
-                                        PropertyType::AuthMethod
-                                    )));
-                                }
-                            }
-                            val => {
-                                return Err(MqttCodecError::new(&format!(
-                                    "unexpected property type value: {}",
-                                    val
-                                )))
-                            }
-                        }
-                    } else {
-                        if self.user_props.is_none() {
-                            self.user_props = Some(UserPropertyMap::default());
-                        }
-                        let property_map = self.user_props.as_mut().unwrap();
-                        let key = get_utf8(src)?;
-                        let value = get_utf8(src)?;
-                        property_map.add_property(&key, &value);
-                    }
-                }
-                Err(e) => return Err(e),
-            };
-            if src.remaining() < read_until {
-                return Err(MqttCodecError::new(
-                    "property size does not match expected length",
-                ));
-            }
-        }
         Ok(())
     }
 
@@ -230,38 +136,7 @@ impl crate::Size for Connect {
     }
 
     fn property_size(&self) -> u32 {
-        let mut property_remaining = 0;
-        if self.session_expiry_interval.is_some() {
-            property_remaining += PROP_SIZE_U32;
-        }
-        // protocol defaults to 65536 if not included
-        if self.receive_max != DEFAULT_RECEIVE_MAX {
-            property_remaining += PROP_SIZE_U16;
-        }
-        if self.max_packet_size.is_some() {
-            property_remaining += PROP_SIZE_U32;
-        }
-        if self.topic_alias_max.is_some() {
-            property_remaining += PROP_SIZE_U16;
-        }
-        // protocol defaults to false if not included
-        if self.req_resp_info {
-            property_remaining += PROP_SIZE_U8;
-        }
-        // protocol defaults to true if not included
-        if !self.problem_info {
-            property_remaining += PROP_SIZE_U8
-        }
-        if let Some(user_property) = self.user_props.as_ref() {
-            property_remaining += user_property.size();
-        }
-        if let Some(auth_method) = self.auth_method.as_ref() {
-            property_remaining += 3 + auth_method.len() as u32;
-        }
-        if let Some(auth_data) = self.auth_data.as_ref() {
-            property_remaining += 3 + auth_data.len() as u32;
-        }
-        property_remaining
+        self.props.size()
     }
 
     fn payload_size(&self) -> u32 {
@@ -297,34 +172,7 @@ impl Encode for Connect {
         self.encode_flags(dest);
         dest.put_u16(self.keep_alive);
         put_var_u32(prop_remaining, dest);
-        if let Some(expiry) = self.session_expiry_interval {
-            dest.put_u8(PropertyType::SessionExpiryInt as u8);
-            dest.put_u32(expiry);
-        }
-        if self.receive_max != DEFAULT_RECEIVE_MAX {
-            encode_u16_property(PropertyType::RecvMax, self.receive_max, dest);
-        }
-        if let Some(max_packet_size) = self.max_packet_size {
-            encode_u32_property(PropertyType::MaxPacketSize, max_packet_size, dest);
-        }
-        if let Some(topic_alias_max) = self.topic_alias_max {
-            encode_u16_property(PropertyType::TopicAliasMax, topic_alias_max, dest);
-        }
-        if self.req_resp_info {
-            encode_u8_property(PropertyType::ReqRespInfo, 1, dest);
-        }
-        if !self.problem_info {
-            encode_u8_property(PropertyType::ReqProblemInfo, 1, dest);
-        }
-        if let Some(user_properties) = &self.user_props {
-            user_properties.encode(dest)?;
-        }
-        if let Some(auth_method) = &self.auth_method {
-            encode_utf8_property(PropertyType::AuthMethod, auth_method, dest)?;
-        }
-        if let Some(auth_data) = &self.auth_data {
-            encode_bin_property(PropertyType::AuthData, auth_data, dest)?;
-        }
+        self.props.encode(dest)?;
         // payload
         put_utf8(&self.client_id, dest)?;
         // connect payload
@@ -349,19 +197,23 @@ impl Decode for Connect {
 
 impl Default for Connect {
     fn default() -> Self {
+
+        let mut allowed = HashSet::new();
+        allowed.insert(PropertyType::SessionExpiryInt);
+        allowed.insert(PropertyType::RecvMax);
+        allowed.insert(PropertyType::MaxPacketSize);
+        allowed.insert(PropertyType::TopicAliasMax);
+        allowed.insert(PropertyType::ReqRespInfo);
+        allowed.insert(PropertyType::ReqProblemInfo);
+        allowed.insert(PropertyType::UserProperty);
+        allowed.insert(PropertyType::AuthMethod);
+        allowed.insert(PropertyType::AuthData);
+
         Connect {
+            props: PropertyBundle::new(allowed),            
             clean_start: false,
             keep_alive: 0,
-            session_expiry_interval: None,
-            receive_max: DEFAULT_RECEIVE_MAX,
-            max_packet_size: None,
-            topic_alias_max: None,
-            req_resp_info: false,
-            problem_info: true,
-            auth_method: None,
-            auth_data: None,
             will_message: None,
-            user_props: None,
             client_id: "".to_string(),
             username: None,
             password: None,

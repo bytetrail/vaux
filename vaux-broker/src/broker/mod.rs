@@ -3,6 +3,7 @@ pub(crate) mod session;
 
 use crate::broker::session::Session;
 use futures::{SinkExt, StreamExt};
+use vaux_mqtt::property::Property;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
@@ -14,7 +15,7 @@ use tokio::time::timeout;
 use tokio_util::codec::Framed;
 use uuid::Uuid;
 use vaux_mqtt::Packet::PingResponse;
-use vaux_mqtt::{ConnAck, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, Reason};
+use vaux_mqtt::{ConnAck, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, Reason, PropertyType};
 
 use self::codec::MqttCodec;
 
@@ -92,7 +93,7 @@ impl Broker {
                     session_id = Uuid::new_v4().to_string();
                     ack.assigned_client_id = Some(session_id.clone());
                 } else {
-                    session_id = packet.client_id;
+                    session_id = packet.client_id.clone();
                 }
                 if let Some(session) = session_pool.read().await.get(&session_id) {
                     let mut session_lock = session.blocking_write();
@@ -119,8 +120,10 @@ impl Broker {
                     ack.server_keep_alive = Some(DEFAULT_KEEP_ALIVE as u16);
                 } else {
                     let mut session = active_session.as_ref().unwrap().write().await;
-                    if let Some(expiry) = packet.session_expiry_interval {
-                        session.session_expiry = Duration::from_secs(expiry as u64);
+                    if let Some(expiry) = packet.properties().get_property(&PropertyType::SessionExpiryInt){
+                        if let Property::SessionExpiryInt(expiry) = expiry {
+                            session.session_expiry = Duration::from_secs(*expiry as u64);
+                        }
                     }
                     session.set_keep_alive(packet.keep_alive as u64);
                 }
