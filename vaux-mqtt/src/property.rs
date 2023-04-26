@@ -243,6 +243,11 @@ impl PropertyBundle {
         len
     }
 
+    pub fn clear(&mut self) {
+        self.properties.clear();
+        self.user_props.clear();
+    }
+
     pub fn supports_property(&self, prop_type: &PropertyType) -> bool {
         self.supported.contains(prop_type)
     }
@@ -263,6 +268,10 @@ impl PropertyBundle {
         } else {
             panic!("Unsupported property: {:?}", prop);
         }
+    }
+
+    pub fn clear_property(&mut self, prop_type: &PropertyType) {
+        self.properties.remove(prop_type);
     }
 
     pub fn add_user_property(&mut self, key: String, value: String) {

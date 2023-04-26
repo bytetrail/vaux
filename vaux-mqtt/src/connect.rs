@@ -171,7 +171,6 @@ impl Encode for Connect {
         dest.put_u8(MQTT_PROTOCOL_VERSION);
         self.encode_flags(dest);
         dest.put_u16(self.keep_alive);
-        put_var_u32(prop_remaining, dest);
         self.props.encode(dest)?;
         // payload
         put_utf8(&self.client_id, dest)?;

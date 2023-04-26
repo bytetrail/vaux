@@ -1,5 +1,6 @@
 use bytes::BytesMut;
 
+#[allow(unused_imports)]
 use crate::{connect::*, property::Property};
 #[allow(unused_imports)]
 use crate::{
@@ -66,7 +67,7 @@ fn test_encode_session_expiry() {
 #[test]
 fn test_encode_receive_max() {
     let mut connect = Connect::default();
-    connect.properties_mut()[PropertyType::RecvMax] = Property::RecvMax(0xcafe);
+    connect.properties_mut().set_property(Property::RecvMax(0xcafe));
     let mut dest = BytesMut::new();
     test_property(connect, &mut dest, 3, PropertyType::RecvMax);
 }
@@ -98,7 +99,7 @@ fn test_encode_req_resp_info() {
 #[test]
 fn test_encode_req_problem_info() {
     let mut connect = Connect::default();
-    connect.properties_mut()[PropertyType::ReqProblemInfo] = Property::ReqProblemInfo(false);
+    connect.properties_mut().set_property(Property::ReqProblemInfo(true));
     let mut dest = BytesMut::new();
     test_property(connect, &mut dest, 2, PropertyType::ReqProblemInfo);
 }
@@ -106,17 +107,17 @@ fn test_encode_req_problem_info() {
 #[test]
 fn test_encode_auth_method() {
     let mut connect = Connect::default();
-    connect.properties_mut()[PropertyType::AuthMethod] = Property::AuthMethod("123-456-789".to_string());
+    connect.properties_mut().set_property(Property::AuthMethod("123-456-789".to_string()));
     let mut dest = BytesMut::new();
-    test_property(connect, &mut dest, 15, PropertyType::AuthMethod);
+    test_property(connect, &mut dest, 14, PropertyType::AuthMethod);
 }
 
 #[test]
 fn test_encode_auth_data() {
     let mut connect = Connect::default();
-    connect.properties_mut()[PropertyType::AuthData] = Property::AuthData(vec![1, 2, 3, 4, 5]);
+    connect.properties_mut().set_property(Property::AuthData(vec![1, 2, 3, 4, 5]));
     let mut dest = BytesMut::new();
-    test_property(connect, &mut dest, 9, PropertyType::AuthData);
+    test_property(connect, &mut dest, 8, PropertyType::AuthData);
 }
 
 #[test]
@@ -153,7 +154,7 @@ fn test_default_remaining() {
 #[test]
 fn test_receive_max_remaining() {
     let mut connect = Connect::default();
-    connect.properties_mut()[PropertyType::RecvMax] = Property::RecvMax(1024);
+    connect.properties_mut().set_property(Property::RecvMax(1024));
     let remaining = connect.size();
     let expected = CONNECT_MIN_REMAINING + 3;
     assert_eq!(
@@ -166,16 +167,20 @@ fn test_receive_max_remaining() {
 #[test]
 fn test_problem_info_remaining() {
     let mut connect = Connect::default();
-    connect.properties_mut()[PropertyType::ReqProblemInfo] = Property::ReqProblemInfo(false);
+    connect.properties_mut().set_property(Property::ReqProblemInfo(false));
     let remaining = connect.size();
+    println!("remaining:{}", remaining);
     let expected = CONNECT_MIN_REMAINING + PROP_SIZE_U8;
+    println!("Prop size:{}", connect.properties().size());
     assert_eq!(
         expected, remaining,
         "[Problem Info false] expected {} remaining size",
         expected
     );
-    connect.properties_mut()[PropertyType::ReqProblemInfo] = Property::ReqProblemInfo(true);
+    connect.properties_mut().clear_property(&PropertyType::ReqProblemInfo);
     let remaining = connect.size();
+    println!("remaining:{}", remaining);
+    println!("Prop size:{}", connect.properties().size());
     assert_eq!(
         CONNECT_MIN_REMAINING, remaining,
         "[Problem Info true] {} remaining size",
@@ -197,7 +202,7 @@ fn test_user_property_remaining() {
         "[Single Property] expected {} remaining size",
         expected
     );
-
+    connect.properties_mut().clear();
     let key = "12335".to_string();
     let value = "12345".to_string();
     let mut expected = CONNECT_MIN_REMAINING + key.len() as u32 + value.len() as u32 + PROP_ENCODE;
@@ -236,7 +241,7 @@ fn test_property(
     expected_prop_len: u32,
     property: PropertyType,
 ) {
-    let expected_len = 16 + expected_prop_len;
+    let expected_len = 15 + expected_prop_len;
     let result = connect.encode(dest);
     assert!(result.is_ok());
     assert_eq!(expected_len, dest.len() as u32, "Packet Size");
@@ -246,6 +251,6 @@ fn test_property(
         "Encoded Property Length"
     );
     assert_eq!(expected_prop_len as u8, dest[12], "Property Length");
-    assert_eq!(property as u8, dest[14], "Property Type");
+    assert_eq!(property as u8, dest[13], "Property Type");
 }
 
