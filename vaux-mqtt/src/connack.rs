@@ -25,7 +25,7 @@ impl ConnAck {
         allowed.insert(PropertyType::MaxPacketSize);
         allowed.insert(PropertyType::AssignedClientId);
         allowed.insert(PropertyType::TopicAliasMax);
-        allowed.insert(PropertyType::Reason);
+        allowed.insert(PropertyType::ReasonString);
         allowed.insert(PropertyType::SubIdAvail);
         allowed.insert(PropertyType::UserProperty);
         allowed.insert(PropertyType::WildcardSubAvail);
@@ -125,7 +125,7 @@ mod test {
         let mut connack = ConnAck::default();
         connack.reason = Reason::MalformedPacket;
         let props = connack.properties_mut();
-        props.set_property(Property::Reason(REASON.to_owned()));
+        props.set_property(Property::ReasonString(REASON.to_owned()));
         props.set_property(Property::AuthData(auth_data.clone()));
         props.set_property(Property::ShardSubAvail(false));
         assert_eq!(expected_len, connack.size());

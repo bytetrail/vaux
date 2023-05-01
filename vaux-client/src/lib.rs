@@ -7,7 +7,7 @@ use std::{
 use bytes::BytesMut;
 use vaux_mqtt::{
     QoSLevel,
-    decode, encode, publish::Publish, Connect, Packet, UserPropertyMap, property::Property, PropertyType,
+    decode, encode, publish::Publish, Connect, Packet, property::Property, PropertyType,
 };
 
 const DEFAULT_TIMEOUT: u64 = 60_000;
@@ -193,10 +193,12 @@ impl MqttClient {
         props: Option<&UserPropertyMap>,
     ) -> Result<Option<Packet>> {
         let mut publish = Publish::default();
-        publish.payload_utf8 = utf8;
+        publish.properties_mut().set_property(Property::PayloadFormat(vaux_mqtt::property::PayloadFormat::Utf8));
         publish.topic_name = Some(topic.to_string());
         publish.set_payload(Vec::from(data));
-        publish.user_props = props.cloned();
+        for (k, v) in props.unwrap_or(&UserPropertyMap::default()).iter() {
+            publish.properties_mut().add_user_property(k.clone(), v.clone());
+        }
         publish.set_qos(QoSLevel::AtLeastOnce);
         publish.packet_id = Some(101);
         self.send(Packet::Publish(publish))

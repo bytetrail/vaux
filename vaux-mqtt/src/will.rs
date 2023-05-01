@@ -3,7 +3,7 @@ use crate::codec::{
 };
 use crate::{
     put_utf8, put_var_u32, Decode, Encode, MqttCodecError, PropertyType, QoSLevel, Size,
-    UserPropertyMap, PROP_SIZE_U32, PROP_SIZE_U8,
+    PROP_SIZE_U32, PROP_SIZE_U8,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
@@ -32,7 +32,6 @@ pub struct WillMessage {
     pub response_topic: Option<String>,
     pub is_request: bool,
     pub correlation_data: Option<Vec<u8>>,
-    pub user_property: Option<UserPropertyMap>,
 }
 
 impl WillMessage {
@@ -49,7 +48,6 @@ impl WillMessage {
             response_topic: None,
             is_request: false,
             correlation_data: None,
-            user_property: None,
         }
     }
 }

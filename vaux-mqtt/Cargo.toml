@@ -13,4 +13,4 @@ tokio-util = { version = "0.7.0", features = ["codec"] }
 bytes = "1.1.0"
 uuid = { version = "1.2.1", features = ["v4", "fast-rng"] }
 prop-macro = { path = "../prop-macro" }
-
+lazy_static = "1.4"

@@ -380,54 +380,6 @@ pub(crate) fn check_property(
     Ok(())
 }
 
-pub(crate) fn encode_u8_property(property_type: PropertyType, value: u8, dest: &mut BytesMut) {
-    dest.put_u8(property_type as u8);
-    dest.put_u8(value);
-}
-
-pub(crate) fn encode_bool_property(property_type: PropertyType, value: bool, dest: &mut BytesMut) {
-    dest.put_u8(property_type as u8);
-    dest.put_u8(value as u8);
-}
-
-pub(crate) fn encode_u16_property(property_type: PropertyType, value: u16, dest: &mut BytesMut) {
-    dest.put_u8(property_type as u8);
-    dest.put_u16(value);
-}
-
-pub(crate) fn encode_u32_property(property_type: PropertyType, value: u32, dest: &mut BytesMut) {
-    dest.put_u8(property_type as u8);
-    dest.put_u32(value);
-}
-
-pub(crate) fn encode_utf8_property(
-    property_type: PropertyType,
-    value: &str,
-    dest: &mut BytesMut,
-) -> Result<(), MqttCodecError> {
-    dest.put_u8(property_type as u8);
-    put_utf8(value, dest)
-}
-
-pub(crate) fn encode_bin_property(
-    property_type: PropertyType,
-    value: &[u8],
-    dest: &mut BytesMut,
-) -> Result<(), MqttCodecError> {
-    dest.put_u8(property_type as u8);
-    put_bin(value, dest)
-}
-
-pub(crate) fn encode_var_int_property(
-    property_type: PropertyType,
-    value: u32,
-    dest: &mut BytesMut,
-) {
-    dest.put_u8(property_type as u8);
-    put_var_u32(value, dest);
-}
-
-
 #[cfg(not(feature = "pedantic"))]
 pub fn get_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {
     Ok(src.get_u8() != 0)

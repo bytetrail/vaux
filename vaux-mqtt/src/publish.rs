@@ -1,31 +1,36 @@
 use std::collections::HashSet;
-
-use bytes::{Buf, BufMut, BytesMut};
-
+use bytes::{Buf, BufMut};
 use crate::{
     codec::{
-        check_property, encode_bin_property, encode_bool_property, encode_u16_property,
-        encode_u32_property, encode_utf8_property, encode_var_int_property, get_bin, get_utf8,
-        get_var_u32, put_utf8, put_var_u32, variable_byte_int_size, PROP_SIZE_BINARY,
-        PROP_SIZE_U16, PROP_SIZE_U32, PROP_SIZE_U8, PROP_SIZE_UTF8_STRING, SIZE_UTF8_STRING,
+        get_utf8,
+        get_var_u32, put_utf8, variable_byte_int_size,
+       SIZE_UTF8_STRING,
     },
     Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyType, QoSLevel, Size,
-    UserPropertyMap,
+    property::PropertyBundle,
 };
+
+lazy_static!{
+    static ref SUPPORTED: HashSet<PropertyType> = {
+        let mut set = HashSet::new();
+        set.insert(PropertyType::PayloadFormat);
+        set.insert(PropertyType::MessageExpiry);
+        set.insert(PropertyType::TopicAlias);
+        set.insert(PropertyType::ResponseTopic);
+        set.insert(PropertyType::CorrelationData);
+        set.insert(PropertyType::SubscriptionIdentifier);
+        set.insert(PropertyType::ContentType);
+        set.insert(PropertyType::UserProperty);
+        set
+    };
+}
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Publish {
-    pub header: FixedHeader,
+    pub header: FixedHeader,    
     pub topic_name: Option<String>,
-    pub topic_alias: Option<u16>,
-    pub response_topic: Option<String>,
     pub packet_id: Option<u16>,
-    pub payload_utf8: bool,
-    pub message_expiry: Option<u32>,
-    pub correlation_data: Option<Vec<u8>>,
-    pub user_props: Option<UserPropertyMap>,
-    pub sub_id: Option<Vec<u32>>,
-    pub content_type: Option<String>,
+    props: PropertyBundle,
     payload: Option<Vec<u8>>,
 }
 
@@ -34,35 +39,23 @@ impl Default for Publish {
         Self { 
             header: FixedHeader::new(PacketType::Publish), 
             topic_name: None, 
-            topic_alias: None, 
-            response_topic: None, 
             packet_id: None, 
-            payload_utf8: false, 
-            message_expiry: None, 
-            correlation_data: None, 
-            user_props: None, 
-            sub_id: None, 
-            content_type: None, 
+            props: PropertyBundle::new(SUPPORTED.clone()),
             payload: None 
         }
     }
 }
 
 impl Publish {
+
     pub fn new_from_header(header: FixedHeader) -> Result<Self, MqttCodecError> {
         match header.packet_type {
-            PacketType::Publish =>         Ok(Publish {
+            PacketType::Publish =>        
+             Ok(Publish {
                 header,
                 topic_name: None,
-                topic_alias: None,
-                response_topic: None,
                 packet_id: None,
-                payload_utf8: false,
-                message_expiry: None,
-                correlation_data: None,
-                user_props: None,
-                sub_id: None,
-                content_type: None,
+                props: PropertyBundle::new(SUPPORTED.clone()),
                 payload: None,
             }),
         p => Err(MqttCodecError { reason: format!("unable to construct from {}", p) })
@@ -96,32 +89,12 @@ impl Publish {
         Ok(())
     }
 
-    fn decode_property(
-        &mut self,
-        property_type: PropertyType,
-        src: &mut BytesMut,
-    ) -> Result<(), MqttCodecError> {
-        match property_type {
-            PropertyType::PayloadFormat => self.payload_utf8 = src.get_u8() == 1,
-            PropertyType::MessageExpiry => self.message_expiry = Some(src.get_u32()),
-            PropertyType::TopicAlias => self.topic_alias = Some(src.get_u16()),
-            PropertyType::ResponseTopic => self.response_topic = Some(get_utf8(src)?),
-            PropertyType::CorrelationData => self.correlation_data = Some(get_bin(src)?),
-            PropertyType::SubscriptionId => {
-                if self.sub_id.is_none() {
-                    self.sub_id = Some(Vec::new());
-                }
-                self.sub_id.as_mut().unwrap().push(get_var_u32(src));
-            }
-            PropertyType::ContentType => self.content_type = Some(get_utf8(src)?),
-            prop => {
-                return Err(MqttCodecError::new(&format!(
-                    "Mqttv5 3.3.2.3 unexpected property type value: {}",
-                    prop
-                )))
-            }
-        }
-        Ok(())
+    pub fn properties(&self) -> &PropertyBundle {
+        &self.props
+    }
+
+    pub fn properties_mut(&mut self) -> &mut PropertyBundle {
+        &mut self.props
     }
 }
 
@@ -144,29 +117,7 @@ impl Size for Publish {
     }
 
     fn property_size(&self) -> u32 {
-        let mut remaining = if self.payload_utf8 { PROP_SIZE_U8 } else { 0 };
-        remaining += self.message_expiry.map_or(0, |_| PROP_SIZE_U32)
-            + self.topic_alias.map_or(0, |_| PROP_SIZE_U16)
-            + self
-                .response_topic
-                .as_ref()
-                .map_or(0, |t| PROP_SIZE_UTF8_STRING + t.len() as u32)
-            + self
-                .correlation_data
-                .as_ref()
-                .map_or(0, |c| PROP_SIZE_BINARY + c.len() as u32)
-            + self.user_props.as_ref().map_or(0, |p| p.size())
-            + self
-                .content_type
-                .as_ref()
-                .map_or(0, |c| PROP_SIZE_UTF8_STRING + c.len() as u32);
-        // handle multiple subscription identifiers
-        if let Some(v) = self.sub_id.as_ref() {
-            for id in v {
-                remaining += variable_byte_int_size(*id) + 1;
-            }
-        }
-        remaining
+        self.props.size()
     }
 
     fn payload_size(&self) -> u32 {
@@ -185,7 +136,7 @@ impl Encode for Publish {
         let property_remaining = self.property_size();
         header.set_remaining(size);
         header.encode(dest)?;
-        if self.topic_name.is_none() && self.topic_alias.is_none() {
+        if self.topic_name.is_none() && self.props.get_property(&PropertyType::TopicAlias).is_none() {
             return Err(MqttCodecError::new(
                 "MQTTv5 3.3.2.1 must have topic name or topic alias",
             ));
@@ -203,33 +154,7 @@ impl Encode for Publish {
                 ));
             }
         }
-        put_var_u32(property_remaining, dest);
-        if self.payload_utf8 {
-            encode_bool_property(PropertyType::PayloadFormat, self.payload_utf8, dest);
-        }
-        if let Some(expiry) = self.message_expiry {
-            encode_u32_property(PropertyType::MessageExpiry, expiry, dest);
-        }
-        if let Some(alias) = self.topic_alias {
-            encode_u16_property(PropertyType::TopicAlias, alias, dest);
-        }
-        if let Some(r) = self.response_topic.as_ref() {
-            encode_utf8_property(PropertyType::ResponseTopic, r, dest)?;
-        }
-        if let Some(c) = self.correlation_data.as_ref() {
-            encode_bin_property(PropertyType::CorrelationData, c, dest)?;
-        }
-        if let Some(user_props) = self.user_props.as_ref() {
-            user_props.encode(dest)?;
-        }
-        if let Some(s) = self.sub_id.as_ref() {
-            for id in s {
-                encode_var_int_property(PropertyType::SubscriptionId, *id, dest);
-            }
-        }
-        if let Some(c) = self.content_type.as_ref() {
-            encode_utf8_property(PropertyType::ContentType, c, dest)?;
-        }
+        self.props.encode(dest)?;
         if let Some(p) = self.payload.as_ref() {
             dest.put_slice(p)
         }
@@ -260,26 +185,7 @@ impl Decode for Publish {
             ));
         }
         let payload_len = src.remaining() - property_len as usize;
-        let mut properties: HashSet<PropertyType> = HashSet::new();
-        while src.remaining() > payload_len {
-            match PropertyType::try_from(src.get_u8()) {
-                Ok(property_type) => {
-                    if property_type != PropertyType::UserProperty {
-                        check_property(property_type, &mut properties)?;
-                        self.decode_property(property_type, src)?;
-                    } else {
-                        if self.user_props.is_none() {
-                            self.user_props = Some(UserPropertyMap::default());
-                        }
-                        let property_map = self.user_props.as_mut().unwrap();
-                        let key = get_utf8(src)?;
-                        let value = get_utf8(src)?;
-                        property_map.add_property(&key, &value);
-                    }
-                }
-                Err(err) => return Err(err),
-            };
-        }
+        self.props.decode(src)?;
         if src.remaining() > 0 {
             match src.get(src.len() - src.remaining()..src.remaining()) {
                 Some(p) => self.payload = Some(Vec::from(p)),
@@ -292,6 +198,8 @@ impl Decode for Publish {
 
 #[cfg(test)]
 mod test {
+    use bytes::BytesMut;
+
     use super::*;
 
     const LEN_TOPIC_NAME_LEN: u32 = 2;

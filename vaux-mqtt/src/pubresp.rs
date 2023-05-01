@@ -32,7 +32,7 @@ impl PubResp {
     fn new(resp_type: PacketType) -> Result<Self, MqttCodecError> {
 
         let mut supported = HashSet::new();
-        supported.insert(PropertyType::Reason);
+        supported.insert(PropertyType::ReasonString);
         supported.insert(PropertyType::UserProperty);
 
         match resp_type {
@@ -185,7 +185,7 @@ mod test {
         let mut pubrec = PubResp::new_pubrec();
         pubrec.packet_id = 12345;
         assert!(pubrec.set_reason(Reason::UnspecifiedErr).is_ok());
-        pubrec.properties_mut().set_property(Property::Reason("unable to comply".to_string()));
+        pubrec.properties_mut().set_property(Property::ReasonString("unable to comply".to_string()));
 
         let mut dest = BytesMut::new();
         let result = pubrec.encode(&mut dest);

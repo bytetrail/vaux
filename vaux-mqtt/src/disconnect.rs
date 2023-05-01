@@ -8,7 +8,6 @@ use crate::{
         PROP_SIZE_U32, PROP_SIZE_UTF8_STRING,
     },
     Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyType, Reason, Size,
-    UserPropertyMap,
 };
 
 const DEFAULT_DISCONNECT_REMAINING: u32 = 1;
@@ -19,7 +18,6 @@ pub struct Disconnect {
     pub session_expiry: Option<u32>,
     pub reason_desc: Option<String>,
     pub server_ref: Option<String>,
-    pub user_props: Option<UserPropertyMap>,
 }
 
 impl Disconnect {
@@ -29,7 +27,6 @@ impl Disconnect {
             session_expiry: None,
             reason_desc: None,
             server_ref: None,
-            user_props: None,
         }
     }
 
@@ -46,7 +43,7 @@ impl Disconnect {
                             PropertyType::SessionExpiryInt => {
                                 self.session_expiry = Some(src.get_u32())
                             }
-                            PropertyType::Reason => self.reason_desc = Some(get_utf8(src)?),
+                            PropertyType::ReasonString => self.reason_desc = Some(get_utf8(src)?),
                             PropertyType::ServerRef => self.server_ref = Some(get_utf8(src)?),
                             val => {
                                 return Err(MqttCodecError::new(&format!(
