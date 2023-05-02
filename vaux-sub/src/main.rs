@@ -2,7 +2,7 @@ use std::net::Ipv4Addr;
 
 use std::io::Write;
 use vaux_client::ErrorKind;
-use vaux_mqtt::{Packet, PubResp, Subscription, Subscribe};
+use vaux_mqtt::{Packet, PubResp, Subscribe, Subscription};
 
 fn main() {
     let addr: Ipv4Addr = "127.0.0.1".parse().expect("unable to create addr");
@@ -23,8 +23,8 @@ fn main() {
                     retain_as: false,
                     handling: vaux_mqtt::subscribe::RetainHandling::None,
                 },
-            ];    
-            let subscribe = Subscribe::new(1, Some(1000), filter);
+            ];
+            let subscribe = Subscribe::new(1, filter);
             match client.send(Packet::Subscribe(subscribe)) {
                 Ok(_) => {
                     if client.set_read_timeout(1000).is_err() {

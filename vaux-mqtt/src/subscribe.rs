@@ -3,22 +3,18 @@ use std::collections::HashSet;
 use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
-    codec::{
-        get_utf8, put_utf8, put_var_u32,
-        variable_byte_int_size, 
-    },
+    codec::{get_utf8, put_utf8, variable_byte_int_size},
+    property::{PacketProperties, PropertyBundle},
     Decode, Encode, FixedHeader, MqttCodecError, PropertyType, QoSLevel, Reason, Size,
-    property::{PropertyBundle, PacketProperties},
 };
 
-lazy_static!{
+lazy_static! {
     static ref SUBACK_SUPPORTED: HashSet<PropertyType> = {
         let mut supported = HashSet::new();
         supported.insert(PropertyType::ReasonString);
         supported.insert(PropertyType::UserProperty);
         supported
     };
-
     static ref SUBSCRIPTION_SUPPORTED: HashSet<PropertyType> = {
         let mut supported = HashSet::new();
         supported.insert(PropertyType::SubscriptionIdentifier);
@@ -27,11 +23,7 @@ lazy_static!{
     };
 }
 
-
-
-
 const VAR_HDR_LEN: u32 = 2;
-const PROP_ID_LEN: u32 = 1;
 
 /// MQTT v5 3.8.3.1 Subscription Options
 /// bits 4 and 5 of the subscription options hold the retain handling flag.
@@ -142,16 +134,25 @@ impl Subscription {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subscribe {
     packet_id: u16,
     props: PropertyBundle,
     payload: Vec<Subscription>,
 }
 
-impl Subscribe {
-    pub fn new(packet_id: u16, sub_id: Option<u32>, payload: Vec<Subscription>) -> Self {
+impl Default for Subscribe {
+    fn default() -> Self {
+        Self {
+            packet_id: 0,
+            props: PropertyBundle::new(SUBSCRIPTION_SUPPORTED.clone()),
+            payload: Vec::new(),
+        }
+    }
+}
 
+impl Subscribe {
+    pub fn new(packet_id: u16, payload: Vec<Subscription>) -> Self {
         Self {
             packet_id,
             props: PropertyBundle::new(SUBSCRIPTION_SUPPORTED.clone()),
@@ -195,6 +196,9 @@ impl PacketProperties for Subscribe {
         &mut self.props
     }
 
+    fn set_properties(&mut self, props: PropertyBundle) {
+        self.props = props;
+    }
 }
 
 impl Size for Subscribe {
@@ -227,7 +231,6 @@ impl Encode for Subscribe {
         hdr.set_remaining(self.size());
         hdr.encode(dest)?;
         dest.put_u16(self.packet_id);
-        put_var_u32(self.property_size(), dest);
         self.props.encode(dest)?;
         self.encode_payload(dest)?;
         Ok(())
@@ -256,7 +259,10 @@ impl Decode for Subscribe {
 mod test {
     use bytes::BytesMut;
 
-    use crate::{Decode, Encode, QoSLevel, Size, Subscribe, property::{PacketProperties, Property}};
+    use crate::{
+        property::{PacketProperties, Property},
+        Decode, Encode, QoSLevel, Size, Subscribe,
+    };
 
     use super::{RetainHandling, Subscription};
 
@@ -343,6 +349,7 @@ mod test {
         const EXPECTED_PAYLOAD_SIZE: u32 = 7;
         const EXPECTED_SIZE: u32 = 5 + EXPECTED_PAYLOAD_SIZE + EXPECTED_PROP_SIZE;
         let mut subscribe = Subscribe::default();
+        subscribe.packet_id = 42;
         let props = subscribe.properties_mut();
         props.add_user_property(USER_PROP_KEY.to_string(), USER_PROP_VALUE.to_string());
         props.set_property(Property::SubscriptionIdentifier(4096));

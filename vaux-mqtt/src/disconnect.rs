@@ -1,72 +1,52 @@
 use std::collections::HashSet;
 
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut};
 
 use crate::{
-    codec::{
-        check_property, get_utf8, get_var_u32, put_utf8, put_var_u32, variable_byte_int_size,
-        PROP_SIZE_U32, PROP_SIZE_UTF8_STRING,
-    },
-    Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyType, Reason, Size,
+    codec::variable_byte_int_size,
+    property::{PacketProperties, PropertyBundle},
+    Decode, Encode, FixedHeader, PacketType, PropertyType, Reason, Size,
 };
+
+lazy_static! {
+    static ref SUPPORTED_DISCONNECT_PROPS: HashSet<PropertyType> = {
+        let mut set = HashSet::new();
+        set.insert(PropertyType::SessionExpiryInterval);
+        set.insert(PropertyType::ReasonString);
+        set.insert(PropertyType::UserProperty);
+        set.insert(PropertyType::ServerReference);
+        set
+    };
+}
 
 const DEFAULT_DISCONNECT_REMAINING: u32 = 1;
 
 #[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct Disconnect {
     pub reason: Reason,
-    pub session_expiry: Option<u32>,
-    pub reason_desc: Option<String>,
-    pub server_ref: Option<String>,
+    props: PropertyBundle,
 }
 
 impl Disconnect {
     pub fn new(reason: Reason) -> Self {
         Self {
             reason,
-            session_expiry: None,
-            reason_desc: None,
-            server_ref: None,
+            props: PropertyBundle::new(SUPPORTED_DISCONNECT_PROPS.clone()),
         }
     }
+}
 
-    fn decode_properties(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
-        let prop_size = get_var_u32(src);
-        let read_until = src.remaining() - prop_size as usize;
-        let mut properties: HashSet<PropertyType> = HashSet::new();
-        while src.remaining() > read_until {
-            match PropertyType::try_from(src.get_u8()) {
-                Ok(property_type) => {
-                    if property_type != PropertyType::UserProperty {
-                        check_property(property_type, &mut properties)?;
-                        match property_type {
-                            PropertyType::SessionExpiryInt => {
-                                self.session_expiry = Some(src.get_u32())
-                            }
-                            PropertyType::ReasonString => self.reason_desc = Some(get_utf8(src)?),
-                            PropertyType::ServerRef => self.server_ref = Some(get_utf8(src)?),
-                            val => {
-                                return Err(MqttCodecError::new(&format!(
-                                    "unexpected property type: {}",
-                                    val
-                                )))
-                            }
-                        }
-                    } else {
-                        if self.user_props.is_none() {
-                            self.user_props = Some(UserPropertyMap::default());
-                        }
-                        let property_map = self.user_props.as_mut().unwrap();
-                        let key = get_utf8(src)?;
-                        let value = get_utf8(src)?;
-                        property_map.add_property(&key, &value);
-                    }
-                }
-                Err(e) => return Err(e),
-            }
-        }
+impl PacketProperties for Disconnect {
+    fn properties(&self) -> &PropertyBundle {
+        &self.props
+    }
 
-        Ok(())
+    fn properties_mut(&mut self) -> &mut PropertyBundle {
+        &mut self.props
+    }
+
+    fn set_properties(&mut self, props: PropertyBundle) {
+        self.props = props;
     }
 }
 
@@ -82,20 +62,7 @@ impl Size for Disconnect {
     }
 
     fn property_size(&self) -> u32 {
-        let mut remaining: u32 = 0;
-        if self.session_expiry.is_some() {
-            remaining += PROP_SIZE_U32;
-        }
-        remaining += self
-            .reason_desc
-            .as_ref()
-            .map_or(0, |r| PROP_SIZE_UTF8_STRING + r.len() as u32);
-        remaining += self.user_props.as_ref().map_or(0, |p| p.size());
-        remaining += self
-            .server_ref
-            .as_ref()
-            .map_or(0, |r| PROP_SIZE_UTF8_STRING + r.len() as u32);
-        remaining
+        self.props.size()
     }
 
     /// The Disconnect packet does not have a payload. None is returned
@@ -115,24 +82,8 @@ impl Encode for Disconnect {
             return Ok(());
         }
         header.encode(dest)?;
-        let reason = self.reason as u8;
-        dest.put_u8(reason);
-        let prop_size = self.property_size();
-        if prop_size > 0 {
-            put_var_u32(prop_size, dest);
-            if let Some(expiry) = self.session_expiry {
-                dest.put_u32(expiry);
-            }
-            if let Some(reason_desc) = self.reason_desc.as_ref() {
-                put_utf8(reason_desc, dest)?;
-            }
-            if let Some(user_props) = &self.user_props {
-                user_props.encode(dest)?;
-            }
-            if let Some(server_ref) = self.server_ref.as_ref() {
-                put_utf8(server_ref, dest)?;
-            }
-        }
+        dest.put_u8(self.reason as u8);
+        self.props.encode(dest)?;
         Ok(())
     }
 }
@@ -145,12 +96,7 @@ impl Decode for Disconnect {
             return Ok(());
         }
         self.reason = Reason::try_from(src.get_u8())?;
-        if src.remaining() > 0 {
-            let property_remaining = get_var_u32(src);
-            if property_remaining > 0 {
-                self.decode_properties(src)?;
-            }
-        }
+        self.props.decode(src)?;
         Ok(())
     }
 }
@@ -177,11 +123,15 @@ mod test {
     #[test]
     fn test_encode_reason_desc() {
         let mut disconnect = Disconnect::new(Reason::ImplementationErr);
-        disconnect.reason_desc = Some("failed".to_string());
+        disconnect
+            .properties_mut()
+            .set_property(crate::property::Property::ReasonString(
+                "failed".to_string(),
+            ));
         let mut dest = BytesMut::new();
         match disconnect.encode(&mut dest) {
             Ok(_) => {
-                assert_eq!("failed".len() + 6 as usize, dest.len());
+                assert_eq!("failed".len() + 7 as usize, dest.len());
             }
             Err(e) => panic!("Unexpected encoding error {:?}", e.to_string()),
         }
@@ -192,11 +142,15 @@ mod test {
         const SERVER_REF: &'static str = "bytetrail.org";
         const PROP_LEN: u8 = 16;
         let mut disconnect = Disconnect::new(Reason::ServerMoved);
-        disconnect.server_ref = Some(SERVER_REF.to_string());
+        disconnect
+            .properties_mut()
+            .set_property(crate::property::Property::ServerReference(
+                SERVER_REF.to_string(),
+            ));
         let mut dest = BytesMut::new();
         match disconnect.encode(&mut dest) {
             Ok(_) => {
-                assert_eq!(SERVER_REF.len() + 6 as usize, dest.len());
+                assert_eq!(PROP_LEN as usize + 4, dest.len());
                 assert_eq!(Reason::ServerMoved as u8, dest[2]);
                 assert_eq!(PROP_LEN, dest[3]);
             }

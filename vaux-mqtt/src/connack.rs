@@ -1,8 +1,6 @@
 use crate::codec::Reason;
 use crate::property::PropertyBundle;
-use crate::{
-    Decode, Encode, PropertyType, Size,
-};
+use crate::{Decode, Encode, PropertyType, Size};
 use crate::{FixedHeader, MqttCodecError, PacketType};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
@@ -15,10 +13,9 @@ pub struct ConnAck {
 }
 
 impl ConnAck {
-
-    fn allowed_properties() -> HashSet<PropertyType>{
+    fn allowed_properties() -> HashSet<PropertyType> {
         let mut allowed = HashSet::new();
-        allowed.insert(PropertyType::SessionExpiryInt);
+        allowed.insert(PropertyType::SessionExpiryInterval);
         allowed.insert(PropertyType::RecvMax);
         allowed.insert(PropertyType::MaxQoS);
         allowed.insert(PropertyType::RetainAvail);
@@ -32,7 +29,7 @@ impl ConnAck {
         allowed.insert(PropertyType::ShardSubAvail);
         allowed.insert(PropertyType::KeepAlive);
         allowed.insert(PropertyType::RespInfo);
-        allowed.insert(PropertyType::ServerRef);
+        allowed.insert(PropertyType::ServerReference);
         allowed.insert(PropertyType::AuthMethod);
         allowed.insert(PropertyType::AuthData);
 
@@ -46,8 +43,6 @@ impl ConnAck {
     pub fn properties_mut(&mut self) -> &mut PropertyBundle {
         &mut self.properties
     }
-
-
 }
 
 impl Default for ConnAck {
@@ -68,7 +63,6 @@ impl crate::Size for ConnAck {
 
     fn property_size(&self) -> u32 {
         self.properties.size()
-
     }
 
     /// Implementation of PacketSize. CONNACK packet does not have a payload.
@@ -105,7 +99,7 @@ impl Encode for ConnAck {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::property::{PropertyType, Property};
+    use crate::property::{Property, PropertyType};
     use crate::Encode;
     use bytes::BytesMut;
 
@@ -138,13 +132,13 @@ mod test {
         let mut dest = BytesMut::new();
         let mut connack = ConnAck::default();
         let props = connack.properties_mut();
-        props.set_property(Property::SessionExpiryInt(257));
+        props.set_property(Property::SessionExpiryInterval(257));
         test_property(
             connack,
             &mut dest,
             EXPECTED_LEN,
             EXPECTED_PROP_LEN,
-            PropertyType::SessionExpiryInt,
+            PropertyType::SessionExpiryInterval,
         );
         // 0x00000101 in bytes 6-9
         assert_eq!(1, dest[8]);
@@ -160,7 +154,7 @@ mod test {
             0x00,
             0x00,
             0x05,
-            PropertyType::SessionExpiryInt as u8,
+            PropertyType::SessionExpiryInterval as u8,
             0x00,
             0x00,
             0x10,
@@ -171,10 +165,14 @@ mod test {
         buf.advance(2);
         let result = connack.decode(&mut buf);
         assert!(result.is_ok());
-        assert!(connack.properties().has_property(&PropertyType::SessionExpiryInt));
-        if let Property::SessionExpiryInt(interval) = connack.properties()[PropertyType::SessionExpiryInt] {
+        assert!(connack
+            .properties()
+            .has_property(&PropertyType::SessionExpiryInterval));
+        if let Property::SessionExpiryInterval(interval) =
+            connack.properties()[PropertyType::SessionExpiryInterval]
+        {
             assert_eq!(EXPECTED_SESSION_EXPIRY, interval);
-        }   
+        }
     }
 
     #[test]
@@ -214,10 +212,13 @@ mod test {
         buf.advance(2);
         let result = connack.decode(&mut buf);
         assert!(result.is_ok(), "expected successful decode");
-        assert!(connack.properties().has_property(&PropertyType::RecvMax), "expected property to be set");
+        assert!(
+            connack.properties().has_property(&PropertyType::RecvMax),
+            "expected property to be set"
+        );
         if let Property::RecvMax(max) = connack.properties()[PropertyType::RecvMax] {
             assert_eq!(EXPECTED_RECEIVE_MAX, max);
-        }   
+        }
     }
 
     fn test_property(

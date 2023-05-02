@@ -1,10 +1,17 @@
-use std::{fmt::{Display, Formatter}, collections::{HashSet, HashMap}, ops::{Index, IndexMut}};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::{Display, Formatter},
+    ops::{Index, IndexMut},
+};
 
-use bytes::{Buf, BytesMut, BufMut};
+use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
-    codec::{get_bin, get_bool, get_utf8, get_var_u32, variable_byte_int_size, put_var_u32, put_utf8, put_bin},
-    MqttCodecError, QoSLevel, Size, Encode, Decode,
+    codec::{
+        get_bin, get_bool, get_utf8, get_var_u32, put_bin, put_utf8, put_var_u32,
+        variable_byte_int_size,
+    },
+    Decode, Encode, MqttCodecError, QoSLevel, Size,
 };
 
 /// MQTT property type. For more information on the specific property types,
@@ -49,7 +56,7 @@ pub enum PropertyType {
     ResponseTopic = 0x08,
     CorrelationData = 0x09,
     SubscriptionIdentifier = 0x0b,
-    SessionExpiryInt = 0x11,
+    SessionExpiryInterval = 0x11,
     AssignedClientId = 0x12,
     KeepAlive = 0x13,
     AuthMethod = 0x15,
@@ -58,7 +65,7 @@ pub enum PropertyType {
     WillDelay = 0x18,
     ReqRespInfo = 0x19,
     RespInfo = 0x1a,
-    ServerRef = 0x1c,
+    ServerReference = 0x1c,
     ReasonString = 0x1f,
     RecvMax = 0x21,
     TopicAliasMax = 0x22,
@@ -81,7 +88,7 @@ pub enum Property {
     ResponseTopic(String) = 0x08,
     CorrelationData(Vec<u8>) = 0x09,
     SubscriptionIdentifier(u32) = 0x0b,
-    SessionExpiryInt(u32) = 0x11,
+    SessionExpiryInterval(u32) = 0x11,
     AssignedClientId(String) = 0x12,
     KeepAlive(u16) = 0x13,
     AuthMethod(String) = 0x15,
@@ -90,7 +97,7 @@ pub enum Property {
     WillDelay(u32) = 0x18,
     ReqRespInfo(bool) = 0x19,
     RespInfo(String) = 0x1a,
-    ServerRef(String) = 0x1c,
+    ServerReference(String) = 0x1c,
     ReasonString(String) = 0x1f,
     RecvMax(u16) = 0x21,
     TopicAliasMax(u16) = 0x22,
@@ -119,7 +126,7 @@ impl From<&Property> for PropertyType {
             Property::ResponseTopic(_) => PropertyType::ResponseTopic,
             Property::CorrelationData(_) => PropertyType::CorrelationData,
             Property::SubscriptionIdentifier(_) => PropertyType::SubscriptionIdentifier,
-            Property::SessionExpiryInt(_) => PropertyType::SessionExpiryInt,
+            Property::SessionExpiryInterval(_) => PropertyType::SessionExpiryInterval,
             Property::AssignedClientId(_) => PropertyType::AssignedClientId,
             Property::KeepAlive(_) => PropertyType::KeepAlive,
             Property::AuthMethod(_) => PropertyType::AuthMethod,
@@ -128,7 +135,7 @@ impl From<&Property> for PropertyType {
             Property::WillDelay(_) => PropertyType::WillDelay,
             Property::ReqRespInfo(_) => PropertyType::ReqRespInfo,
             Property::RespInfo(_) => PropertyType::RespInfo,
-            Property::ServerRef(_) => PropertyType::ServerRef,
+            Property::ServerReference(_) => PropertyType::ServerReference,
             Property::ReasonString(_) => PropertyType::ReasonString,
             Property::RecvMax(_) => PropertyType::RecvMax,
             Property::TopicAliasMax(_) => PropertyType::TopicAliasMax,
@@ -153,7 +160,7 @@ impl Display for PropertyType {
             PropertyType::ResponseTopic => write!(f, "\"Response Topic\""),
             PropertyType::CorrelationData => write!(f, "\"Correlation Data\""),
             PropertyType::SubscriptionIdentifier => write!(f, "\"Subscription Identifier\""),
-            PropertyType::SessionExpiryInt => write!(f, "\"Session Expiry Interval\""),
+            PropertyType::SessionExpiryInterval => write!(f, "\"Session Expiry Interval\""),
             PropertyType::AssignedClientId => write!(f, "\"Assigned Client Identifier\""),
             PropertyType::KeepAlive => write!(f, "\"Server Keep Alive\""),
             PropertyType::AuthMethod => write!(f, "\"Authentication Method\""),
@@ -162,7 +169,7 @@ impl Display for PropertyType {
             PropertyType::WillDelay => write!(f, "\"Will Delay Interval\""),
             PropertyType::ReqRespInfo => write!(f, "\"Request Response Information\""),
             PropertyType::RespInfo => write!(f, "\"Response Information\""),
-            PropertyType::ServerRef => write!(f, "\"Server Reference\""),
+            PropertyType::ServerReference => write!(f, "\"Server Reference\""),
             PropertyType::ReasonString => write!(f, "\"Reason String\""),
             PropertyType::RecvMax => write!(f, "\"Receive Maximum\""),
             PropertyType::TopicAliasMax => write!(f, "\"Topic Alias Maximum\""),
@@ -189,7 +196,7 @@ impl TryFrom<u8> for PropertyType {
             0x08 => Ok(PropertyType::ResponseTopic),
             0x09 => Ok(PropertyType::CorrelationData),
             0x0b => Ok(PropertyType::SubscriptionIdentifier),
-            0x11 => Ok(PropertyType::SessionExpiryInt),
+            0x11 => Ok(PropertyType::SessionExpiryInterval),
             0x12 => Ok(PropertyType::AssignedClientId),
             0x13 => Ok(PropertyType::KeepAlive),
             0x15 => Ok(PropertyType::AuthMethod),
@@ -198,7 +205,7 @@ impl TryFrom<u8> for PropertyType {
             0x18 => Ok(PropertyType::WillDelay),
             0x19 => Ok(PropertyType::ReqRespInfo),
             0x1a => Ok(PropertyType::RespInfo),
-            0x1c => Ok(PropertyType::ServerRef),
+            0x1c => Ok(PropertyType::ServerReference),
             0x1f => Ok(PropertyType::ReasonString),
             0x21 => Ok(PropertyType::RecvMax),
             0x22 => Ok(PropertyType::TopicAliasMax),
@@ -226,7 +233,6 @@ pub struct PropertyBundle {
 }
 
 impl PropertyBundle {
-
     pub(crate) fn new(supported: HashSet<PropertyType>) -> Self {
         Self {
             supported,
@@ -236,7 +242,7 @@ impl PropertyBundle {
     }
 
     pub fn len(&self) -> usize {
-        let mut len= self.properties.len();
+        let mut len = self.properties.len();
         for item in &self.user_props {
             len += item.1.len();
         }
@@ -281,74 +287,92 @@ impl PropertyBundle {
             let value = vec![value];
             self.user_props.insert(key, value);
         }
-    }   
+    }
 }
 
 impl Index<PropertyType> for PropertyBundle {
     type Output = Property;
 
     fn index(&self, prop_type: PropertyType) -> &Self::Output {
-        &self.properties[&prop_type.into()]
+        &self.properties[&prop_type]
     }
 }
 
 impl IndexMut<PropertyType> for PropertyBundle {
     fn index_mut(&mut self, prop_type: PropertyType) -> &mut Self::Output {
-        self.properties.get_mut(&prop_type.into()).unwrap()
+        self.properties.get_mut(&prop_type).unwrap()
+    }
+}
+
+impl IntoIterator for PropertyBundle {
+    type Item = (PropertyType, Property);
+    type IntoIter = std::collections::hash_map::IntoIter<PropertyType, Property>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.user_props
+            .iter()
+            .flat_map(|(k, v)| {
+                v.iter().map(|v| {
+                    (
+                        PropertyType::UserProperty,
+                        Property::UserProperty(k.to_string(), v.to_string()),
+                    )
+                })
+            })
+            .chain(self.properties.into_iter())
+            .collect::<HashMap<PropertyType, Property>>()
+            .into_iter()
     }
 }
 
 impl Size for PropertyBundle {
     fn size(&self) -> u32 {
         let mut size = 0_u32;
-        for (_, prop) in &self.properties {
+        for prop in self.properties.values() {
             match prop {
-                Property::ContentType(p) | 
-                Property::ResponseTopic(p) |
-                Property::AssignedClientId(p) |
-                Property::AuthMethod(p) |
-                Property::RespInfo(p) |
-                Property::ServerRef(p) |
-                Property::ReasonString(p) => size += p.len() as u32 + 3,
-    
+                Property::ContentType(p)
+                | Property::ResponseTopic(p)
+                | Property::AssignedClientId(p)
+                | Property::AuthMethod(p)
+                | Property::RespInfo(p)
+                | Property::ServerReference(p)
+                | Property::ReasonString(p) => size += p.len() as u32 + 3,
+
                 Property::SubscriptionIdentifier(p) => size += variable_byte_int_size(*p) + 1,
-    
-                Property::MessageExpiry(_) |
-                Property::SessionExpiryInt(_) |
-                Property::WillDelay(_) |
-                Property::MaxPacketSize(_) => size += 5,
-            
-                Property::KeepAlive(_) |
-                Property::RecvMax(_) |
-                Property::TopicAliasMax(_) |
-                Property::TopicAlias(_) => size += 3,
-            
-                Property::PayloadFormat(_) =>  size += 2,
-    
-                Property::ReqProblemInfo(_) |
-                Property::ReqRespInfo(_) => size += 2,
+
+                Property::MessageExpiry(_)
+                | Property::SessionExpiryInterval(_)
+                | Property::WillDelay(_)
+                | Property::MaxPacketSize(_) => size += 5,
+
+                Property::KeepAlive(_)
+                | Property::RecvMax(_)
+                | Property::TopicAliasMax(_)
+                | Property::TopicAlias(_) => size += 3,
+
+                Property::PayloadFormat(_) => size += 2,
+
+                Property::ReqProblemInfo(_) | Property::ReqRespInfo(_) => size += 2,
                 Property::MaxQoS(_) => size += 2,
-    
-                Property::RetainAvail(_) |
-                Property::WildcardSubAvail(_) |
-                Property::SubIdAvail(_) |
-                Property::ShardSubAvail(_) => size += 2,
-    
-                Property::CorrelationData(p) |
-                Property::AuthData(p) => size += p.len() as u32 + 3,   
+
+                Property::RetainAvail(_)
+                | Property::WildcardSubAvail(_)
+                | Property::SubIdAvail(_)
+                | Property::ShardSubAvail(_) => size += 2,
+
+                Property::CorrelationData(p) | Property::AuthData(p) => size += p.len() as u32 + 3,
                 // ignore user properties here
-                _ => {},             
+                _ => {}
             }
         }
 
         for (key, values) in &self.user_props {
             for value in values {
                 size += value.len() as u32 + 2;
-
             }
             size += key.len() as u32 + 3;
         }
-        size        
+        size
     }
 
     fn property_size(&self) -> u32 {
@@ -363,7 +387,7 @@ impl Size for PropertyBundle {
 impl Encode for PropertyBundle {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         put_var_u32(self.size(), dest);
-        for (_, prop) in &self.properties {
+        for prop in self.properties.values() {
             prop.encode(dest)?;
         }
         for (key, values) in &self.user_props {
@@ -427,8 +451,12 @@ impl Property {
                 PropertyType::ContentType => Ok(Property::ContentType(get_utf8(src)?)),
                 PropertyType::ResponseTopic => Ok(Property::ResponseTopic(get_utf8(src)?)),
                 PropertyType::CorrelationData => Ok(Property::CorrelationData(get_bin(src)?)),
-                PropertyType::SubscriptionIdentifier => Ok(Property::SubscriptionIdentifier(get_var_u32(src))),
-                PropertyType::SessionExpiryInt => Ok(Property::SessionExpiryInt(src.get_u32())),
+                PropertyType::SubscriptionIdentifier => {
+                    Ok(Property::SubscriptionIdentifier(get_var_u32(src)))
+                }
+                PropertyType::SessionExpiryInterval => {
+                    Ok(Property::SessionExpiryInterval(src.get_u32()))
+                }
                 PropertyType::AssignedClientId => Ok(Property::AssignedClientId(get_utf8(src)?)),
                 PropertyType::KeepAlive => Ok(Property::KeepAlive(src.get_u16())),
                 PropertyType::AuthMethod => Ok(Property::AuthMethod(get_utf8(src)?)),
@@ -437,7 +465,7 @@ impl Property {
                 PropertyType::WillDelay => Ok(Property::WillDelay(src.get_u32())),
                 PropertyType::ReqRespInfo => Ok(Property::ReqRespInfo(get_bool(src)?)),
                 PropertyType::RespInfo => Ok(Property::RespInfo(get_utf8(src)?)),
-                PropertyType::ServerRef => Ok(Property::ServerRef(get_utf8(src)?)),
+                PropertyType::ServerReference => Ok(Property::ServerReference(get_utf8(src)?)),
                 PropertyType::ReasonString => Ok(Property::ReasonString(get_utf8(src)?)),
                 PropertyType::RecvMax => Ok(Property::RecvMax(src.get_u16())),
                 PropertyType::TopicAliasMax => Ok(Property::TopicAliasMax(src.get_u16())),
@@ -460,46 +488,46 @@ impl Property {
 
     pub fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
         match self {
-            Property::ContentType(p) | 
-            Property::ResponseTopic(p) |
-            Property::AssignedClientId(p) |
-            Property::AuthMethod(p) |
-            Property::RespInfo(p) |
-            Property::ServerRef(p) |
-            Property::ReasonString(p) => encode_utf8_property(self.into(), p, dest)?,
+            Property::ContentType(p)
+            | Property::ResponseTopic(p)
+            | Property::AssignedClientId(p)
+            | Property::AuthMethod(p)
+            | Property::RespInfo(p)
+            | Property::ServerReference(p)
+            | Property::ReasonString(p) => encode_utf8_property(self.into(), p, dest)?,
 
             Property::SubscriptionIdentifier(p) => encode_var_int_property(self.into(), *p, dest),
 
-            Property::MessageExpiry(p) |
-            Property::SessionExpiryInt(p) |
-            Property::WillDelay(p) |
-            Property::MaxPacketSize(p) => encode_u32_property(self.into(), *p, dest),
-        
-            Property::KeepAlive(p) |
-            Property::RecvMax(p) |
-            Property::TopicAliasMax(p) |
-            Property::TopicAlias(p) => encode_u16_property(self.into(), *p, dest),
-        
-            Property::PayloadFormat(p) =>  encode_u8_property(self.into(), *p as u8, dest),
+            Property::MessageExpiry(p)
+            | Property::SessionExpiryInterval(p)
+            | Property::WillDelay(p)
+            | Property::MaxPacketSize(p) => encode_u32_property(self.into(), *p, dest),
+
+            Property::KeepAlive(p)
+            | Property::RecvMax(p)
+            | Property::TopicAliasMax(p)
+            | Property::TopicAlias(p) => encode_u16_property(self.into(), *p, dest),
+
+            Property::PayloadFormat(p) => encode_u8_property(self.into(), *p as u8, dest),
 
             Property::MaxQoS(p) => encode_u8_property(self.into(), *p as u8, dest),
 
-            Property::ReqProblemInfo(p) |
-            Property::ReqRespInfo(p) |
-            Property::RetainAvail(p) |
-            Property::WildcardSubAvail(p) |
-            Property::SubIdAvail(p) |
-            Property::ShardSubAvail(p) => encode_bool_property(self.into(), *p, dest),
+            Property::ReqProblemInfo(p)
+            | Property::ReqRespInfo(p)
+            | Property::RetainAvail(p)
+            | Property::WildcardSubAvail(p)
+            | Property::SubIdAvail(p)
+            | Property::ShardSubAvail(p) => encode_bool_property(self.into(), *p, dest),
 
-            Property::CorrelationData(p) |
-            Property::AuthData(p) => encode_bin_property(self.into(), p, dest)?,
+            Property::CorrelationData(p) | Property::AuthData(p) => {
+                encode_bin_property(self.into(), p, dest)?
+            }
 
             Property::UserProperty(k, v) => {
                 dest.put_u8(PropertyType::from(self) as u8);
                 put_utf8(k, dest)?;
                 put_utf8(v, dest)?;
             }
-                
         }
         Ok(())
     }
@@ -508,6 +536,7 @@ impl Property {
 pub trait PacketProperties {
     fn properties(&self) -> &PropertyBundle;
     fn properties_mut(&mut self) -> &mut PropertyBundle;
+    fn set_properties(&mut self, properties: PropertyBundle);
 }
 
 pub trait PropertyEncode {
@@ -517,7 +546,6 @@ pub trait PropertyEncode {
 pub trait PropertySize {
     fn property_size_internal() -> u32;
 }
-
 
 pub(crate) fn encode_u8_property(property_type: PropertyType, value: u8, dest: &mut BytesMut) {
     dest.put_u8(property_type as u8);

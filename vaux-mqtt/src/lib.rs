@@ -21,11 +21,10 @@ pub use crate::connack::ConnAck;
 pub use crate::connect::Connect;
 pub use crate::will::WillMessage;
 pub use crate::{
-    disconnect::Disconnect, fixed::FixedHeader, 
-    pubresp::PubResp,
-    subscribe::Subscribe, subscribe::Subscription,
+    disconnect::Disconnect, fixed::FixedHeader, pubresp::PubResp, subscribe::Subscribe,
+    subscribe::Subscription,
 };
-use bytes::{BytesMut};
+use bytes::BytesMut;
 #[macro_use]
 extern crate lazy_static;
 

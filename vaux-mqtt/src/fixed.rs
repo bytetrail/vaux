@@ -5,7 +5,6 @@ use crate::{
     Encode, MqttCodecError, PacketType, QoSLevel,
 };
 
-
 const QOS_MASK: u8 = 0b_0000_0110;
 const RETAIN_MASK: u8 = 0b_0000_0001;
 
@@ -44,7 +43,7 @@ impl FixedHeader {
     }
 
     pub fn retain(&self) -> bool {
-        (self.flags & RETAIN_MASK) != 0       
+        (self.flags & RETAIN_MASK) != 0
     }
 
     pub fn set_qos(&mut self, qos: QoSLevel) {
@@ -61,8 +60,8 @@ impl FixedHeader {
 
     pub fn set_flags(&mut self, flags: u8) -> Result<(), MqttCodecError> {
         if flags & QOS_MASK == QOS_MASK {
-            return Err(MqttCodecError{
-                    reason: "unsupported QOS level".to_string()
+            return Err(MqttCodecError {
+                reason: "unsupported QOS level".to_string(),
             });
         }
         self.flags = flags;

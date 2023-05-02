@@ -6,8 +6,10 @@ use std::{
 
 use bytes::BytesMut;
 use vaux_mqtt::{
-    QoSLevel,
-    decode, encode, publish::Publish, Connect, Packet, property::Property, PropertyType,
+    decode, encode,
+    property::{PacketProperties, Property, PropertyBundle},
+    publish::Publish,
+    Connect, Packet, PropertyType, QoSLevel,
 };
 
 const DEFAULT_TIMEOUT: u64 = 60_000;
@@ -107,7 +109,10 @@ impl MqttClient {
                                     match packet {
                                         Packet::ConnAck(connack) => {
                                             if self.client_id.is_none() {
-                                                match connack.properties().get_property(&PropertyType::AssignedClientId) {
+                                                match connack
+                                                    .properties()
+                                                    .get_property(&PropertyType::AssignedClientId)
+                                                {
                                                     Some(Property::AssignedClientId(id)) => {
                                                         self.client_id = Some(id.to_owned());
                                                     }
@@ -167,18 +172,18 @@ impl MqttClient {
         &mut self,
         topic: &str,
         data: &[u8],
-        props: Option<&UserPropertyMap>,
+        props: Option<&PropertyBundle>,
     ) -> Result<Option<Packet>> {
-        self.publish(topic, false, data, props)
+        self.publish(topic, data, props)
     }
 
     pub fn send_utf8(
         &mut self,
         topic: &str,
         message: &str,
-        props: Option<&UserPropertyMap>,
+        props: Option<&PropertyBundle>,
     ) -> Result<Option<Packet>> {
-        self.publish(topic, true, message.as_bytes(), props)
+        self.publish(topic, message.as_bytes(), props)
     }
 
     /// Basic send of a UTF8 encoded payload. The message is sent with QoS
@@ -188,19 +193,22 @@ impl MqttClient {
     pub fn publish(
         &mut self,
         topic: &str,
-        utf8: bool,
         data: &[u8],
-        props: Option<&UserPropertyMap>,
+        props: Option<&PropertyBundle>,
     ) -> Result<Option<Packet>> {
         let mut publish = Publish::default();
-        publish.properties_mut().set_property(Property::PayloadFormat(vaux_mqtt::property::PayloadFormat::Utf8));
+        publish
+            .properties_mut()
+            .set_property(Property::PayloadFormat(
+                vaux_mqtt::property::PayloadFormat::Utf8,
+            ));
         publish.topic_name = Some(topic.to_string());
         publish.set_payload(Vec::from(data));
-        for (k, v) in props.unwrap_or(&UserPropertyMap::default()).iter() {
-            publish.properties_mut().add_user_property(k.clone(), v.clone());
-        }
         publish.set_qos(QoSLevel::AtLeastOnce);
         publish.packet_id = Some(101);
+        if let Some(props) = props {
+            publish.set_properties(props.clone());
+        }
         self.send(Packet::Publish(publish))
     }
 

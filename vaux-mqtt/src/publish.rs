@@ -1,16 +1,12 @@
-use std::collections::HashSet;
-use bytes::{Buf, BufMut};
 use crate::{
-    codec::{
-        get_utf8,
-        get_var_u32, put_utf8, variable_byte_int_size,
-       SIZE_UTF8_STRING,
-    },
+    codec::{get_utf8, put_utf8, variable_byte_int_size, SIZE_UTF8_STRING},
+    property::{PacketProperties, PropertyBundle},
     Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyType, QoSLevel, Size,
-    property::PropertyBundle,
 };
+use bytes::{Buf, BufMut};
+use std::collections::HashSet;
 
-lazy_static!{
+lazy_static! {
     static ref SUPPORTED: HashSet<PropertyType> = {
         let mut set = HashSet::new();
         set.insert(PropertyType::PayloadFormat);
@@ -27,7 +23,7 @@ lazy_static!{
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Publish {
-    pub header: FixedHeader,    
+    pub header: FixedHeader,
     pub topic_name: Option<String>,
     pub packet_id: Option<u16>,
     props: PropertyBundle,
@@ -36,34 +32,33 @@ pub struct Publish {
 
 impl Default for Publish {
     fn default() -> Self {
-        Self { 
-            header: FixedHeader::new(PacketType::Publish), 
-            topic_name: None, 
-            packet_id: None, 
+        Self {
+            header: FixedHeader::new(PacketType::Publish),
+            topic_name: None,
+            packet_id: None,
             props: PropertyBundle::new(SUPPORTED.clone()),
-            payload: None 
+            payload: None,
         }
     }
 }
 
 impl Publish {
-
     pub fn new_from_header(header: FixedHeader) -> Result<Self, MqttCodecError> {
         match header.packet_type {
-            PacketType::Publish =>        
-             Ok(Publish {
+            PacketType::Publish => Ok(Publish {
                 header,
                 topic_name: None,
                 packet_id: None,
                 props: PropertyBundle::new(SUPPORTED.clone()),
                 payload: None,
             }),
-        p => Err(MqttCodecError { reason: format!("unable to construct from {}", p) })
-
+            p => Err(MqttCodecError {
+                reason: format!("unable to construct from {}", p),
+            }),
         }
     }
 
-    pub fn qos(&self) -> QoSLevel{
+    pub fn qos(&self) -> QoSLevel {
         self.header.qos()
     }
 
@@ -95,6 +90,18 @@ impl Publish {
 
     pub fn properties_mut(&mut self) -> &mut PropertyBundle {
         &mut self.props
+    }
+}
+
+impl PacketProperties for Publish {
+    fn properties(&self) -> &PropertyBundle {
+        &self.props
+    }
+    fn properties_mut(&mut self) -> &mut PropertyBundle {
+        &mut self.props
+    }
+    fn set_properties(&mut self, properties: PropertyBundle) {
+        self.props = properties;
     }
 }
 
@@ -133,10 +140,10 @@ impl Encode for Publish {
     fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
         let mut header = self.header.clone();
         let size = self.size();
-        let property_remaining = self.property_size();
         header.set_remaining(size);
         header.encode(dest)?;
-        if self.topic_name.is_none() && self.props.get_property(&PropertyType::TopicAlias).is_none() {
+        if self.topic_name.is_none() && self.props.get_property(&PropertyType::TopicAlias).is_none()
+        {
             return Err(MqttCodecError::new(
                 "MQTTv5 3.3.2.1 must have topic name or topic alias",
             ));
@@ -173,18 +180,6 @@ impl Decode for Publish {
         if self.header.qos() != QoSLevel::AtMostOnce {
             self.packet_id = Some(src.get_u16());
         }
-        let property_len = get_var_u32(src);
-        if property_len > src.remaining() as u32 {
-            return Err(MqttCodecError::new(
-                "MQTTv5 2.2.2.1 property length exceeds packet size",
-            ));
-        }
-        if property_len == 1 {
-            return Err(MqttCodecError::new(
-                "MQTTv5 2.2.2.1 invalid property length",
-            ));
-        }
-        let payload_len = src.remaining() - property_len as usize;
         self.props.decode(src)?;
         if src.remaining() > 0 {
             match src.get(src.len() - src.remaining()..src.remaining()) {
@@ -278,7 +273,7 @@ mod test {
         const EXPECTED_REMAINING: u32 =
             LEN_TOPIC_NAME_LEN + LEN_TOPIC_NAME + LEN_PROP_LEN + LEN_PAYLOAD;
         const EXPECTED_LEN: u32 = EXPECTED_REMAINING + 2;
-        let hdr = crate::FixedHeader::new(PacketType::Publish); 
+        let hdr = crate::FixedHeader::new(PacketType::Publish);
         match Publish::new_from_header(hdr) {
             Ok(mut publish) => {
                 let mut dest = BytesMut::new();

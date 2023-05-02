@@ -1,11 +1,8 @@
-use crate::codec::{
-    get_bin, get_utf8, put_bin,
-    MqttCodecError, 
-};
-use crate::property::{PropertySize, PropertyBundle};
+use crate::codec::{get_bin, get_utf8, put_bin, MqttCodecError};
+use crate::property::{PropertyBundle, PropertySize};
 use crate::{
-    put_utf8, put_var_u32, variable_byte_int_size, Decode, Encode, FixedHeader, PacketType,
-    PropertyType, QoSLevel, Size, WillMessage,
+    put_utf8, variable_byte_int_size, Decode, Encode, FixedHeader, PacketType, PropertyType,
+    QoSLevel, Size, WillMessage,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use prop_macro::PropertySize;
@@ -38,7 +35,6 @@ pub struct Connect {
 }
 
 impl Connect {
-
     pub fn properties(&self) -> &PropertyBundle {
         &self.props
     }
@@ -102,7 +98,7 @@ impl Connect {
         self.keep_alive = src.get_u16();
         if src.remaining() > 0 {
             self.props.decode(src)?;
-        }       
+        }
         self.decode_payload(src, username, password)?;
         Ok(())
     }
@@ -196,9 +192,8 @@ impl Decode for Connect {
 
 impl Default for Connect {
     fn default() -> Self {
-
         let mut allowed = HashSet::new();
-        allowed.insert(PropertyType::SessionExpiryInt);
+        allowed.insert(PropertyType::SessionExpiryInterval);
         allowed.insert(PropertyType::RecvMax);
         allowed.insert(PropertyType::MaxPacketSize);
         allowed.insert(PropertyType::TopicAliasMax);
@@ -209,7 +204,7 @@ impl Default for Connect {
         allowed.insert(PropertyType::AuthData);
 
         Connect {
-            props: PropertyBundle::new(allowed),            
+            props: PropertyBundle::new(allowed),
             clean_start: false,
             keep_alive: 0,
             will_message: None,
