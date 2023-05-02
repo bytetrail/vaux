@@ -131,7 +131,7 @@ impl Broker {
                         .properties()
                         .get_property(&PropertyType::SessionExpiryInterval)
                     {
-                            session.session_expiry = Duration::from_secs(*expiry as u64);
+                        session.session_expiry = Duration::from_secs(*expiry as u64);
                     }
                     session.set_keep_alive(packet.keep_alive as u64);
                 }

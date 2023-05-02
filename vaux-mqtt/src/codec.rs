@@ -1,17 +1,9 @@
 use crate::publish::Publish;
 use crate::subscribe::SubAck;
-use crate::{
-    ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, PropertyType, PubResp, Subscribe,
-};
+use crate::{ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, PubResp, Subscribe};
 use bytes::{Buf, BufMut, BytesMut};
-use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 
-pub(crate) const PROP_SIZE_U32: u32 = 5;
-pub(crate) const PROP_SIZE_U16: u32 = 3;
-pub(crate) const PROP_SIZE_U8: u32 = 2;
-pub(crate) const PROP_SIZE_UTF8_STRING: u32 = 3;
-pub(crate) const PROP_SIZE_BINARY: u32 = 3;
 pub(crate) const SIZE_UTF8_STRING: u32 = 2;
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
 pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
@@ -213,7 +205,7 @@ impl TryFrom<u8> for QoSLevel {
 pub enum Packet {
     PingRequest(FixedHeader),
     PingResponse(FixedHeader),
-    Connect(Connect),
+    Connect(Box<Connect>),
     ConnAck(ConnAck),
     Publish(Publish),
     PubAck(PubResp),
@@ -282,7 +274,7 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<Packet>, MqttCodecError> {
                 PacketType::Connect => {
                     let mut connect = Connect::default();
                     connect.decode(src)?;
-                    Ok(Some(Packet::Connect(connect)))
+                    Ok(Some(Packet::Connect(Box::new(connect))))
                 }
                 PacketType::Publish => {
                     let mut publish = Publish::new_from_header(packet_header)?;

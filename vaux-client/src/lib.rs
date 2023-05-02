@@ -91,7 +91,7 @@ impl MqttClient {
         if let Some(id) = self.client_id.as_ref() {
             connect.client_id = id.to_owned();
         }
-        let connect_packet = Packet::Connect(connect);
+        let connect_packet = Packet::Connect(Box::new(connect));
         match TcpStream::connect_timeout(&self.addr, timeout) {
             Ok(stream) => {
                 self.connection = Some(stream);

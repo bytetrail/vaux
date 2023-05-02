@@ -1,11 +1,9 @@
 use bytes::BytesMut;
 
 #[allow(unused_imports)]
-use crate::{
-    codec::PROP_SIZE_U8, property::PropertySize, Encode, PropertyType, QoSLevel, Size, WillMessage,
-};
-#[allow(unused_imports)]
 use crate::{connect::*, property::Property};
+#[allow(unused_imports)]
+use crate::{property::PropertySize, Encode, PropertyType, QoSLevel, Size, WillMessage};
 
 #[allow(dead_code)]
 const CONNECT_MIN_REMAINING: u32 = 13;
@@ -189,7 +187,7 @@ fn test_problem_info_remaining() {
         .set_property(Property::ReqProblemInfo(false));
     let remaining = connect.size();
     println!("remaining:{}", remaining);
-    let expected = CONNECT_MIN_REMAINING + PROP_SIZE_U8;
+    let expected = CONNECT_MIN_REMAINING + 2;
     println!("Prop size:{}", connect.properties().size());
     assert_eq!(
         expected, remaining,

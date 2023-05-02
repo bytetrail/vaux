@@ -77,22 +77,21 @@ impl PubResp {
 
     fn supported_reason(resp_type: &PacketType, reason: &Reason) -> bool {
         match resp_type {
-            PacketType::PubAck | PacketType::PubRec => match reason {
+            PacketType::PubAck | PacketType::PubRec => matches!(
+                reason,
                 Reason::Success
-                | Reason::NoSubscribers
-                | Reason::UnspecifiedErr
-                | Reason::ImplementationErr
-                | Reason::NotAuthorized
-                | Reason::InvalidTopicName
-                | Reason::PacketIdInUse
-                | Reason::QuotaExceeded
-                | Reason::PayloadFormatErr => true,
-                _ => false,
-            },
-            PacketType::PubComp | PacketType::PubRel => match reason {
-                Reason::Success | Reason::PacketIdInUse => true,
-                _ => false,
-            },
+                    | Reason::NoSubscribers
+                    | Reason::UnspecifiedErr
+                    | Reason::ImplementationErr
+                    | Reason::NotAuthorized
+                    | Reason::InvalidTopicName
+                    | Reason::PacketIdInUse
+                    | Reason::QuotaExceeded
+                    | Reason::PayloadFormatErr
+            ),
+            PacketType::PubComp | PacketType::PubRel => {
+                matches!(reason, Reason::Success | Reason::PacketIdInUse)
+            }
             _ => false,
         }
     }
@@ -136,7 +135,7 @@ impl Encode for PubResp {
         header.set_remaining(self.size());
         header.encode(dest)?;
         dest.put_u16(self.packet_id);
-        if self.reason == Reason::Success && self.props.len() == 0 {
+        if self.reason == Reason::Success && self.props.is_empty() {
             Ok(())
         } else {
             dest.put_u8(self.reason as u8);

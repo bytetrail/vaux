@@ -21,7 +21,7 @@ impl Decoder for MqttCodec {
                     PacketType::Connect => {
                         let mut connect = Connect::default();
                         connect.decode(src)?;
-                        Ok(Some(Packet::Connect(connect)))
+                        Ok(Some(Packet::Connect(Box::new(connect))))
                     }
                     PacketType::Publish => Ok(None),
                     PacketType::ConnAck => {

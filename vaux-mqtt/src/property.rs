@@ -249,6 +249,10 @@ impl PropertyBundle {
         len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.properties.is_empty() && self.user_props.is_empty()
+    }
+
     pub fn clear(&mut self) {
         self.properties.clear();
         self.user_props.clear();
@@ -281,11 +285,11 @@ impl PropertyBundle {
     }
 
     pub fn add_user_property(&mut self, key: String, value: String) {
-        if self.user_props.contains_key(&key) {
-            self.user_props.get_mut(&key).unwrap().push(value)
-        } else {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.user_props.entry(key.clone()) {
             let value = vec![value];
-            self.user_props.insert(key, value);
+            e.insert(value);
+        } else {
+            self.user_props.get_mut(&key).unwrap().push(value)
         }
     }
 }
