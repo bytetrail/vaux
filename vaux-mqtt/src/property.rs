@@ -284,6 +284,14 @@ impl PropertyBundle {
         self.properties.remove(prop_type);
     }
 
+    pub fn user_properties(&self) -> &HashMap<String, Vec<String>> {
+        &self.user_props
+    }
+
+    pub fn user_property(&self, key: &str) -> Option<&Vec<String>> {
+        self.user_props.get(key)
+    }
+
     pub fn add_user_property(&mut self, key: String, value: String) {
         if let std::collections::hash_map::Entry::Vacant(e) = self.user_props.entry(key.clone()) {
             let value = vec![value];
