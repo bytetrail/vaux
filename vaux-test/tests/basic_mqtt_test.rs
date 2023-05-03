@@ -28,7 +28,7 @@ fn test_basic_connect() {
     request.client_id = Uuid::new_v4().to_string();
     let ack = ConnAck::default();
     test_basic(
-        Packet::Connect(request),
+        Packet::Connect(Box::new(request)),
         CONNACK_RESP_LEN,
         &Packet::ConnAck(ack),
         true,
@@ -42,13 +42,15 @@ fn test_broker_assigned_id() {
     let ack = ConnAck::default();
     let packet = Packet::ConnAck(ack);
     let result = test_basic(
-        Packet::Connect(request),
+        Packet::Connect(Box::new(request)),
         EXPECTED_CONNACK_LEN,
         &packet,
         false,
     );
     if let Some(Packet::ConnAck(ack)) = result {
-        assert!(ack.properties().has_property(&vaux_mqtt::PropertyType::AssignedClientId));
+        assert!(ack
+            .properties()
+            .has_property(&vaux_mqtt::PropertyType::AssignedClientId));
     }
 }
 
@@ -59,7 +61,9 @@ fn test_existing_session() {
     let result = client.connect(Some(&client_id));
     assert!(result.is_some(), "expected connection acknowledge");
     let ack = result.unwrap();
-    assert!(!ack.properties().has_property(&vaux_mqtt::PropertyType::AssignedClientId));
+    assert!(!ack
+        .properties()
+        .has_property(&vaux_mqtt::PropertyType::AssignedClientId));
     assert_eq!(false, ack.session_present, "expected no existing session");
     client.disconnect();
     let ack = client.connect(Some(&client_id)).unwrap();
@@ -145,7 +149,7 @@ impl MQTTClient {
         if let Some(id) = id {
             connect.client_id = id.to_string();
         }
-        let connect_packet = Packet::Connect(connect);
+        let connect_packet = Packet::Connect(Box::new(connect));
         match TcpStream::connect((DEFAULT_HOST, DEFAULT_PORT)) {
             Ok(stream) => {
                 self.connection = Some(stream);

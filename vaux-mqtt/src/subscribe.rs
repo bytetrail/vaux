@@ -1,16 +1,29 @@
+use std::collections::HashSet;
+
 use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
-    codec::{
-        encode_var_int_property, get_utf8, get_var_u32, put_utf8, put_var_u32,
-        variable_byte_int_size, PROP_SIZE_UTF8_STRING,
-    },
+    codec::{get_utf8, put_utf8, variable_byte_int_size},
+    property::{PacketProperties, PropertyBundle},
     Decode, Encode, FixedHeader, MqttCodecError, PropertyType, QoSLevel, Reason, Size,
-    UserPropertyMap,
 };
 
+lazy_static! {
+    static ref SUBACK_SUPPORTED: HashSet<PropertyType> = {
+        let mut supported = HashSet::new();
+        supported.insert(PropertyType::ReasonString);
+        supported.insert(PropertyType::UserProperty);
+        supported
+    };
+    static ref SUBSCRIPTION_SUPPORTED: HashSet<PropertyType> = {
+        let mut supported = HashSet::new();
+        supported.insert(PropertyType::SubscriptionIdentifier);
+        supported.insert(PropertyType::UserProperty);
+        supported
+    };
+}
+
 const VAR_HDR_LEN: u32 = 2;
-const PROP_ID_LEN: u32 = 1;
 
 /// MQTT v5 3.8.3.1 Subscription Options
 /// bits 4 and 5 of the subscription options hold the retain handling flag.
@@ -44,8 +57,7 @@ impl TryFrom<u8> for RetainHandling {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SubAck {
     packet_id: u16,
-    reason_desc: Option<String>,
-    user_props: Option<UserPropertyMap>,
+    props: PropertyBundle,
     sub_reason: Vec<Reason>,
 }
 
@@ -56,10 +68,7 @@ impl Size for SubAck {
     }
 
     fn property_size(&self) -> u32 {
-        self.reason_desc
-            .as_ref()
-            .map_or(0, |d| PROP_SIZE_UTF8_STRING + d.len() as u32)
-            + self.user_props.as_ref().map_or(0, |u| u.property_size())
+        self.props.size()
     }
 
     fn payload_size(&self) -> u32 {
@@ -75,46 +84,11 @@ impl Decode for SubAck {
             ));
         }
         self.packet_id = src.get_u16();
-        let prop_len = get_var_u32(src);
-        if src.remaining() < prop_len as usize {
-            return Err(MqttCodecError::new(
-                "MQTTv5 3.9.3 insufficient data for SUBACK properties",
-            ));
-        }
-        let read_until = src.remaining() - prop_len as usize;
-        let mut reason_id_prop: bool = false;
-        while src.remaining() > read_until {
-            match PropertyType::try_from(src.get_u8()) {
-                Ok(property_type) => {
-                    if property_type != PropertyType::UserProperty {
-                        match property_type {
-                            PropertyType::Reason => {
-                                if reason_id_prop {
-                                    return Err(MqttCodecError::new(
-                                        "MQTTv5 3.9.2.1.2 reason description can appear only once",
-                                    ));
-                                }
-                                self.reason_desc = Some(get_utf8(src)?);
-                                reason_id_prop = true;
-                            }
-                            _ => {
-                                return Err(MqttCodecError::new(
-                                    "MQTTv5 3.8.2.1 unexpected property",
-                                ))
-                            }
-                        }
-                    } else {
-                        if self.user_props.is_none() {
-                            self.user_props = Some(UserPropertyMap::default());
-                        }
-                        let property_map = self.user_props.as_mut().unwrap();
-                        let key = get_utf8(src)?;
-                        let value = get_utf8(src)?;
-                        property_map.add_property(&key, &value);
-                    }
-                }
-                Err(_) => todo!(),
-            }
+        self.props.decode(src)?;
+        // decode the reason codes
+        while src.has_remaining() {
+            let reason = Reason::try_from(src.get_u8())?;
+            self.sub_reason.push(reason);
         }
         Ok(())
     }
@@ -160,20 +134,28 @@ impl Subscription {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subscribe {
     packet_id: u16,
-    pub sub_id: Option<u32>,
-    pub user_props: Option<UserPropertyMap>,
+    props: PropertyBundle,
     payload: Vec<Subscription>,
 }
 
+impl Default for Subscribe {
+    fn default() -> Self {
+        Self {
+            packet_id: 0,
+            props: PropertyBundle::new(SUBSCRIPTION_SUPPORTED.clone()),
+            payload: Vec::new(),
+        }
+    }
+}
+
 impl Subscribe {
-    pub fn new(packet_id: u16, sub_id: Option<u32>, payload: Vec<Subscription>) -> Self {
+    pub fn new(packet_id: u16, payload: Vec<Subscription>) -> Self {
         Self {
             packet_id,
-            sub_id,
-            user_props: None,
+            props: PropertyBundle::new(SUBSCRIPTION_SUPPORTED.clone()),
             payload,
         }
     }
@@ -205,6 +187,20 @@ impl Subscribe {
     }
 }
 
+impl PacketProperties for Subscribe {
+    fn properties(&self) -> &PropertyBundle {
+        &self.props
+    }
+
+    fn properties_mut(&mut self) -> &mut PropertyBundle {
+        &mut self.props
+    }
+
+    fn set_properties(&mut self, props: PropertyBundle) {
+        self.props = props;
+    }
+}
+
 impl Size for Subscribe {
     fn size(&self) -> u32 {
         let prop_size = self.property_size();
@@ -212,9 +208,7 @@ impl Size for Subscribe {
     }
 
     fn property_size(&self) -> u32 {
-        self.sub_id
-            .map_or(0, |id| PROP_ID_LEN + variable_byte_int_size(id))
-            + self.user_props.as_ref().map_or(0, |p| p.size())
+        self.props.size()
     }
 
     fn payload_size(&self) -> u32 {
@@ -237,13 +231,7 @@ impl Encode for Subscribe {
         hdr.set_remaining(self.size());
         hdr.encode(dest)?;
         dest.put_u16(self.packet_id);
-        put_var_u32(self.property_size(), dest);
-        if let Some(sub_id) = self.sub_id {
-            encode_var_int_property(PropertyType::SubscriptionId, sub_id, dest);
-        }
-        if let Some(props) = self.user_props.as_ref() {
-            props.encode(dest)?;
-        }
+        self.props.encode(dest)?;
         self.encode_payload(dest)?;
         Ok(())
     }
@@ -257,47 +245,7 @@ impl Decode for Subscribe {
             ));
         }
         self.packet_id = src.get_u16();
-        let prop_len = get_var_u32(src);
-        if src.remaining() < prop_len as usize {
-            return Err(MqttCodecError::new(
-                "MQTTv5 3.8.2 insufficient data for SUBSCRIBE properties",
-            ));
-        }
-        let read_until = src.remaining() - prop_len as usize;
-        let mut sub_id_prop: bool = false;
-        while src.remaining() > read_until {
-            match PropertyType::try_from(src.get_u8()) {
-                Ok(property_type) => {
-                    if property_type != PropertyType::UserProperty {
-                        match property_type {
-                            PropertyType::SubscriptionId => {
-                                if sub_id_prop {
-                                    return Err(MqttCodecError::new(
-                                        "MQTTv5 3.8.2.1.2 subscription identifier repeated",
-                                    ));
-                                }
-                                sub_id_prop = true;
-                                self.sub_id = Some(get_var_u32(src));
-                            }
-                            _ => {
-                                return Err(MqttCodecError::new(
-                                    "MQTTv5 3.8.2.1 unexpected property",
-                                ))
-                            }
-                        }
-                    } else {
-                        if self.user_props.is_none() {
-                            self.user_props = Some(UserPropertyMap::default());
-                        }
-                        let property_map = self.user_props.as_mut().unwrap();
-                        let key = get_utf8(src)?;
-                        let value = get_utf8(src)?;
-                        property_map.add_property(&key, &value);
-                    }
-                }
-                Err(e) => return Err(e),
-            }
-        }
+        self.props.decode(src)?;
         while src.remaining() != 0 {
             let mut s = Subscription::default();
             s.decode(src)?;
@@ -311,7 +259,10 @@ impl Decode for Subscribe {
 mod test {
     use bytes::BytesMut;
 
-    use crate::{Decode, Encode, QoSLevel, Size, Subscribe, UserPropertyMap};
+    use crate::{
+        property::{PacketProperties, Property},
+        Decode, Encode, QoSLevel, Size, Subscribe,
+    };
 
     use super::{RetainHandling, Subscription};
 
@@ -398,11 +349,10 @@ mod test {
         const EXPECTED_PAYLOAD_SIZE: u32 = 7;
         const EXPECTED_SIZE: u32 = 5 + EXPECTED_PAYLOAD_SIZE + EXPECTED_PROP_SIZE;
         let mut subscribe = Subscribe::default();
-        subscribe.packet_id = 101;
-        let mut usr = UserPropertyMap::default();
-        usr.add_property(USER_PROP_KEY, USER_PROP_VALUE);
-        subscribe.user_props = Some(usr);
-        subscribe.sub_id = Some(4096);
+        subscribe.packet_id = 42;
+        let props = subscribe.properties_mut();
+        props.add_user_property(USER_PROP_KEY.to_string(), USER_PROP_VALUE.to_string());
+        props.set_property(Property::SubscriptionIdentifier(4096));
         let subscription = Subscription {
             filter: "test".to_string(),
             qos: QoSLevel::AtLeastOnce,

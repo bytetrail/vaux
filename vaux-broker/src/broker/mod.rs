@@ -3,7 +3,6 @@ pub(crate) mod session;
 
 use crate::broker::session::Session;
 use futures::{SinkExt, StreamExt};
-use vaux_mqtt::property::Property;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
@@ -14,8 +13,11 @@ use tokio::sync::RwLock;
 use tokio::time::timeout;
 use tokio_util::codec::Framed;
 use uuid::Uuid;
+use vaux_mqtt::property::Property;
 use vaux_mqtt::Packet::PingResponse;
-use vaux_mqtt::{ConnAck, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, Reason, PropertyType};
+use vaux_mqtt::{
+    ConnAck, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, PropertyType, Reason,
+};
 
 use self::codec::MqttCodec;
 
@@ -91,8 +93,9 @@ impl Broker {
                 // handle the client id
                 if packet.client_id.is_empty() {
                     session_id = Uuid::new_v4().to_string();
-                    ack.properties_mut().set_property(vaux_mqtt::property::Property::AssignedClientId(
-                        session_id.clone()));
+                    ack.properties_mut().set_property(
+                        vaux_mqtt::property::Property::AssignedClientId(session_id.clone()),
+                    );
                 } else {
                     session_id = packet.client_id.clone();
                 }
@@ -118,14 +121,17 @@ impl Broker {
                     active_session = Some(session);
                 }
                 if packet.keep_alive > DEFAULT_KEEP_ALIVE as u16 {
-                    ack.properties_mut().set_property(vaux_mqtt::property::Property::KeepAlive(
-                        DEFAULT_KEEP_ALIVE as u16));
+                    ack.properties_mut()
+                        .set_property(vaux_mqtt::property::Property::KeepAlive(
+                            DEFAULT_KEEP_ALIVE as u16,
+                        ));
                 } else {
                     let mut session = active_session.as_ref().unwrap().write().await;
-                    if let Some(expiry) = packet.properties().get_property(&PropertyType::SessionExpiryInt){
-                        if let Property::SessionExpiryInt(expiry) = expiry {
-                            session.session_expiry = Duration::from_secs(*expiry as u64);
-                        }
+                    if let Some(Property::SessionExpiryInterval(expiry)) = packet
+                        .properties()
+                        .get_property(&PropertyType::SessionExpiryInterval)
+                    {
+                        session.session_expiry = Duration::from_secs(*expiry as u64);
                     }
                     session.set_keep_alive(packet.keep_alive as u64);
                 }

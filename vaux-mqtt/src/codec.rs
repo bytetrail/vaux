@@ -1,15 +1,9 @@
 use crate::publish::Publish;
 use crate::subscribe::SubAck;
-use crate::{ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, PropertyType, PubResp, Subscribe};
+use crate::{ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, PubResp, Subscribe};
 use bytes::{Buf, BufMut, BytesMut};
-use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 
-pub(crate) const PROP_SIZE_U32: u32 = 5;
-pub(crate) const PROP_SIZE_U16: u32 = 3;
-pub(crate) const PROP_SIZE_U8: u32 = 2;
-pub(crate) const PROP_SIZE_UTF8_STRING: u32 = 3;
-pub(crate) const PROP_SIZE_BINARY: u32 = 3;
 pub(crate) const SIZE_UTF8_STRING: u32 = 2;
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
 pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
@@ -211,7 +205,7 @@ impl TryFrom<u8> for QoSLevel {
 pub enum Packet {
     PingRequest(FixedHeader),
     PingResponse(FixedHeader),
-    Connect(Connect),
+    Connect(Box<Connect>),
     ConnAck(ConnAck),
     Publish(Publish),
     PubAck(PubResp),
@@ -280,7 +274,7 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<Packet>, MqttCodecError> {
                 PacketType::Connect => {
                     let mut connect = Connect::default();
                     connect.decode(src)?;
-                    Ok(Some(Packet::Connect(connect)))
+                    Ok(Some(Packet::Connect(Box::new(connect))))
                 }
                 PacketType::Publish => {
                     let mut publish = Publish::new_from_header(packet_header)?;
@@ -341,10 +335,9 @@ pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MqttCodecError>
         Packet::ConnAck(c) => c.encode(dest),
         Packet::Disconnect(d) => d.encode(dest),
         Packet::Publish(p) => p.encode(dest),
-        Packet::PubAck(p) |
-        Packet::PubComp(p) |
-        Packet::PubRec(p) |
-        Packet::PubRel(p) => p.encode(dest),
+        Packet::PubAck(p) | Packet::PubComp(p) | Packet::PubRec(p) | Packet::PubRel(p) => {
+            p.encode(dest)
+        }
 
         Packet::PingRequest(header) | Packet::PingResponse(header) => {
             dest.put_u8(header.packet_type() as u8 | header.flags());
@@ -366,67 +359,6 @@ pub(crate) fn variable_byte_int_size(value: u32) -> u32 {
         _ => 4,
     }
 }
-
-pub(crate) fn check_property(
-    property: PropertyType,
-    properties: &mut HashSet<PropertyType>,
-) -> Result<(), MqttCodecError> {
-    if properties.contains(&property) {
-        return Err(MqttCodecError::new(
-            format!("{} already set", property).as_str(),
-        ));
-    }
-    properties.insert(property);
-    Ok(())
-}
-
-pub(crate) fn encode_u8_property(property_type: PropertyType, value: u8, dest: &mut BytesMut) {
-    dest.put_u8(property_type as u8);
-    dest.put_u8(value);
-}
-
-pub(crate) fn encode_bool_property(property_type: PropertyType, value: bool, dest: &mut BytesMut) {
-    dest.put_u8(property_type as u8);
-    dest.put_u8(value as u8);
-}
-
-pub(crate) fn encode_u16_property(property_type: PropertyType, value: u16, dest: &mut BytesMut) {
-    dest.put_u8(property_type as u8);
-    dest.put_u16(value);
-}
-
-pub(crate) fn encode_u32_property(property_type: PropertyType, value: u32, dest: &mut BytesMut) {
-    dest.put_u8(property_type as u8);
-    dest.put_u32(value);
-}
-
-pub(crate) fn encode_utf8_property(
-    property_type: PropertyType,
-    value: &str,
-    dest: &mut BytesMut,
-) -> Result<(), MqttCodecError> {
-    dest.put_u8(property_type as u8);
-    put_utf8(value, dest)
-}
-
-pub(crate) fn encode_bin_property(
-    property_type: PropertyType,
-    value: &[u8],
-    dest: &mut BytesMut,
-) -> Result<(), MqttCodecError> {
-    dest.put_u8(property_type as u8);
-    put_bin(value, dest)
-}
-
-pub(crate) fn encode_var_int_property(
-    property_type: PropertyType,
-    value: u32,
-    dest: &mut BytesMut,
-) {
-    dest.put_u8(property_type as u8);
-    put_var_u32(value, dest);
-}
-
 
 #[cfg(not(feature = "pedantic"))]
 pub fn get_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {
@@ -555,7 +487,10 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
                     format!("invalid flags for {}: {}", packet_type, flags).as_str(),
                 );
             }
-            Ok(Some(FixedHeader::new_with_remaining(packet_type, remaining)))
+            Ok(Some(FixedHeader::new_with_remaining(
+                packet_type,
+                remaining,
+            )))
         }
         PacketType::ConnAck
         | PacketType::PubRec
@@ -571,7 +506,10 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
                     format!("invalid flags for {}: {}", packet_type, flags).as_str(),
                 );
             }
-            Ok(Some(FixedHeader::new_with_remaining(packet_type, remaining)))
+            Ok(Some(FixedHeader::new_with_remaining(
+                packet_type,
+                remaining,
+            )))
         }
         PacketType::Publish => {
             let mut header = FixedHeader::new_with_remaining(packet_type, remaining);
