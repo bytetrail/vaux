@@ -1,16 +1,20 @@
 use std::net::Ipv4Addr;
 
-use std::io::Write;
 use clap::Parser;
 use vaux_client::ErrorKind;
-use vaux_mqtt::{Packet, PubResp, Subscribe, Subscription, QoSLevel};
+use vaux_mqtt::{
+    property::{PayloadFormat, Property},
+    Packet, PropertyType, PubResp, QoSLevel, Subscribe, Subscription,
+};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
+    #[arg(short, long)]
+    auto_ack: bool,
     #[arg(short, long, default_value = "0", value_parser = QoSLevelParser)]
     qos: QoSLevel,
-    #[arg(short, long, default_value = "127.0.0.1")]
+    #[arg(short='b', long, default_value = "127.0.0.1")]
     addr: String,
 }
 
@@ -30,13 +34,12 @@ impl clap::builder::TypedValueParser for QoSLevelParser {
             "0" => Ok(QoSLevel::AtMostOnce),
             "1" => Ok(QoSLevel::AtLeastOnce),
             "2" => Ok(QoSLevel::ExactlyOnce),
-            _ => Err(clap::Error::new(clap::error::ErrorKind::InvalidValue))
+            _ => Err(clap::Error::new(clap::error::ErrorKind::InvalidValue)),
         }
     }
-
 }
-fn main() {
 
+fn main() {
     let args = Args::parse();
 
     let addr: Ipv4Addr = "127.0.0.1".parse().expect("unable to create addr");
@@ -72,13 +75,51 @@ fn main() {
                                 if let Some(packet) = next {
                                     packet_count += 1;
                                     if let Packet::Publish(mut p) = packet {
-                                        print!("{:?}", p.take_payload().unwrap());
-                                        std::io::stdout().flush().expect("unable to flush stdout");
-                                        let mut ack = PubResp::new_puback();
-                                        ack.packet_id = p.packet_id.unwrap();
-                                        if let Err(e) = client.send(Packet::PubAck(ack)) {
-                                            eprintln!("{:?}", e);
+                                        if p.properties().has_property(&PropertyType::PayloadFormat)
+                                        {
+                                            if let Property::PayloadFormat(indicator) = p
+                                                .properties()
+                                                .get_property(&PropertyType::PayloadFormat)
+                                                .unwrap()
+                                            {
+                                                if *indicator == PayloadFormat::Utf8 {
+                                                    print!("Payload: ");
+                                                    println!(
+                                                        "{}",
+                                                        String::from_utf8(
+                                                            p.take_payload().unwrap()
+                                                        )
+                                                        .unwrap()
+                                                    );
+                                                }
+                                            }
                                         }
+                                        if args.auto_ack {
+                                            // check for QOS 1 or 2
+                                            match p.qos() {
+                                                QoSLevel::AtLeastOnce => {
+                                                    let mut ack = PubResp::new_puback();
+                                                    ack.packet_id = p.packet_id.unwrap();
+                                                    if let Err(e) = client.send(Packet::PubAck(ack))
+                                                    {
+                                                        eprintln!("{:?}", e);
+                                                    }
+                                                }
+                                                QoSLevel::ExactlyOnce => {
+                                                    let mut ack = PubResp::new_pubrec();
+                                                    ack.packet_id = p.packet_id.unwrap();
+                                                    if let Err(e) = client.send(Packet::PubRec(ack))
+                                                    {
+                                                        eprintln!("{:?}", e);
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }                                        
+                                    } else {
+                                        // save to ack in the future
+
+                                        
                                     }
                                     if packet_count == 80 {
                                         println!();

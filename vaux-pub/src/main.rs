@@ -1,6 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr};
 
-use clap::{Parser, error::ErrorKind};
+use clap::{error::ErrorKind, Parser};
 use vaux_mqtt::QoSLevel;
 
 #[derive(Parser, Debug)]
@@ -28,10 +28,9 @@ impl clap::builder::TypedValueParser for QoSLevelParser {
             "0" => Ok(QoSLevel::AtMostOnce),
             "1" => Ok(QoSLevel::AtLeastOnce),
             "2" => Ok(QoSLevel::ExactlyOnce),
-            _ => Err(clap::Error::new(ErrorKind::InvalidValue))
+            _ => Err(clap::Error::new(ErrorKind::InvalidValue)),
         }
     }
-
 }
 
 fn main() {
