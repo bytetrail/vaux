@@ -174,7 +174,7 @@ impl MqttClient {
         data: &[u8],
         props: Option<&PropertyBundle>,
     ) -> Result<Option<Packet>> {
-        self.publish(topic, data, props)
+        self.publish(topic, data, QoSLevel::AtMostOnce, props)
     }
 
     pub fn send_utf8(
@@ -183,7 +183,7 @@ impl MqttClient {
         message: &str,
         props: Option<&PropertyBundle>,
     ) -> Result<Option<Packet>> {
-        self.publish(topic, message.as_bytes(), props)
+        self.publish(topic, message.as_bytes(), QoSLevel::AtLeastOnce, props)
     }
 
     /// Basic send of a UTF8 encoded payload. The message is sent with QoS
@@ -194,6 +194,7 @@ impl MqttClient {
         &mut self,
         topic: &str,
         data: &[u8],
+        qos: QoSLevel,
         props: Option<&PropertyBundle>,
     ) -> Result<Option<Packet>> {
         let mut publish = Publish::default();
