@@ -1,3 +1,5 @@
+pub mod client;
+
 use std::{
     io::{Read, Write},
     net::{IpAddr, SocketAddr, SocketAddrV4, SocketAddrV6, TcpStream},
