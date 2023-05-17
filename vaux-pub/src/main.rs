@@ -1,7 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use clap::{error::ErrorKind, Parser};
-use vaux_mqtt::{QoSLevel, publish::Publish, property::Property};
+use vaux_mqtt::{property::Property, publish::Publish, QoSLevel};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -41,14 +41,20 @@ fn main() {
     let args = Args::parse();
 
     let addr: Ipv4Addr = args.addr.parse().expect("unable to create addr");
-    let mut client =
-        vaux_client::MqttClient::new(IpAddr::V4(addr), 1883, "vaux-publisher-001", true, 10, QoSLevel::AtMostOnce);
+    let mut client = vaux_client::MqttClient::new(
+        IpAddr::V4(addr),
+        1883,
+        "vaux-publisher-001",
+        true,
+        10,
+        QoSLevel::AtMostOnce,
+    );
     match client.connect() {
         Ok(_) => {
             println!("connected");
             let handle = client.start();
             let producer = client.producer();
-            //let mut receiver = client.take_consumer();  
+            //let mut receiver = client.take_consumer();
 
             let mut publish = Publish::default();
             publish
@@ -65,6 +71,7 @@ fn main() {
             } else {
                 println!("sent message");
             }
+            client.stop();
             if handle.unwrap().join().unwrap().is_err() {
                 eprintln!("error in client thread");
             }

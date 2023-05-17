@@ -1,7 +1,18 @@
-use std::{net::{IpAddr, Ipv4Addr, TcpStream, SocketAddr}, collections::HashMap, sync::mpsc::{Receiver, Sender, self, SendError}, time::Duration, thread::{self, JoinHandle}, io::{Write, Read}, f32::consts::E};
+use std::{
+    collections::HashMap,
+    f32::consts::E,
+    io::{Read, Write},
+    net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
+    sync::mpsc::{self, Receiver, SendError, Sender},
+    thread::{self, JoinHandle},
+    time::Duration,
+};
 
 use bytes::BytesMut;
-use vaux_mqtt::{QoSLevel, Packet, Subscription, Connect, encode, decode, PropertyType, property::Property, Subscribe, PubResp};
+use vaux_mqtt::{
+    decode, encode, property::Property, Connect, Packet, PropertyType, PubResp, QoSLevel,
+    Subscribe, Subscription,
+};
 
 use crate::{ErrorKind, MqttError};
 
@@ -30,7 +41,7 @@ pub struct MqttClient {
     packet_recv: Option<Sender<vaux_mqtt::Packet>>,
     subscriptions: Vec<Subscription>,
 
-    qos_channel: Option<Receiver<Packet>>, 
+    qos_channel: Option<Receiver<Packet>>,
     pending_recv_ack: HashMap<u16, Packet>,
 }
 
@@ -49,7 +60,14 @@ impl Default for MqttClient {
 }
 
 impl MqttClient {
-    pub fn new(host: IpAddr, port: u16, client_id: &str, auto_ack: bool, receive_max: u16, qos: QoSLevel) -> Self {
+    pub fn new(
+        host: IpAddr,
+        port: u16,
+        client_id: &str,
+        auto_ack: bool,
+        receive_max: u16,
+        qos: QoSLevel,
+    ) -> Self {
         let (producer, packet_send): (Sender<vaux_mqtt::Packet>, Receiver<vaux_mqtt::Packet>) =
             mpsc::channel();
         let (packet_recv, consumer): (Sender<vaux_mqtt::Packet>, Receiver<vaux_mqtt::Packet>) =
@@ -58,7 +76,7 @@ impl MqttClient {
             auto_ack,
             receive_max,
             qos,
-            addr: SocketAddr::new(host, port),  
+            addr: SocketAddr::new(host, port),
             connected: false,
             connection: None,
             connect_retry: DEFAULT_CONNECT_RETRY,
@@ -105,7 +123,7 @@ impl MqttClient {
         }
         result
     }
-    
+
     /// Helper method to subscribe to the topics in the topic filter. This helper
     /// subscribes with a QoS level of "At Most Once", or 0. A SUBACK will
     /// typically be returned on the consumer on a successful subscribe.
@@ -136,7 +154,10 @@ impl MqttClient {
         let mut connection = self.connection.take().unwrap();
         Some(thread::spawn(move || {
             if let Err(e) = connection.set_read_timeout(Some(Duration::from_millis(100))) {
-                return Err(MqttError::new(&format!("unable to set read timeout: {}", e), ErrorKind::Transport));
+                return Err(MqttError::new(
+                    &format!("unable to set read timeout: {}", e),
+                    ErrorKind::Transport,
+                ));
             }
             loop {
                 match MqttClient::read_next(&mut connection) {
@@ -146,7 +167,10 @@ impl MqttClient {
                                 Packet::Disconnect(d) => {
                                     // TODO handle disconnect - verify shutdown behavior
                                     connection.shutdown(std::net::Shutdown::Both).unwrap();
-                                    return Err(MqttError::new(&format!("disconnect received: {:?}", d), ErrorKind::Protocol));
+                                    return Err(MqttError::new(
+                                        &format!("disconnect received: {:?}", d),
+                                        ErrorKind::Protocol,
+                                    ));                                
                                 }
                                 Packet::Publish(publish) => {
                                     match publish.qos() {
@@ -157,12 +181,21 @@ impl MqttClient {
                                                 if let Some(packet_id) = publish.packet_id {
                                                     puback.packet_id = packet_id;
                                                 } else {
-                                                    connection.shutdown(std::net::Shutdown::Both).unwrap();
-                                                    return Err(MqttError::new("protocol error, no packet ID with QAS > 0", ErrorKind::Protocol));
+                                                    connection
+                                                        .shutdown(std::net::Shutdown::Both)
+                                                        .unwrap();
+                                                    return Err(MqttError::new(
+                                                        "protocol error, no packet ID with QAS > 0",
+                                                        ErrorKind::Protocol,
+                                                    ));
                                                 }
-                                                if MqttClient::send(&mut connection, Packet::PubAck(puback)).is_err() {
+                                                if MqttClient::send(
+                                                    &mut connection,
+                                                    Packet::PubAck(puback),
+                                                )
+                                                .is_err()
+                                                {
                                                     // TODO handle the pub ack next time through
-                                                    
                                                 }
                                             }
                                         }
@@ -170,10 +203,13 @@ impl MqttClient {
                                     }
                                 }
                                 _ => {}
-                            }                            
+                            }
                             if let Err(e) = packet_recv.send(p.clone()) {
                                 connection.shutdown(std::net::Shutdown::Both).unwrap();
-                                return Err(MqttError::new(&format!("unable to send packet to consumer: {}", e), ErrorKind::Transport));
+                                return Err(MqttError::new(
+                                    &format!("unable to send packet to consumer: {}", e),
+                                    ErrorKind::Transport,
+                                ));
                             }
                         }
                     }
@@ -192,6 +228,12 @@ impl MqttClient {
                                 // self.pending_recv_ack.insert(packet_id, packet.clone());
                             }
                         }
+                    } else if let Packet::Disconnect(_d) = packet.clone() {
+                        if let Err(e) = MqttClient::send(&mut connection, packet) {
+                            eprintln!("ERROR sending packet to remote: {}", e.message());
+                        }
+                        connection.shutdown(std::net::Shutdown::Both).unwrap();
+                        return Ok(());
                     }
                     if let Err(e) = MqttClient::send(&mut connection, packet) {
                         eprintln!("ERROR sending packet to remote: {}", e.message());
@@ -199,6 +241,13 @@ impl MqttClient {
                 }
             }
         }))
+    }
+
+    pub fn stop(&mut self) {
+        let disconnect = Packet::Disconnect(Default::default());
+        if let Err(e) = self.producer.send(disconnect) {
+            eprintln!("unable to send disconnect: {}", e);
+        }
     }
 
     fn connect_with_timeout(&mut self, timeout: Duration) -> Result<()> {
@@ -283,7 +332,6 @@ impl MqttClient {
         }
     }
 
-
     pub fn read_next(connection: &mut TcpStream) -> Result<Option<Packet>> {
         let mut buffer = [0u8; 4096];
         match connection.read(&mut buffer) {
@@ -323,5 +371,4 @@ impl MqttClient {
         }
         Ok(None)
     }
-
 }

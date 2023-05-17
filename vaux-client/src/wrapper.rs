@@ -1,18 +1,24 @@
-use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc::{Receiver, Sender};
 
-use vaux_mqtt::{Packet, property::{PropertyBundle, Property, PacketProperties}, QoSLevel, publish::Publish};
+use vaux_mqtt::{
+    property::{PacketProperties, Property, PropertyBundle},
+    publish::Publish,
+    Packet, QoSLevel,
+};
 
-use crate::{Result, MqttError, ErrorKind};
+use crate::{ErrorKind, MqttError, Result};
 
 pub struct ClientWrapper {
     sender: Option<Sender<Packet>>,
     receiver: Option<Receiver<Packet>>,
 }
 
-
 impl ClientWrapper {
     pub fn new() -> Self {
-        ClientWrapper { sender: None, receiver: None }
+        ClientWrapper {
+            sender: None,
+            receiver: None,
+        }
     }
 
     pub fn send_binary(
@@ -63,7 +69,7 @@ impl ClientWrapper {
                     "unable to send packet to broker",
                     ErrorKind::Transport,
                 ));
-            } 
+            }
         } else {
             return Err(MqttError::new(
                 "no connection to broker",

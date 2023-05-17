@@ -3,7 +3,6 @@ mod wrapper;
 
 pub use client::MqttClient;
 
-
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ErrorKind {
@@ -39,4 +38,3 @@ impl MqttError {
 }
 
 pub type Result<T> = core::result::Result<T, MqttError>;
-

@@ -1,4 +1,4 @@
-use std::{net::Ipv4Addr};
+use std::net::Ipv4Addr;
 
 use clap::Parser;
 use vaux_client::{ErrorKind, MqttClient};
@@ -14,7 +14,7 @@ pub struct Args {
     auto_ack: bool,
     #[arg(short, long, default_value = "0", value_parser = QoSLevelParser)]
     qos: QoSLevel,
-    #[arg(short='b', long, default_value = "127.0.0.1")]
+    #[arg(short = 'b', long, default_value = "127.0.0.1")]
     addr: String,
 }
 
@@ -50,7 +50,7 @@ fn main() {
         true,
         10,
         args.qos,
-            );
+    );
     match client.connect() {
         Ok(_) => {
             println!("connected");
@@ -75,8 +75,7 @@ fn main() {
                         while let Some(packet) = iter.next() {
                             match packet {
                                 Packet::Publish(mut p) => {
-                                    if p.properties().has_property(&PropertyType::PayloadFormat)
-                                    {
+                                    if p.properties().has_property(&PropertyType::PayloadFormat) {
                                         if let Property::PayloadFormat(indicator) = p
                                             .properties()
                                             .get_property(&PropertyType::PayloadFormat)
@@ -86,10 +85,8 @@ fn main() {
                                                 print!("Payload: ");
                                                 println!(
                                                     "{}",
-                                                    String::from_utf8(
-                                                        p.take_payload().unwrap()
-                                                    )
-                                                    .unwrap()
+                                                    String::from_utf8(p.take_payload().unwrap())
+                                                        .unwrap()
                                                 );
                                             }
                                         }
@@ -100,33 +97,30 @@ fn main() {
                                             QoSLevel::AtLeastOnce => {
                                                 let mut ack = PubResp::new_puback();
                                                 ack.packet_id = p.packet_id.unwrap();
-                                                if let Err(e) = producer.send(Packet::PubAck(ack))
-                                                {
+                                                if let Err(e) = producer.send(Packet::PubAck(ack)) {
                                                     eprintln!("{:?}", e);
                                                 }
                                             }
                                             QoSLevel::ExactlyOnce => {
                                                 let mut ack = PubResp::new_pubrec();
                                                 ack.packet_id = p.packet_id.unwrap();
-                                                if let Err(e) = producer.send(Packet::PubRec(ack))
-                                                {
+                                                if let Err(e) = producer.send(Packet::PubRec(ack)) {
                                                     eprintln!("{:?}", e);
                                                 }
                                             }
                                             _ => {}
                                         }
-                                    }                                        
-                                    else {
-                                    }   
+                                    } else {
+                                    }
                                 }
                                 _ => {}
-                            } 
+                            }
                         }
                     }
                 }
                 Err(e) => {
                     eprintln!("Error: {:?}", e);
-                }   
+                }
             }
         }
         Err(e) => {
