@@ -1,7 +1,7 @@
 use std::net::Ipv4Addr;
 
 use clap::Parser;
-use vaux_client::ErrorKind;
+use vaux_client::{ErrorKind, MqttClient};
 use vaux_mqtt::{
     property::{PayloadFormat, Property},
     Packet, PropertyType, PubResp, QoSLevel, Subscribe, Subscription,
@@ -14,7 +14,7 @@ pub struct Args {
     auto_ack: bool,
     #[arg(short, long, default_value = "0", value_parser = QoSLevelParser)]
     qos: QoSLevel,
-    #[arg(short='b', long, default_value = "127.0.0.1")]
+    #[arg(short = 'b', long, default_value = "127.0.0.1")]
     addr: String,
 }
 
@@ -43,14 +43,19 @@ fn main() {
     let args = Args::parse();
 
     let addr: Ipv4Addr = "127.0.0.1".parse().expect("unable to create addr");
-    let mut client = vaux_client::MqttClient::new_with_id(
+    let mut client = MqttClient::new(
         std::net::IpAddr::V4(addr),
         1883,
         "vaux-subscriber-001",
+        true,
+        10,
+        args.qos,
     );
     match client.connect() {
         Ok(_) => {
-            println!("connected");
+            client.start();
+            let consumer = client.take_consumer().unwrap();
+            let producer = client.producer();
             let filter = vec![
                 // inbound device ops messages for this shadow on this site
                 Subscription {
@@ -62,84 +67,63 @@ fn main() {
                 },
             ];
             let subscribe = Subscribe::new(1, filter);
-            match client.send(Packet::Subscribe(subscribe)) {
+            match producer.send(Packet::Subscribe(subscribe)) {
                 Ok(_) => {
-                    if client.set_read_timeout(1000).is_err() {
-                        eprintln!("Unable to set read timeout");
-                        return;
-                    }
-                    let mut packet_count = 0;
                     loop {
-                        match client.read_next() {
-                            Ok(next) => {
-                                if let Some(packet) = next {
-                                    packet_count += 1;
-                                    if let Packet::Publish(mut p) = packet {
-                                        if p.properties().has_property(&PropertyType::PayloadFormat)
+                        let mut iter = consumer.try_iter();
+                        while let Some(packet) = iter.next() {
+                            match packet {
+                                Packet::Publish(mut p) => {
+                                    if p.properties().has_property(&PropertyType::PayloadFormat) {
+                                        if let Property::PayloadFormat(indicator) = p
+                                            .properties()
+                                            .get_property(&PropertyType::PayloadFormat)
+                                            .unwrap()
                                         {
-                                            if let Property::PayloadFormat(indicator) = p
-                                                .properties()
-                                                .get_property(&PropertyType::PayloadFormat)
-                                                .unwrap()
-                                            {
-                                                if *indicator == PayloadFormat::Utf8 {
-                                                    print!("Payload: ");
-                                                    println!(
-                                                        "{}",
-                                                        String::from_utf8(
-                                                            p.take_payload().unwrap()
-                                                        )
+                                            if *indicator == PayloadFormat::Utf8 {
+                                                print!("Payload: ");
+                                                println!(
+                                                    "{}",
+                                                    String::from_utf8(p.take_payload().unwrap())
                                                         .unwrap()
-                                                    );
-                                                }
+                                                );
                                             }
                                         }
-                                        if args.auto_ack {
-                                            // check for QOS 1 or 2
-                                            match p.qos() {
-                                                QoSLevel::AtLeastOnce => {
-                                                    let mut ack = PubResp::new_puback();
-                                                    ack.packet_id = p.packet_id.unwrap();
-                                                    if let Err(e) = client.send(Packet::PubAck(ack))
-                                                    {
-                                                        eprintln!("{:?}", e);
-                                                    }
+                                    }
+                                    if args.auto_ack {
+                                        // check for QOS 1 or 2
+                                        match p.qos() {
+                                            QoSLevel::AtLeastOnce => {
+                                                let mut ack = PubResp::new_puback();
+                                                ack.packet_id = p.packet_id.unwrap();
+                                                if let Err(e) = producer.send(Packet::PubAck(ack)) {
+                                                    eprintln!("{:?}", e);
                                                 }
-                                                QoSLevel::ExactlyOnce => {
-                                                    let mut ack = PubResp::new_pubrec();
-                                                    ack.packet_id = p.packet_id.unwrap();
-                                                    if let Err(e) = client.send(Packet::PubRec(ack))
-                                                    {
-                                                        eprintln!("{:?}", e);
-                                                    }
-                                                }
-                                                _ => {}
                                             }
-                                        }                                        
+                                            QoSLevel::ExactlyOnce => {
+                                                let mut ack = PubResp::new_pubrec();
+                                                ack.packet_id = p.packet_id.unwrap();
+                                                if let Err(e) = producer.send(Packet::PubRec(ack)) {
+                                                    eprintln!("{:?}", e);
+                                                }
+                                            }
+                                            _ => {}
+                                        }
                                     } else {
-                                        // save to ack in the future
-
-                                        
-                                    }
-                                    if packet_count == 80 {
-                                        println!();
-                                        packet_count = 0;
                                     }
                                 }
+                                _ => {}
                             }
-                            Err(e) => match e.kind() {
-                                ErrorKind::Timeout => {}
-                                _ => {
-                                    eprintln!("{}", e.message());
-                                    break;
-                                }
-                            },
                         }
                     }
                 }
-                Err(e) => eprintln!("{:#?}", e),
+                Err(e) => {
+                    eprintln!("Error: {:?}", e);
+                }
             }
         }
-        Err(e) => eprintln!("Unable to connect {}", e.message()),
+        Err(e) => {
+            eprintln!("Error: {:?}", e);
+        }
     }
 }
