@@ -53,7 +53,6 @@ fn main() {
     );
     match client.connect() {
         Ok(_) => {
-            println!("connected");
             client.start();
             let consumer = client.take_consumer().unwrap();
             let producer = client.producer();

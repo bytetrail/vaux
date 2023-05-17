@@ -51,7 +51,6 @@ fn main() {
     );
     match client.connect() {
         Ok(_) => {
-            println!("connected");
             let handle = client.start();
             let producer = client.producer();
             //let mut receiver = client.take_consumer();

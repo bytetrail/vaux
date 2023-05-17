@@ -117,7 +117,6 @@ impl MqttClient {
                     break;
                 }
             } else {
-                println!("connected");
                 retry = false;
             }
         }
