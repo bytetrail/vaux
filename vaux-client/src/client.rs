@@ -165,6 +165,7 @@ impl MqttClient {
         let auto_ack = self.auto_ack;
         let mut connection = self.connection.take().unwrap();
         let receive_max = self.receive_max;
+        let pending_producer = self.producer.clone();
         Some(thread::spawn(move || {
             if let Err(e) = connection.set_read_timeout(Some(Duration::from_millis(100))) {
                 return Err(MqttError::new(
@@ -242,8 +243,8 @@ impl MqttClient {
                     }
                     Err(e) => {
                         if e.kind() != ErrorKind::Timeout {
-                            connection.shutdown(std::net::Shutdown::Both).unwrap();
-                            return Err(e);
+                            // there may be nothing to read so this is not necessarily an error
+                            // TODO configure for disconnect/reconnect, PING or stop on timeouts
                         }
                     }
                 };
@@ -275,6 +276,18 @@ impl MqttClient {
                     }
                     if let Err(e) = MqttClient::send(&mut connection, packet) {
                         eprintln!("ERROR sending packet to remote: {}", e.message());
+                    }
+                    // send any pending QOS-1 publish packets that we are able to send
+                    while pending_publish.len() > 0 && qos_1_remaining > 0 {
+                        let packet = pending_publish.remove(0);
+                        // pending_publish_size -= packet.encoded_size();
+                        if let Err(e) = MqttClient::send(&mut connection, packet.clone()) {
+                            pending_publish.insert(0, packet);
+                            // TODO notify calling client of error 
+                            eprintln!("ERROR sending packet to remote: {}", e.message());
+                        } else {
+                            qos_1_remaining += 1;
+                        }
                     }
                 }
             }
