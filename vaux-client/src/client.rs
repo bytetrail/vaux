@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    f32::consts::E,
     io::{Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
     sync::mpsc::{self, Receiver, SendError, Sender},
@@ -22,6 +21,9 @@ const DEFAULT_RECV_MAX: u16 = 100;
 const DEFAULT_HOST_IP: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 1883;
 
+const MAX_QUEUE_LEN: usize = 100;
+const MAX_QUEUE_SIZE: usize = 100 * 1024;
+
 pub type Result<T> = core::result::Result<T, MqttError>;
 
 #[derive(Debug)]
@@ -40,9 +42,6 @@ pub struct MqttClient {
     packet_send: Option<Receiver<vaux_mqtt::Packet>>,
     packet_recv: Option<Sender<vaux_mqtt::Packet>>,
     subscriptions: Vec<Subscription>,
-
-    qos_channel: Option<Receiver<Packet>>,
-    pending_recv_ack: HashMap<u16, Packet>,
 }
 
 impl Default for MqttClient {
@@ -87,8 +86,6 @@ impl MqttClient {
             packet_send: Some(packet_send),
             packet_recv: Some(packet_recv),
             subscriptions: Vec::new(),
-            qos_channel: None,
-            pending_recv_ack: HashMap::new(),
         }
     }
 
@@ -146,11 +143,28 @@ impl MqttClient {
         self.producer.send(vaux_mqtt::Packet::Subscribe(subscribe))
     }
 
+    /// Starts the MQTT client thread. The MQTT client thread will send packets 
+    /// to the remote broker that it receives on the producer channel and make 
+    /// packets available on the consumer channel that it receives from the broker
+    /// 
+    /// The MQTT client thread can be stopped by calling the stop method or by 
+    /// sending a DISCONNECT packet on the producer channel.
+    /// 
+    /// There are cases where the client may not be able to send a message (e.g. 
+    /// QoS 1 and no more messages can be sent). In these cases, the message will
+    /// be queued and sent when the client is able to send it or until the maximum
+    /// queue size is reached based on packet size and/or count. The client will
+    /// thread will terminate if the queue is full and the client is unable to send.
+    /// 
+    /// Queued messages will be sent in the order they were received. Any messages 
+    /// that are queued when the client is stopped will remain queued until the client 
+    /// is started again or the client is dropped.
     pub fn start(&mut self) -> Option<JoinHandle<Result<()>>> {
         let packet_recv = self.packet_recv.take().unwrap();
         let packet_send = self.packet_send.take().unwrap();
         let auto_ack = self.auto_ack;
         let mut connection = self.connection.take().unwrap();
+        let receive_max = self.receive_max;
         Some(thread::spawn(move || {
             if let Err(e) = connection.set_read_timeout(Some(Duration::from_millis(100))) {
                 return Err(MqttError::new(
@@ -158,6 +172,10 @@ impl MqttClient {
                     ErrorKind::Transport,
                 ));
             }
+            let mut pending_recv_ack: HashMap<u16, Packet> = HashMap::new();
+            let mut pending_publish: Vec<Packet> = Vec::new();
+            let mut pending_publish_size = 0;
+            let mut qos_1_remaining = receive_max;
             loop {
                 match MqttClient::read_next(&mut connection) {
                     Ok(result) => {
@@ -195,11 +213,21 @@ impl MqttClient {
                                                 .is_err()
                                                 {
                                                     // TODO handle the pub ack next time through
+                                                    // push a message to the last error channel
                                                 }
                                             }
                                         }
                                         vaux_mqtt::QoSLevel::ExactlyOnce => todo!(),
                                     }
+                                }
+                                Packet::PubAck(puback) => {
+                                        if let Some(p) = pending_recv_ack.remove(&puback.packet_id) {
+                                            if qos_1_remaining < receive_max {
+                                                qos_1_remaining += 1;
+                                            }
+                                        } else {
+                                            // TODO PUBACK that was not expected
+                                        }
                                 }
                                 _ => {}
                             }
@@ -222,10 +250,21 @@ impl MqttClient {
                 if let Ok(packet) = packet_send.recv_timeout(Duration::from_millis(10)) {
                     if let Packet::Publish(p) = packet.clone() {
                         if p.qos() == QoSLevel::AtLeastOnce {
-                            if let Some(packet_id) = p.packet_id {
-                                // TODO protect a pending ack with a mutex
-                                // self.pending_recv_ack.insert(packet_id, packet.clone());
-                            }
+                            if qos_1_remaining > 0 {
+                                qos_1_remaining -= 1;
+                                if let Some(packet_id) = p.packet_id {                            
+                                    pending_recv_ack.insert(packet_id, packet.clone());
+                                } else {
+                                    // TODO handle error - no packet ID
+                                    continue;
+                                }
+                            } else {
+                                // TODO cannot send the packet - need to inform client   
+                                if pending_publish.len() < MAX_QUEUE_LEN && pending_publish_size < MAX_QUEUE_SIZE {
+                                    pending_publish.push(packet);
+                                    continue;
+                                }
+                            }                            
                         }
                     } else if let Packet::Disconnect(_d) = packet.clone() {
                         if let Err(e) = MqttClient::send(&mut connection, packet) {
