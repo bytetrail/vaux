@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     io::{Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
-    sync::mpsc::{self, Receiver, SendError, Sender},
+    sync::{mpsc::{self, Receiver, SendError, Sender}, Arc, Mutex},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -42,6 +42,7 @@ pub struct MqttClient {
     packet_send: Option<Receiver<vaux_mqtt::Packet>>,
     packet_recv: Option<Sender<vaux_mqtt::Packet>>,
     subscriptions: Vec<Subscription>,
+    pending_qos1: Arc<Mutex<Vec<Packet>>>,
 }
 
 impl Default for MqttClient {
@@ -86,6 +87,7 @@ impl MqttClient {
             packet_send: Some(packet_send),
             packet_recv: Some(packet_recv),
             subscriptions: Vec::new(),
+            pending_qos1: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -165,7 +167,7 @@ impl MqttClient {
         let auto_ack = self.auto_ack;
         let mut connection = self.connection.take().unwrap();
         let receive_max = self.receive_max;
-        let pending_producer = self.producer.clone();
+        let pending_qos1 = self.pending_qos1.clone();
         Some(thread::spawn(move || {
             if let Err(e) = connection.set_read_timeout(Some(Duration::from_millis(100))) {
                 return Err(MqttError::new(
@@ -177,6 +179,7 @@ impl MqttClient {
             let mut pending_publish: Vec<Packet> = Vec::new();
             let mut pending_publish_size = 0;
             let mut qos_1_remaining = receive_max;
+            pending_publish.append(&mut pending_qos1.lock().unwrap());
             loop {
                 match MqttClient::read_next(&mut connection) {
                     Ok(result) => {
@@ -185,6 +188,7 @@ impl MqttClient {
                                 Packet::Disconnect(d) => {
                                     // TODO handle disconnect - verify shutdown behavior
                                     connection.shutdown(std::net::Shutdown::Both).unwrap();
+                                    pending_qos1.lock().unwrap().append(&mut pending_publish);
                                     return Err(MqttError::new(
                                         &format!("disconnect received: {:?}", d),
                                         ErrorKind::Protocol,
@@ -234,6 +238,7 @@ impl MqttClient {
                             }
                             if let Err(e) = packet_recv.send(p.clone()) {
                                 connection.shutdown(std::net::Shutdown::Both).unwrap();
+                                pending_qos1.lock().unwrap().append(&mut pending_publish);
                                 return Err(MqttError::new(
                                     &format!("unable to send packet to consumer: {}", e),
                                     ErrorKind::Transport,
@@ -272,6 +277,7 @@ impl MqttClient {
                             eprintln!("ERROR sending packet to remote: {}", e.message());
                         }
                         connection.shutdown(std::net::Shutdown::Both).unwrap();
+                        pending_qos1.lock().unwrap().append(&mut pending_publish);
                         return Ok(());
                     }
                     if let Err(e) = MqttClient::send(&mut connection, packet) {
