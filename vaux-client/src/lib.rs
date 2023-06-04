@@ -1,5 +1,4 @@
 mod client;
-mod wrapper;
 
 pub use client::MqttClient;
 

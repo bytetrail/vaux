@@ -47,7 +47,7 @@ fn main() {
         "vaux-publisher-001",
         true,
         10,
-        QoSLevel::AtMostOnce,
+        false,
     );
     match client.connect() {
         Ok(_) => {

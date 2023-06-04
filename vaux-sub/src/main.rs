@@ -1,7 +1,7 @@
 use std::net::Ipv4Addr;
 
 use clap::Parser;
-use vaux_client::{ErrorKind, MqttClient};
+use vaux_client::MqttClient;
 use vaux_mqtt::{
     property::{PayloadFormat, Property},
     Packet, PropertyType, PubResp, QoSLevel, Subscribe, Subscription,
@@ -49,7 +49,7 @@ fn main() {
         "vaux-subscriber-001",
         true,
         10,
-        args.qos,
+        false,
     );
     match client.connect() {
         Ok(_) => {
