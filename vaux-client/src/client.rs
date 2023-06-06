@@ -263,24 +263,27 @@ impl MqttClient {
                         }
                     }
                 };
-                if let Ok(packet) = packet_send.recv_timeout(Duration::from_millis(10)) {
+                if let Ok(mut packet) = packet_send.recv_timeout(Duration::from_millis(10)) {
                     if let Packet::Publish(mut p) = packet.clone() {
                         if p.qos() == QoSLevel::AtLeastOnce {
+                            if auto_packet_id {
+                                last_packet_id += 1;
+                                p.packet_id = Some(last_packet_id);
+                                pending_recv_ack.insert(last_packet_id, Packet::Publish(p.clone()));
+                            } else if let Some(packet_id) = p.packet_id {
+                                pending_recv_ack.insert(packet_id, Packet::Publish(p.clone()));
+                            } else {
+                                // TODO handle error
+                                eprintln!("no packet id");
+                            }
                             if qos_1_remaining > 0 {
                                 qos_1_remaining -= 1;
-                                if auto_packet_id {
-                                    last_packet_id += 1;
-                                    p.packet_id = Some(last_packet_id);
-                                    pending_recv_ack.insert(last_packet_id, packet.clone());
-                                } else if let Some(packet_id) = p.packet_id {
-                                    pending_recv_ack.insert(packet_id, packet.clone());
-                                } else {
-                                }
+                                packet = Packet::Publish(p);
                             } else {
                                 // TODO cannot send the packet - need to inform client
                                 if pending_publish.len() < MAX_QUEUE_LEN {
                                     // && pending_publish_size < MAX_QUEUE_SIZE {
-                                    pending_publish.push(packet);
+                                    pending_publish.push(Packet::Publish(p));
                                     continue;
                                 }
                             }
