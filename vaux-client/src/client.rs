@@ -2,10 +2,7 @@ use std::{
     collections::HashMap,
     io::{Read, Write},
     net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
-    sync::{
-        mpsc::{self, Receiver, SendError, Sender},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -42,10 +39,10 @@ pub struct MqttClient {
     connect_retry: u8,
     connect_interval: u64,
     client_id: Option<String>,
-    producer: Sender<vaux_mqtt::Packet>,
-    consumer: Option<Receiver<vaux_mqtt::Packet>>,
-    packet_send: Option<Receiver<vaux_mqtt::Packet>>,
-    packet_recv: Option<Sender<vaux_mqtt::Packet>>,
+    producer: crossbeam_channel::Sender<vaux_mqtt::Packet>,
+    consumer: crossbeam_channel::Receiver<vaux_mqtt::Packet>,
+    packet_send: Option<crossbeam_channel::Receiver<vaux_mqtt::Packet>>,
+    packet_recv: Option<crossbeam_channel::Sender<vaux_mqtt::Packet>>,
     subscriptions: Vec<Subscription>,
     pending_qos1: Arc<Mutex<Vec<Packet>>>,
 }
@@ -73,10 +70,14 @@ impl MqttClient {
         receive_max: u16,
         auto_packet_id: bool,
     ) -> Self {
-        let (producer, packet_send): (Sender<vaux_mqtt::Packet>, Receiver<vaux_mqtt::Packet>) =
-            mpsc::channel();
-        let (packet_recv, consumer): (Sender<vaux_mqtt::Packet>, Receiver<vaux_mqtt::Packet>) =
-            mpsc::channel();
+        let (producer, packet_send): (
+            crossbeam_channel::Sender<vaux_mqtt::Packet>,
+            crossbeam_channel::Receiver<vaux_mqtt::Packet>,
+        ) = crossbeam_channel::unbounded();
+        let (packet_recv, consumer): (
+            crossbeam_channel::Sender<vaux_mqtt::Packet>,
+            crossbeam_channel::Receiver<vaux_mqtt::Packet>,
+        ) = crossbeam_channel::unbounded();
         Self {
             auto_ack,
             auto_packet_id,
@@ -89,7 +90,7 @@ impl MqttClient {
             connect_interval: DEFAULT_CONNECT_INTERVAL,
             client_id: Some(client_id.to_string()),
             producer,
-            consumer: Some(consumer),
+            consumer,
             packet_send: Some(packet_send),
             packet_recv: Some(packet_recv),
             subscriptions: Vec::new(),
@@ -97,12 +98,12 @@ impl MqttClient {
         }
     }
 
-    pub fn producer(&self) -> Sender<vaux_mqtt::Packet> {
+    pub fn producer(&self) -> crossbeam_channel::Sender<vaux_mqtt::Packet> {
         self.producer.clone()
     }
 
-    pub fn take_consumer(&mut self) -> Option<Receiver<vaux_mqtt::Packet>> {
-        self.consumer.take()
+    pub fn consumer(&mut self) -> crossbeam_channel::Receiver<vaux_mqtt::Packet> {
+        self.consumer.clone()
     }
 
     pub fn connect(&mut self) -> Result<()> {
@@ -136,7 +137,7 @@ impl MqttClient {
         packet_id: u16,
         topic_filter: &[&str],
         qos: QoSLevel,
-    ) -> std::result::Result<(), SendError<Packet>> {
+    ) -> std::result::Result<(), crossbeam_channel::SendError<Packet>> {
         let mut subscribe = Subscribe::default();
         subscribe.set_packet_id(packet_id);
         for topic in topic_filter {

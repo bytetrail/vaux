@@ -54,7 +54,7 @@ fn main() {
     match client.connect() {
         Ok(_) => {
             client.start();
-            let consumer = client.take_consumer().unwrap();
+            let consumer = client.consumer();
             let producer = client.producer();
             let filter = vec![
                 // inbound device ops messages for this shadow on this site
