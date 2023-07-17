@@ -20,6 +20,8 @@ const DEFAULT_CONNECT_RETRY: u8 = 20;
 const DEFAULT_RECV_MAX: u16 = 100;
 const DEFAULT_HOST_IP: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 1883;
+// 16K is the default max packet size for the broker
+const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024;
 
 const MAX_QUEUE_LEN: usize = 100;
 // TODO add size tracking to pending publish
@@ -45,6 +47,7 @@ pub struct MqttClient {
     packet_recv: Option<crossbeam_channel::Sender<vaux_mqtt::Packet>>,
     subscriptions: Vec<Subscription>,
     pending_qos1: Arc<Mutex<Vec<Packet>>>,
+    max_packet_size: usize,
 }
 
 impl Default for MqttClient {
@@ -95,6 +98,7 @@ impl MqttClient {
             packet_recv: Some(packet_recv),
             subscriptions: Vec::new(),
             pending_qos1: Arc::new(Mutex::new(Vec::new())),
+            max_packet_size: DEFAULT_MAX_PACKET_SIZE,
         }
     }
 
@@ -104,6 +108,14 @@ impl MqttClient {
 
     pub fn consumer(&mut self) -> crossbeam_channel::Receiver<vaux_mqtt::Packet> {
         self.consumer.clone()
+    }
+
+    pub fn max_packet_size(&self) -> usize {
+        self.max_packet_size
+    }
+
+    pub fn set_max_packet_size(&mut self, max_packet_size: usize) {
+        self.max_packet_size = max_packet_size;
     }
 
     pub fn connect(&mut self) -> Result<()> {
@@ -177,6 +189,7 @@ impl MqttClient {
         let pending_qos1 = self.pending_qos1.clone();
         let mut last_packet_id = self.last_packet_id;
         let auto_packet_id = self.auto_packet_id;
+        let max_packet_size = self.max_packet_size;
         Some(thread::spawn(move || {
             if let Err(e) = connection.set_read_timeout(Some(Duration::from_millis(100))) {
                 return Err(MqttError::new(
@@ -191,7 +204,7 @@ impl MqttClient {
             let mut qos_1_remaining = receive_max;
             pending_publish.append(&mut pending_qos1.lock().unwrap());
             loop {
-                match MqttClient::read_next(&mut connection) {
+                match MqttClient::read_next(&mut connection, max_packet_size) {
                     Ok(result) => {
                         if let Some(p) = result {
                             match &p {
@@ -406,8 +419,8 @@ impl MqttClient {
         }
     }
 
-    pub fn read_next(connection: &mut TcpStream) -> Result<Option<Packet>> {
-        let mut buffer = [0u8; 4096];
+    pub fn read_next(connection: &mut TcpStream, max_packet_size: usize) -> Result<Option<Packet>> {
+        let mut buffer = vec![0u8; max_packet_size];
         match connection.read(&mut buffer) {
             Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
                 Ok(packet) => Ok(packet),
