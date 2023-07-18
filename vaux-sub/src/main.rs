@@ -16,6 +16,8 @@ pub struct Args {
     qos: QoSLevel,
     #[arg(short = 'b', long, default_value = "127.0.0.1")]
     addr: String,
+    #[arg(short, long)]
+    clean_start: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -47,12 +49,13 @@ fn main() {
         std::net::IpAddr::V4(addr),
         1883,
         "vaux-subscriber-001",
-        true,
+        false,
         10,
         false,
     );
-    match client.connect() {
-        Ok(_) => {
+    match client.connect(args.clean_start) {
+        Ok(c) => {
+            println!("Connected: {:?}", c);
             client.start();
             let consumer = client.consumer();
             let producer = client.producer();
@@ -112,6 +115,7 @@ fn main() {
                                     } else {
                                     }
                                 }
+
                                 _ => {}
                             }
                         }

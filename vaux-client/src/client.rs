@@ -9,7 +9,7 @@ use std::{
 
 use bytes::BytesMut;
 use vaux_mqtt::{
-    decode, encode, property::Property, Connect, Packet, PropertyType, PubResp, QoSLevel,
+    decode, encode, property::Property, ConnAck, Connect, Packet, PropertyType, PubResp, QoSLevel,
     Subscribe, Subscription,
 };
 
@@ -18,11 +18,11 @@ use crate::{ErrorKind, MqttError};
 const DEFAULT_CONNECT_INTERVAL: u64 = 3000;
 const DEFAULT_CONNECT_RETRY: u8 = 20;
 const DEFAULT_RECV_MAX: u16 = 100;
+const DEFAULT_SESSION_EXPIRY: u32 = 0;
 const DEFAULT_HOST_IP: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 1883;
 // 16K is the default max packet size for the broker
 const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024;
-
 const MAX_QUEUE_LEN: usize = 100;
 // TODO add size tracking to pending publish
 // const MAX_QUEUE_SIZE: usize = 100 * 1024;
@@ -37,6 +37,7 @@ pub struct MqttClient {
     receive_max: u16,
     addr: SocketAddr,
     connected: bool,
+    session_expiry: u32,
     connection: Option<TcpStream>,
     connect_retry: u8,
     connect_interval: u64,
@@ -88,6 +89,7 @@ impl MqttClient {
             receive_max,
             addr: SocketAddr::new(host, port),
             connected: false,
+            session_expiry: DEFAULT_SESSION_EXPIRY,
             connection: None,
             connect_retry: DEFAULT_CONNECT_RETRY,
             connect_interval: DEFAULT_CONNECT_INTERVAL,
@@ -118,13 +120,40 @@ impl MqttClient {
         self.max_packet_size = max_packet_size;
     }
 
-    pub fn connect(&mut self) -> Result<()> {
-        let mut result: Result<()> = Ok(());
+    pub fn session_expiry(&self) -> u32 {
+        self.session_expiry
+    }
+
+    /// Sets the session expiry for the client. The session expiry is the number
+    /// of seconds that the broker will maintain the session for the client after
+    /// the client disconnects. If the client reconnects within the session expiry
+    /// interval, the broker will resume the session. If the client does not
+    /// reconnect within the session expiry interval, the broker will discard the
+    /// session and any state associated with the session. The session_expiry must
+    /// be set prior to calling connect for the value to be used.
+    ///
+    /// The default session expiry is 0 seconds, so no session information would be
+    /// stored by the broker with the default set.
+    /// Example:
+    /// ```
+    /// use vaux_client::MqttClient;
+    ///
+    /// let mut client = MqttClient::default();
+    /// // set the session expiry to 1 day
+    /// client.set_session_expiry(60 * 60 * 24);
+    /// ```
+    pub fn set_session_expiry(&mut self, session_expiry: u32) {
+        self.session_expiry = session_expiry;
+    }
+
+    pub fn connect(&mut self, clean_start: bool) -> Result<ConnAck> {
         let mut retry = true;
         let mut attempts = 0;
         let interval = Duration::from_millis(self.connect_interval);
+        let mut result: Result<ConnAck> =
+            Err(MqttError::new("unable to connect", ErrorKind::Connection));
         while retry {
-            result = self.connect_with_timeout(interval);
+            result = self.connect_with_timeout(interval, clean_start);
             if let Err(e) = &result {
                 match e.kind() {
                     ErrorKind::Timeout => {}
@@ -337,12 +366,17 @@ impl MqttClient {
         }
     }
 
-    fn connect_with_timeout(&mut self, timeout: Duration) -> Result<()> {
+    fn connect_with_timeout(&mut self, timeout: Duration, clean_start: bool) -> Result<ConnAck> {
         let mut connect = Connect::default();
+        connect.clean_start = clean_start;
         if let Some(id) = self.client_id.as_ref() {
             connect.client_id = id.to_owned();
         }
+        connect
+            .properties_mut()
+            .set_property(Property::SessionExpiryInterval(self.session_expiry));
         let connect_packet = Packet::Connect(Box::new(connect));
+
         match TcpStream::connect_timeout(&self.addr, timeout) {
             Ok(stream) => {
                 self.connection = Some(stream);
@@ -378,7 +412,7 @@ impl MqttClient {
                                             }
                                             // TODO set server properties based on ConnAck
                                             self.connected = true;
-                                            Ok(())
+                                            Ok(connack)
                                         }
                                         Packet::Disconnect(_disconnect) => {
                                             // TODO return the disconnect reason as MQTT error

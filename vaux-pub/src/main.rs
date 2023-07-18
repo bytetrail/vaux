@@ -49,7 +49,7 @@ fn main() {
         10,
         false,
     );
-    match client.connect() {
+    match client.connect(true) {
         Ok(_) => {
             let handle = client.start();
             let producer = client.producer();
@@ -61,6 +61,10 @@ fn main() {
                 .set_property(Property::PayloadFormat(
                     vaux_mqtt::property::PayloadFormat::Utf8,
                 ));
+            publish
+                .properties_mut()
+                .set_property(Property::MessageExpiry(1000));
+            
             publish.topic_name = Some(args.topic);
             publish.set_payload(Vec::from(args.message.as_bytes()));
             publish.set_qos(args.qos);
