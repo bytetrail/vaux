@@ -66,6 +66,10 @@ impl Default for MqttClient {
 }
 
 impl MqttClient {
+    /// Creates a new MQTT client with the specified host, port, client ID, and
+    /// auto ack settings. The client ID is required and must be unique for the
+    /// broker. If the client ID is not specified, a UUID will be generated and
+    /// used as the client ID.
     pub fn new(
         host: IpAddr,
         port: u16,
@@ -104,10 +108,18 @@ impl MqttClient {
         }
     }
 
+    /// Gets a new message producer channel. This channel is used to send MQTT packets
+    /// to the remote broker. The producer channel is cloned and returned so that
+    /// multiple threads can send messages to the remote broker.
     pub fn producer(&self) -> crossbeam_channel::Sender<vaux_mqtt::Packet> {
         self.producer.clone()
     }
 
+    /// Gets a new message consumer channel. This channel is used to receive MQTT packets
+    /// from the remote broker. The consumer channel is cloned and returned so that
+    /// multiple threads can receive messages from the remote broker. Consumers do not
+    /// get duplicate messages using this method. A consumer will only receive a message
+    /// once and no 2 consumers will receive the same message.
     pub fn consumer(&mut self) -> crossbeam_channel::Receiver<vaux_mqtt::Packet> {
         self.consumer.clone()
     }
