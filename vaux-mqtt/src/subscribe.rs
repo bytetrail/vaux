@@ -112,6 +112,16 @@ pub struct Subscription {
 }
 
 impl Subscription {
+    /// Create a new Subscription with the given filter and QoSLevel.
+    /// The remaining fields are set to their default values.
+    pub fn new(filter: String, qos: QoSLevel) -> Self {
+        Self {
+            filter,
+            qos,
+            ..Default::default()
+        }
+    }
+
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         put_utf8(&self.filter, dest)?;
         let flags = self.qos as u8
