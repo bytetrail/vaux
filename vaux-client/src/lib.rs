@@ -19,6 +19,14 @@ pub struct MqttError {
     kind: ErrorKind,
 }
 
+impl std::error::Error for MqttError {}
+
+impl std::fmt::Display for MqttError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
 impl MqttError {
     pub fn new(message: &str, kind: ErrorKind) -> Self {
         Self {
