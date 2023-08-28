@@ -36,6 +36,10 @@ impl ConnAck {
         allowed
     }
 
+    pub fn reason(&self) -> Reason {
+        self.reason
+    }
+
     pub fn properties(&self) -> &PropertyBundle {
         &self.properties
     }

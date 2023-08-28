@@ -12,7 +12,10 @@ pub struct Args {
     topic: String,
     #[arg(short, long, default_value = "127.0.0.1")]
     addr: String,
-
+    #[arg(short, long, requires = "password")]
+    username: Option<String>,
+    #[arg(short, long, requires = "username")]
+    password: Option<String>,
     message: String,
 }
 
@@ -40,6 +43,11 @@ impl clap::builder::TypedValueParser for QoSLevelParser {
 fn main() {
     let args = Args::parse();
 
+    let credentials = match (args.username, args.password) {
+        (Some(u), Some(p)) => Some((u, Vec::from(p.as_bytes()))),
+        _ => None,
+    };
+
     let addr: Ipv4Addr = args.addr.parse().expect("unable to create addr");
     let mut client = vaux_client::MqttClient::new(
         IpAddr::V4(addr),
@@ -49,7 +57,7 @@ fn main() {
         10,
         false,
     );
-    match client.connect(true) {
+    match client.connect(true, &credentials) {
         Ok(_) => {
             let handle = client.start();
             let producer = client.producer();
@@ -64,7 +72,7 @@ fn main() {
             publish
                 .properties_mut()
                 .set_property(Property::MessageExpiry(1000));
-            
+
             publish.topic_name = Some(args.topic);
             publish.set_payload(Vec::from(args.message.as_bytes()));
             publish.set_qos(args.qos);

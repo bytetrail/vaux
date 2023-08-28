@@ -10,7 +10,7 @@ use std::{
 use bytes::BytesMut;
 use vaux_mqtt::{
     decode, encode, property::Property, ConnAck, Connect, Packet, PropertyType, PubResp, QoSLevel,
-    Subscribe, Subscription,
+    Reason, Subscribe, Subscription,
 };
 
 use crate::{ErrorKind, MqttError};
@@ -158,25 +158,44 @@ impl MqttClient {
         self.session_expiry = session_expiry;
     }
 
-    pub fn connect(&mut self, clean_start: bool) -> Result<ConnAck> {
-        let mut retry = true;
+    /// Connects to the remote broker.
+    /// Set ```clean_start``` to ```true``` to connect with a new session. The
+    /// server will discard any existing session state
+    /// (3.1.2.4 Clean Start)[https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901039]
+    /// and start a new session for existing clients when ```clean_start``` is
+    /// set to true.
+    /// Basic authentication credential may be passes in the ```credentials```
+    /// parameter when required. This parameter is ignored when set to ```None```
+    pub fn connect(
+        &mut self,
+        clean_start: bool,
+        credentials: &Option<(String, Vec<u8>)>,
+    ) -> Result<ConnAck> {
         let mut attempts = 0;
         let interval = Duration::from_millis(self.connect_interval);
-        let mut result: Result<ConnAck> =
-            Err(MqttError::new("unable to connect", ErrorKind::Connection));
-        while retry {
-            result = self.connect_with_timeout(interval, clean_start);
-            if let Err(e) = &result {
-                match e.kind() {
-                    ErrorKind::Timeout => {}
-                    _ => thread::sleep(interval),
-                }
-                attempts += 1;
-                if attempts == self.connect_retry {
+        let mut result: Result<ConnAck>;
+        loop {
+            match self.connect_with_timeout(interval, clean_start, credentials) {
+                Ok(connack) => {
+                    result = Ok(connack);
                     break;
                 }
-            } else {
-                retry = false;
+                Err(e) => {
+                    let k = e.kind();
+                    result = Err(e);
+                    match k {
+                        ErrorKind::Timeout => {
+                            thread::sleep(interval);
+                            attempts += 1;
+                            if attempts == self.connect_retry {
+                                break;
+                            }
+                        }
+                        _ => {
+                            break;
+                        }
+                    }
+                }
             }
         }
         result
@@ -355,7 +374,7 @@ impl MqttClient {
                         eprintln!("ERROR sending packet to remote: {}", e.message());
                     }
                     // send any pending QOS-1 publish packets that we are able to send
-                    while pending_publish.len() > 0 && qos_1_remaining > 0 {
+                    while !pending_publish.is_empty() && qos_1_remaining > 0 {
                         let packet = pending_publish.remove(0);
                         // pending_publish_size -= packet.encoded_size();
                         if let Err(e) = MqttClient::send(&mut connection, packet.clone()) {
@@ -378,7 +397,12 @@ impl MqttClient {
         }
     }
 
-    fn connect_with_timeout(&mut self, timeout: Duration, clean_start: bool) -> Result<ConnAck> {
+    fn connect_with_timeout(
+        &mut self,
+        timeout: Duration,
+        clean_start: bool,
+        credentials: &Option<(String, Vec<u8>)>,
+    ) -> Result<ConnAck> {
         let mut connect = Connect::default();
         connect.clean_start = clean_start;
         if let Some(id) = self.client_id.as_ref() {
@@ -387,8 +411,12 @@ impl MqttClient {
         connect
             .properties_mut()
             .set_property(Property::SessionExpiryInterval(self.session_expiry));
-        let connect_packet = Packet::Connect(Box::new(connect));
 
+        if let Some(credentials) = credentials {
+            connect.username = Some(credentials.0.to_string());
+            connect.password = Some(credentials.1.clone());
+        }
+        let connect_packet = Packet::Connect(Box::new(connect));
         match TcpStream::connect_timeout(&self.addr, timeout) {
             Ok(stream) => {
                 self.connection = Some(stream);
@@ -405,6 +433,15 @@ impl MqttClient {
                                 if let Some(packet) = p {
                                     match packet {
                                         Packet::ConnAck(connack) => {
+                                            if connack.reason() != Reason::Success {
+                                                return Err(MqttError::new(
+                                                    &format!(
+                                                        "connection refused: {}",
+                                                        connack.reason()
+                                                    ),
+                                                    ErrorKind::Connection(connack.reason()),
+                                                ));
+                                            }
                                             if self.client_id.is_none() {
                                                 match connack
                                                     .properties()
@@ -453,13 +490,11 @@ impl MqttClient {
                 }
             }
             Err(e) => match e.kind() {
-                std::io::ErrorKind::TimedOut => Err(MqttError {
-                    message: "timeout".to_string(),
-                    kind: ErrorKind::Timeout,
-                }),
-                _ => Err(MqttError::new(
-                    &format!("unable to connect: {}", e),
-                    ErrorKind::Connection,
+                std::io::ErrorKind::TimedOut => Err(MqttError::new("timeout", ErrorKind::Timeout)),
+                k => Err(MqttError::new_with_source(
+                    &format!("unable to connect: {}", k),
+                    ErrorKind::IO,
+                    Box::new(e),
                 )),
             },
         }
@@ -470,20 +505,17 @@ impl MqttClient {
         match connection.read(&mut buffer) {
             Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
                 Ok(packet) => Ok(packet),
-                Err(e) => Err(MqttError {
-                    message: e.reason,
-                    kind: ErrorKind::Codec,
-                }),
+                Err(e) => Err(MqttError::new(&e.reason, ErrorKind::Codec)),
             },
             Err(e) => match e.kind() {
-                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => Err(MqttError {
-                    message: e.to_string(),
-                    kind: ErrorKind::Timeout,
-                }),
-                _ => Err(MqttError {
-                    message: e.to_string(),
-                    kind: ErrorKind::Transport,
-                }),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+                    Err(MqttError::new(&e.to_string(), ErrorKind::Timeout))
+                }
+                _ => Err(MqttError::new_with_source(
+                    &e.to_string(),
+                    ErrorKind::IO,
+                    Box::new(e),
+                )),
             },
         }
     }
@@ -497,10 +529,11 @@ impl MqttClient {
         if let Err(e) = connection.write_all(&dest) {
             eprintln!("unexpected send error {:#?}", e);
             // TODO higher fidelity error handling
-            return Err(MqttError {
-                kind: ErrorKind::Transport,
-                message: e.to_string(),
-            });
+            return Err(MqttError::new_with_source(
+                &format!("unable to send packet: {}", e),
+                ErrorKind::IO,
+                Box::new(e),
+            ));
         }
         Ok(None)
     }

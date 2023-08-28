@@ -18,6 +18,10 @@ pub struct Args {
     addr: String,
     #[arg(short, long)]
     clean_start: bool,
+    #[arg(short, long, requires = "password")]
+    username: Option<String>,
+    #[arg(short, long, requires = "username")]
+    password: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -53,7 +57,13 @@ fn main() {
         10,
         false,
     );
-    match client.connect(args.clean_start) {
+
+    let credentials = match (args.username, args.password) {
+        (Some(u), Some(p)) => Some((u, Vec::from(p.as_bytes()))),
+        _ => None,
+    };
+
+    match client.connect(args.clean_start, &credentials) {
         Ok(c) => {
             println!("Connected: {:?}", c);
             client.start();
@@ -73,8 +83,7 @@ fn main() {
             match producer.send(Packet::Subscribe(subscribe)) {
                 Ok(_) => {
                     loop {
-                        let mut iter = consumer.try_iter();
-                        while let Some(packet) = iter.next() {
+                        for packet in consumer.try_iter() {
                             match packet {
                                 Packet::Publish(mut p) => {
                                     if p.properties().has_property(&PropertyType::PayloadFormat) {
