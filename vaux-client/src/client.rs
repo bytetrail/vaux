@@ -31,6 +31,10 @@ pub type Result<T> = core::result::Result<T, MqttError>;
 
 #[derive(Debug)]
 pub struct MqttClient {
+    tls: bool,
+    trusted_ca: Option<rustls::RootCertStore>,
+    #[cfg(feature = "developer")]
+    verifier: Verfier,
     auto_ack: bool,
     auto_packet_id: bool,
     last_packet_id: u16,
@@ -87,6 +91,8 @@ impl MqttClient {
             crossbeam_channel::Receiver<vaux_mqtt::Packet>,
         ) = crossbeam_channel::unbounded();
         Self {
+            tls: false,
+            trusted_ca: None,
             auto_ack,
             auto_packet_id,
             last_packet_id: 0,
@@ -465,7 +471,10 @@ impl MqttClient {
         }
     }
 
-    pub fn read_next(connection: &mut TcpStream, max_packet_size: usize) -> Result<Option<Packet>> {
+    pub fn read_next(
+        connection: &mut dyn std::io::Read,
+        max_packet_size: usize,
+    ) -> Result<Option<Packet>> {
         let mut buffer = vec![0u8; max_packet_size];
         match connection.read(&mut buffer) {
             Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
@@ -488,7 +497,7 @@ impl MqttClient {
         }
     }
 
-    pub fn send(connection: &mut TcpStream, packet: Packet) -> Result<Option<Packet>> {
+    pub fn send(connection: &mut dyn std::io::Write, packet: Packet) -> Result<Option<Packet>> {
         let mut dest = BytesMut::default();
         let result = encode(packet, &mut dest);
         if let Err(e) = result {
