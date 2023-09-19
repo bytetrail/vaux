@@ -42,6 +42,8 @@ fn main() {
 
     let addr: Ipv4Addr = args.addr.parse().expect("unable to create addr");
     let mut client = vaux_client::MqttClient::new(
+        false,
+        None,
         IpAddr::V4(addr),
         1883,
         "vaux-publisher-001",
@@ -64,7 +66,7 @@ fn main() {
             publish
                 .properties_mut()
                 .set_property(Property::MessageExpiry(1000));
-            
+
             publish.topic_name = Some(args.topic);
             publish.set_payload(Vec::from(args.message.as_bytes()));
             publish.set_qos(args.qos);

@@ -59,6 +59,8 @@ impl Default for MqttClient {
     fn default() -> Self {
         let ip_addr = DEFAULT_HOST_IP.parse::<Ipv4Addr>().unwrap();
         Self::new(
+            false,
+            None,
             IpAddr::V4(ip_addr),
             DEFAULT_PORT,
             &uuid::Uuid::new_v4().to_string(),
@@ -75,6 +77,8 @@ impl MqttClient {
     /// broker. If the client ID is not specified, a UUID will be generated and
     /// used as the client ID.
     pub fn new(
+        tls: bool,
+        trusted_ca: Option<rustls::RootCertStore>,
         host: IpAddr,
         port: u16,
         client_id: &str,
@@ -91,8 +95,8 @@ impl MqttClient {
             crossbeam_channel::Receiver<vaux_mqtt::Packet>,
         ) = crossbeam_channel::unbounded();
         Self {
-            tls: false,
-            trusted_ca: None,
+            tls,
+            trusted_ca,
             auto_ack,
             auto_packet_id,
             last_packet_id: 0,

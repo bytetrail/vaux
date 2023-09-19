@@ -46,6 +46,8 @@ fn main() {
 
     let addr: Ipv4Addr = "127.0.0.1".parse().expect("unable to create addr");
     let mut client = MqttClient::new(
+        false,
+        None,
         std::net::IpAddr::V4(addr),
         1883,
         "vaux-subscriber-001",
