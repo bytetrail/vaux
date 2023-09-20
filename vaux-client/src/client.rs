@@ -65,26 +65,6 @@ impl<'a> MqttStream<'a> {
         }
     }
 
-    fn reader(&mut self) -> &mut dyn Read {
-        if let Some(ref mut tcp) = self.tcp {
-            return tcp;
-        }
-        if let Some(ref mut tls) = self.tls {
-            return tls;
-        }
-        panic!("no stream available");
-    }
-
-    fn writer(&mut self) -> &mut dyn Write {
-        if let Some(ref mut tcp) = self.tcp {
-            return tcp;
-        }
-        if let Some(ref mut tls) = self.tls {
-            return tls;
-        }
-        panic!("no stream available");
-    }
-
     fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
         if let Some(ref mut tcp) = self.tcp {
             return tcp.set_read_timeout(timeout);
