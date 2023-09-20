@@ -43,6 +43,10 @@ impl ConnAck {
     pub fn properties_mut(&mut self) -> &mut PropertyBundle {
         &mut self.properties
     }
+
+    pub fn reason(&self) -> Reason {
+        self.reason
+    }
 }
 
 impl Default for ConnAck {

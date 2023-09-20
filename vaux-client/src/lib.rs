@@ -1,6 +1,8 @@
 mod client;
+#[cfg(feature = "developer")]
+mod developer;
 
-pub use client::MqttClient;
+pub use client::{MqttClient, MqttConnection};
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
