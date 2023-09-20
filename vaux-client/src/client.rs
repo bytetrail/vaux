@@ -45,9 +45,114 @@ pub struct MqttConnection {
 }
 
 #[derive(Debug)]
-enum MqttStream<'a> {
-    Tcp(TcpStream),
-    Tls(rustls::Stream<'a, rustls::ClientConnection, TcpStream>),
+struct MqttStream<'a> {
+    tcp: Option<TcpStream>,
+    tls: Option<rustls::Stream<'a, rustls::ClientConnection, TcpStream>>,
+}
+
+impl<'a> MqttStream<'a> {
+    fn new_tcp(tcp: TcpStream) -> Self {
+        Self {
+            tcp: Some(tcp),
+            tls: None,
+        }
+    }
+
+    fn new_tls(tls_conn: &'a mut rustls::ClientConnection, tcp: &'a mut TcpStream) -> Self {
+        Self {
+            tcp: None,
+            tls: Some(rustls::Stream::new(tls_conn, tcp)),
+        }
+    }
+
+    fn reader(&mut self) -> &mut dyn Read {
+        if let Some(ref mut tcp) = self.tcp {
+            return tcp;
+        }
+        if let Some(ref mut tls) = self.tls {
+            return tls;
+        }
+        panic!("no stream available");
+    }
+
+    fn writer(&mut self) -> &mut dyn Write {
+        if let Some(ref mut tcp) = self.tcp {
+            return tcp;
+        }
+        if let Some(ref mut tls) = self.tls {
+            return tls;
+        }
+        panic!("no stream available");
+    }
+
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        if let Some(ref mut tcp) = self.tcp {
+            return tcp.set_read_timeout(timeout);
+        }
+        if let Some(ref mut tls) = self.tls {
+            return tls.sock.set_read_timeout(timeout);
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "no stream available",
+        ))
+    }
+
+    fn shutdown(&mut self) -> std::io::Result<()> {
+        if let Some(ref mut tcp) = self.tcp {
+            return tcp.shutdown(std::net::Shutdown::Both);
+        }
+        if let Some(ref mut tls) = self.tls {
+            return tls.sock.shutdown(std::net::Shutdown::Both);
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "no stream available",
+        ))
+    }
+}
+
+impl<'a> Read for MqttStream<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if let Some(ref mut tcp) = self.tcp {
+            return tcp.read(buf);
+        }
+        if let Some(ref mut tls) = self.tls {
+            return tls.read(buf);
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "no stream available",
+        ))
+    }
+}
+
+impl<'a> Write for MqttStream<'a> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Some(ref mut tcp) = self.tcp {
+            return tcp.write(buf);
+        }
+        if let Some(ref mut tls) = self.tls {
+            return tls.write(buf);
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "no stream available",
+        ))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if let Some(ref mut tcp) = self.tcp {
+            return tcp.flush();
+        }
+        if let Some(ref mut tls) = self.tls {
+            return tls.flush();
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "no stream available",
+        ))
+    }
 }
 
 impl MqttConnection {
@@ -337,7 +442,7 @@ impl MqttClient {
         &mut self,
         mut connection: MqttConnection,
         clean_start: bool,
-    ) -> Option<JoinHandle<Result<()>>> {
+    ) -> Result<JoinHandle<Result<()>>> {
         let packet_recv = self.packet_recv.take().unwrap();
         let packet_send = self.packet_send.take().unwrap();
         let auto_ack = self.auto_ack;
@@ -350,44 +455,22 @@ impl MqttClient {
         let session_expiry = self.session_expiry;
         let connected = self.connected.clone();
         let credentials = connection.credentials().clone();
-        Some(thread::spawn(move || {
-            let mut stream: MqttStream;
-            if connection.tls {
-                let mut tls_stream = rustls::Stream::new(
+
+        Ok(thread::spawn(move || {
+            let mut stream = if connection.tls {
+                MqttStream::new_tls(
                     connection.tls_conn.as_mut().unwrap(),
                     connection.tcp_socket.as_mut().unwrap(),
-                );
-                if let Err(e) = tls_stream.flush() {
-                    return Err(MqttError::new(
-                        &format!("unable to flush stream: {}", e),
-                        ErrorKind::Transport,
-                    ));
-                }
-                stream = MqttStream::Tls(tls_stream);
+                )
             } else {
-                stream = MqttStream::Tcp(connection.tcp_socket.take().unwrap());
-            }
+                MqttStream::new_tcp(connection.tcp_socket.take().unwrap())
+            };
 
-            match stream {
-                MqttStream::Tcp(ref mut connection) => {
-                    if let Err(e) = connection.set_read_timeout(Some(Duration::from_millis(100))) {
-                        return Err(MqttError::new(
-                            &format!("unable to set read timeout: {}", e),
-                            ErrorKind::Transport,
-                        ));
-                    }
-                }
-                MqttStream::Tls(ref mut connection) => {
-                    if let Err(e) = connection
-                        .sock
-                        .set_read_timeout(Some(Duration::from_millis(100)))
-                    {
-                        return Err(MqttError::new(
-                            &format!("unable to set read timeout: {}", e),
-                            ErrorKind::Transport,
-                        ));
-                    }
-                }
+            if let Err(e) = stream.set_read_timeout(Some(Duration::from_millis(100))) {
+                return Err(MqttError::new(
+                    &format!("unable to set read timeout: {}", e),
+                    ErrorKind::Transport,
+                ));
             }
 
             match Self::send_connect(
@@ -400,11 +483,10 @@ impl MqttClient {
             ) {
                 Ok(_) => {}
                 Err(e) => {
-                    Self::shutdown(&mut stream).unwrap();
+                    stream.shutdown().unwrap();
                     return Err(e);
                 }
             }
-
             let mut pending_recv_ack: HashMap<u16, Packet> = HashMap::new();
             let mut pending_publish: Vec<Packet> = Vec::new();
             // TODO add size tracking to pending publish
@@ -412,19 +494,13 @@ impl MqttClient {
             let mut qos_1_remaining = receive_max;
             pending_publish.append(&mut pending_qos1.lock().unwrap());
             loop {
-                match MqttClient::read_next(
-                    match stream {
-                        MqttStream::Tcp(ref mut connection) => connection,
-                        MqttStream::Tls(ref mut connection) => connection,
-                    },
-                    max_packet_size,
-                ) {
+                match MqttClient::read_next(&mut stream, max_packet_size) {
                     Ok(result) => {
                         if let Some(p) = result {
                             match &p {
                                 Packet::Disconnect(d) => {
                                     // TODO handle disconnect - verify shutdown behavior
-                                    Self::shutdown(&mut stream).unwrap();
+                                    stream.shutdown().unwrap();
                                     pending_qos1.lock().unwrap().append(&mut pending_publish);
                                     return Err(MqttError::new(
                                         &format!("disconnect received: {:?}", d),
@@ -440,21 +516,14 @@ impl MqttClient {
                                                 if let Some(packet_id) = publish.packet_id {
                                                     puback.packet_id = packet_id;
                                                 } else {
-                                                    Self::shutdown(&mut stream).unwrap();
+                                                    stream.shutdown().unwrap();
                                                     return Err(MqttError::new(
                                                         "protocol error, no packet ID with QAS > 0",
                                                         ErrorKind::Protocol,
                                                     ));
                                                 }
                                                 if MqttClient::send(
-                                                    match stream {
-                                                        MqttStream::Tcp(ref mut connection) => {
-                                                            connection
-                                                        }
-                                                        MqttStream::Tls(ref mut connection) => {
-                                                            connection
-                                                        }
-                                                    },
+                                                    &mut stream,
                                                     Packet::PubAck(puback),
                                                 )
                                                 .is_err()
@@ -480,7 +549,7 @@ impl MqttClient {
                                 _ => {}
                             }
                             if let Err(e) = packet_recv.send(p.clone()) {
-                                Self::shutdown(&mut stream).unwrap();
+                                stream.shutdown().unwrap();
                                 pending_qos1.lock().unwrap().append(&mut pending_publish);
                                 return Err(MqttError::new(
                                     &format!("unable to send packet to consumer: {}", e),
@@ -522,39 +591,21 @@ impl MqttClient {
                             }
                         }
                     } else if let Packet::Disconnect(_d) = packet.clone() {
-                        if let Err(e) = MqttClient::send(
-                            match stream {
-                                MqttStream::Tcp(ref mut connection) => connection,
-                                MqttStream::Tls(ref mut connection) => connection,
-                            },
-                            packet,
-                        ) {
+                        if let Err(e) = MqttClient::send(&mut stream, packet) {
                             eprintln!("ERROR sending packet to remote: {}", e.message());
                         }
-                        Self::shutdown(&mut stream).unwrap();
+                        stream.shutdown().unwrap();
                         pending_qos1.lock().unwrap().append(&mut pending_publish);
                         return Ok(());
                     }
-                    if let Err(e) = MqttClient::send(
-                        match stream {
-                            MqttStream::Tcp(ref mut connection) => connection,
-                            MqttStream::Tls(ref mut connection) => connection,
-                        },
-                        packet,
-                    ) {
+                    if let Err(e) = MqttClient::send(&mut stream, packet) {
                         eprintln!("ERROR sending packet to remote: {}", e.message());
                     }
                     // send any pending QOS-1 publish packets that we are able to send
                     while pending_publish.len() > 0 && qos_1_remaining > 0 {
                         let packet = pending_publish.remove(0);
                         // pending_publish_size -= packet.encoded_size();
-                        if let Err(e) = MqttClient::send(
-                            match stream {
-                                MqttStream::Tcp(ref mut connection) => connection,
-                                MqttStream::Tls(ref mut connection) => connection,
-                            },
-                            packet.clone(),
-                        ) {
+                        if let Err(e) = MqttClient::send(&mut stream, packet.clone()) {
                             pending_publish.insert(0, packet);
                             // TODO notify calling client of error
                             eprintln!("ERROR sending packet to remote: {}", e.message());
@@ -605,14 +656,8 @@ impl MqttClient {
         if let Err(e) = result {
             panic!("Failed to encode packet: {:?}", e);
         }
-        match match stream {
-            MqttStream::Tcp(ref mut connection) => connection.write_all(&dest),
-            MqttStream::Tls(ref mut connection) => connection.write_all(&dest),
-        } {
-            Ok(_) => match match stream {
-                MqttStream::Tcp(ref mut connection) => connection.read(&mut buffer),
-                MqttStream::Tls(ref mut connection) => connection.read(&mut buffer),
-            } {
+        match stream.write_all(&dest) {
+            Ok(_) => match stream.read(&mut buffer) {
                 Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
                     Ok(p) => {
                         if let Some(packet) = p {
@@ -719,27 +764,5 @@ impl MqttClient {
             });
         }
         Ok(None)
-    }
-
-    fn shutdown(stream: &mut MqttStream) -> Result<()> {
-        match stream {
-            MqttStream::Tcp(ref mut connection) => {
-                connection.shutdown(std::net::Shutdown::Both).map_err(|e| {
-                    MqttError::new(
-                        &format!("unable to shutdown TCP connection: {}", e),
-                        ErrorKind::Transport,
-                    )
-                })
-            }
-            MqttStream::Tls(ref mut connection) => connection
-                .sock
-                .shutdown(std::net::Shutdown::Both)
-                .map_err(|e| {
-                    MqttError::new(
-                        &format!("unable to shutdown TLS connection: {}", e),
-                        ErrorKind::Transport,
-                    )
-                }),
-        }
     }
 }
