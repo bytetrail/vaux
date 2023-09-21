@@ -425,7 +425,17 @@ impl MqttClient {
     /// use std::time::Duration;
     ///
     /// let mut client = MqttClient::default();
-    /// let connection = MqttConnection::new().with_host("localhost").with_port(1883).connect().unwrap();
+    /// let connection: MqttConnection;
+    ///
+    /// match MqttConnection::new().with_host("localhost").with_port(1883).connect() {
+    ///     Ok(c) => {
+    ///         connection = c;
+    ///     }
+    ///     Err(e) => {
+    ///         println!("unable to establish TCP connection: {:?}", e);
+    ///        return;
+    ///     }
+    /// }
     /// let handle: Option<std::thread::JoinHandle<_>>;
     /// match client.try_start(Duration::from_millis(5000), connection, true) {
     ///    Ok(h) => {
