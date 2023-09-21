@@ -1,15 +1,15 @@
 [package]
 name = "vaux-broker"
-version = "0.4.2"
+version = "0.4.4"
 edition = "2021"
 authors = ["ByteTrail, LLC"]
 description = "MQTT Broker"
 
 [dependencies]
 clap = { version = "3.1.18", features = ["derive"] }
-uuid = {version = "1.0.0", features = ["v4"] }
+uuid = { version = "1.0.0", features = ["v4"] }
 tokio = { version = "1.17.0", features = ["full"] }
 tokio-util = { version = "0.7.0", features = ["codec"] }
 futures = "0.3.21"
 bytes = "1.1.0"
-vaux-mqtt = { path="../vaux-mqtt" }
+vaux-mqtt = { path = "../vaux-mqtt" }
