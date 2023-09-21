@@ -404,6 +404,30 @@ impl MqttClient {
         self.producer.send(vaux_mqtt::Packet::Subscribe(subscribe))
     }
 
+    /// Attempts to start an MQTT session with the remote broker. The client will
+    /// attempt to connect to the remote broker and send a CONNECT packet. If the
+    /// client is unable to connect to the remote broker, an error will be returned.
+    /// The ```max_wait``` parameter is used to determine how long the client will
+    /// wait for the connection to be established. If the connection is not established
+    /// within the ```max_wait``` interval, an error will be returned.
+    /// Example:
+    /// ```
+    /// use vaux_client::MqttClient;
+    /// use std::time::Duration;
+    ///
+    /// let mut client = MqttClient::default();
+    /// let connection = MqttConnection::new().with_host("localhost").with_port(1883).connect().unwrap();
+    /// let handle: Option<std::thread::JoinHandle<_>>;
+    /// match client.try_start(Duration::from_millis(5000), connection, true) {
+    ///    Ok(h) => {
+    ///       handle = Some(h);
+    ///       println!("connected to broker");
+    ///   }
+    ///  Err(e) => {
+    ///    println!("unable to connect to broker: {:?}", e);
+    /// }
+    /// ```
+    ///
     pub fn try_start(
         &mut self,
         max_wait: Duration,
