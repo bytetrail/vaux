@@ -17,6 +17,7 @@ use vaux_mqtt::{
 use crate::developer;
 use crate::{ErrorKind, MqttError};
 
+const DEFAULT_CONNECTION_TIMEOUT: u64 = 30_000;
 const DEFAULT_RECV_MAX: u16 = 100;
 const DEFAULT_SESSION_EXPIRY: u32 = 0;
 const DEFAULT_HOST: &str = "localhost";
@@ -25,8 +26,6 @@ pub const DEFAULT_SECURE_PORT: u16 = 8883;
 // 16K is the default max packet size for the broker
 const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024;
 const MAX_QUEUE_LEN: usize = 100;
-// TODO add size tracking to pending publish
-// const MAX_QUEUE_SIZE: usize = 100 * 1024;
 
 pub type Result<T> = core::result::Result<T, MqttError>;
 
@@ -105,7 +104,7 @@ impl MqttConnection {
     }
 
     pub fn connect(self) -> Result<Self> {
-        self.connect_with_timeout(Duration::from_millis(30000))
+        self.connect_with_timeout(Duration::from_millis(DEFAULT_CONNECTION_TIMEOUT))
     }
 
     pub fn connect_with_timeout(mut self, timeout: Duration) -> Result<Self> {

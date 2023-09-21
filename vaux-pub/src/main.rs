@@ -90,7 +90,6 @@ fn publish(
         };
     println!("connected to broker");
     let producer = client.producer();
-    //let mut receiver = client.take_consumer();
 
     let mut publish = Publish::default();
     publish

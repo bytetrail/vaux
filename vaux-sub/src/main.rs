@@ -135,7 +135,6 @@ fn subscribe(connection: vaux_client::MqttConnection, mut client: MqttClient, ar
                                 }
                                 _ => {}
                             }
-                        } else {
                         }
                     }
                 }
