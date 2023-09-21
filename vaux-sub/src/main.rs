@@ -94,55 +94,51 @@ fn subscribe(connection: vaux_client::MqttConnection, mut client: MqttClient, ar
     match producer.send(Packet::Subscribe(subscribe)) {
         Ok(_) => {
             loop {
-                let mut iter = consumer.try_iter();
-                while let Some(packet) = iter.next() {
-                    match packet {
-                        Packet::Publish(mut p) => {
-                            if p.properties().has_property(&PropertyType::PayloadFormat) {
-                                if let Property::PayloadFormat(indicator) = p
-                                    .properties()
-                                    .get_property(&PropertyType::PayloadFormat)
-                                    .unwrap()
-                                {
-                                    if *indicator == PayloadFormat::Utf8 {
-                                        print!("Payload: ");
-                                        println!(
-                                            "{}",
-                                            String::from_utf8(p.take_payload().unwrap()).unwrap()
-                                        );
-                                    }
+                let iter = consumer.try_iter();
+                for packet in iter {
+                    if let Packet::Publish(mut p) = packet {
+                        if p.properties().has_property(&PropertyType::PayloadFormat) {
+                            if let Property::PayloadFormat(indicator) = p
+                                .properties()
+                                .get_property(&PropertyType::PayloadFormat)
+                                .unwrap()
+                            {
+                                if *indicator == PayloadFormat::Utf8 {
+                                    print!("Payload: ");
+                                    println!(
+                                        "{}",
+                                        String::from_utf8(p.take_payload().unwrap()).unwrap()
+                                    );
                                 }
-                            }
-                            if args.auto_ack {
-                                // check for QOS 1 or 2
-                                match p.qos() {
-                                    QoSLevel::AtLeastOnce => {
-                                        let mut ack = PubResp::new_puback();
-                                        ack.packet_id = p.packet_id.unwrap();
-                                        if let Err(e) = producer.send(Packet::PubAck(ack)) {
-                                            eprintln!("{:?}", e);
-                                        }
-                                    }
-                                    QoSLevel::ExactlyOnce => {
-                                        let mut ack = PubResp::new_pubrec();
-                                        ack.packet_id = p.packet_id.unwrap();
-                                        if let Err(e) = producer.send(Packet::PubRec(ack)) {
-                                            eprintln!("{:?}", e);
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            } else {
                             }
                         }
-
-                        _ => {}
+                        if args.auto_ack {
+                            // check for QOS 1 or 2
+                            match p.qos() {
+                                QoSLevel::AtLeastOnce => {
+                                    let mut ack = PubResp::new_puback();
+                                    ack.packet_id = p.packet_id.unwrap();
+                                    if let Err(e) = producer.send(Packet::PubAck(ack)) {
+                                        eprintln!("{:?}", e);
+                                    }
+                                }
+                                QoSLevel::ExactlyOnce => {
+                                    let mut ack = PubResp::new_pubrec();
+                                    ack.packet_id = p.packet_id.unwrap();
+                                    if let Err(e) = producer.send(Packet::PubRec(ack)) {
+                                        eprintln!("{:?}", e);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        } else {
+                        }
                     }
                 }
             }
         }
         Err(e) => {
-            eprintln!("Error: {:?}", e);
+            eprintln!("{:?}", e);
         }
     }
 }

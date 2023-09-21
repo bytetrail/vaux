@@ -44,94 +44,9 @@ pub struct MqttConnection {
     verifier: developer::Verifier,
 }
 
-#[derive(Debug)]
-struct MqttStream<'a> {
-    tcp: Option<TcpStream>,
-    tls: Option<rustls::Stream<'a, rustls::ClientConnection, TcpStream>>,
-}
-
-impl<'a> MqttStream<'a> {
-    fn new_tcp(tcp: TcpStream) -> Self {
-        Self {
-            tcp: Some(tcp),
-            tls: None,
-        }
-    }
-
-    fn new_tls(tls_conn: &'a mut rustls::ClientConnection, tcp: &'a mut TcpStream) -> Self {
-        Self {
-            tcp: None,
-            tls: Some(rustls::Stream::new(tls_conn, tcp)),
-        }
-    }
-
-    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
-        if let Some(ref mut tcp) = self.tcp {
-            return tcp.set_read_timeout(timeout);
-        }
-        if let Some(ref mut tls) = self.tls {
-            return tls.sock.set_read_timeout(timeout);
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "no stream available",
-        ))
-    }
-
-    fn shutdown(&mut self) -> std::io::Result<()> {
-        if let Some(ref mut tcp) = self.tcp {
-            return tcp.shutdown(std::net::Shutdown::Both);
-        }
-        if let Some(ref mut tls) = self.tls {
-            return tls.sock.shutdown(std::net::Shutdown::Both);
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "no stream available",
-        ))
-    }
-}
-
-impl<'a> Read for MqttStream<'a> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if let Some(ref mut tcp) = self.tcp {
-            return tcp.read(buf);
-        }
-        if let Some(ref mut tls) = self.tls {
-            return tls.read(buf);
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "no stream available",
-        ))
-    }
-}
-
-impl<'a> Write for MqttStream<'a> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if let Some(ref mut tcp) = self.tcp {
-            return tcp.write(buf);
-        }
-        if let Some(ref mut tls) = self.tls {
-            return tls.write(buf);
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "no stream available",
-        ))
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        if let Some(ref mut tcp) = self.tcp {
-            return tcp.flush();
-        }
-        if let Some(ref mut tls) = self.tls {
-            return tls.flush();
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "no stream available",
-        ))
+impl Default for MqttConnection {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -265,6 +180,97 @@ impl MqttConnection {
 }
 
 #[derive(Debug)]
+struct MqttStream<'a> {
+    tcp: Option<TcpStream>,
+    tls: Option<rustls::Stream<'a, rustls::ClientConnection, TcpStream>>,
+}
+
+impl<'a> MqttStream<'a> {
+    fn new_tcp(tcp: TcpStream) -> Self {
+        Self {
+            tcp: Some(tcp),
+            tls: None,
+        }
+    }
+
+    fn new_tls(tls_conn: &'a mut rustls::ClientConnection, tcp: &'a mut TcpStream) -> Self {
+        Self {
+            tcp: None,
+            tls: Some(rustls::Stream::new(tls_conn, tcp)),
+        }
+    }
+
+    fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
+        if let Some(ref mut tcp) = self.tcp {
+            return tcp.set_read_timeout(timeout);
+        }
+        if let Some(ref mut tls) = self.tls {
+            return tls.sock.set_read_timeout(timeout);
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "no stream available",
+        ))
+    }
+
+    fn shutdown(&mut self) -> std::io::Result<()> {
+        if let Some(ref mut tcp) = self.tcp {
+            return tcp.shutdown(std::net::Shutdown::Both);
+        }
+        if let Some(ref mut tls) = self.tls {
+            return tls.sock.shutdown(std::net::Shutdown::Both);
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "no stream available",
+        ))
+    }
+}
+
+impl<'a> Read for MqttStream<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if let Some(ref mut tcp) = self.tcp {
+            return tcp.read(buf);
+        }
+        if let Some(ref mut tls) = self.tls {
+            return tls.read(buf);
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "no stream available",
+        ))
+    }
+}
+
+impl<'a> Write for MqttStream<'a> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Some(ref mut tcp) = self.tcp {
+            return tcp.write(buf);
+        }
+        if let Some(ref mut tls) = self.tls {
+            return tls.write(buf);
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "no stream available",
+        ))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if let Some(ref mut tcp) = self.tcp {
+            return tcp.flush();
+        }
+        if let Some(ref mut tls) = self.tls {
+            return tls.flush();
+        }
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "no stream available",
+        ))
+    }
+}
+
+#[derive(Debug)]
 pub struct MqttClient {
     auto_ack: bool,
     auto_packet_id: bool,
@@ -389,7 +395,7 @@ impl MqttClient {
         packet_id: u16,
         topic_filter: &[&str],
         qos: QoSLevel,
-    ) -> std::result::Result<(), crossbeam_channel::SendError<Packet>> {
+    ) -> std::result::Result<(), Box<crossbeam_channel::SendError<Packet>>> {
         let mut subscribe = Subscribe::default();
         subscribe.set_packet_id(packet_id);
         for topic in topic_filter {
@@ -401,7 +407,9 @@ impl MqttClient {
             self.subscriptions.push(subscription.clone());
             subscribe.add_subscription(subscription);
         }
-        self.producer.send(vaux_mqtt::Packet::Subscribe(subscribe))
+        self.producer
+            .send(vaux_mqtt::Packet::Subscribe(subscribe))
+            .map_err(|e| e.into())
     }
 
     /// Attempts to start an MQTT session with the remote broker. The client will
@@ -442,9 +450,7 @@ impl MqttClient {
                 if let Some(last_error) = last_error.as_ref() {
                     match handle.join() {
                         Ok(result) => {
-                            if let Err(e) = result {
-                                return Err(e);
-                            }
+                            result?;
                         }
                         Err(e) => {
                             return Err(MqttError::new(
@@ -499,7 +505,7 @@ impl MqttClient {
         let client_id = self.client_id.clone();
         let session_expiry = self.session_expiry;
         let connected = self.connected.clone();
-        let credentials = connection.credentials().clone();
+        let credentials = connection.credentials();
         let last_error = self.last_error.clone();
 
         thread::spawn(move || {
@@ -654,7 +660,7 @@ impl MqttClient {
                         eprintln!("ERROR sending packet to remote: {}", e.message());
                     }
                     // send any pending QOS-1 publish packets that we are able to send
-                    while pending_publish.len() > 0 && qos_1_remaining > 0 {
+                    while !pending_publish.is_empty() && qos_1_remaining > 0 {
                         let packet = pending_publish.remove(0);
                         // pending_publish_size -= packet.encoded_size();
                         if let Err(e) = MqttClient::send(&mut stream, packet.clone()) {

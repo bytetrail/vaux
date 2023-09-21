@@ -77,16 +77,14 @@ fn publish(
     connection: vaux_client::MqttConnection,
     args: Args,
 ) {
-    let handle: Option<std::thread::JoinHandle<_>>;
-    match client.try_start(Duration::from_millis(5000), connection, true) {
-        Ok(h) => {
-            handle = Some(h);
-        }
-        Err(e) => {
-            eprintln!("unable to start client: {:?}", e);
-            return;
-        }
-    }
+    let handle: Option<std::thread::JoinHandle<_>> =
+        match client.try_start(Duration::from_millis(5000), connection, true) {
+            Ok(h) => Some(h),
+            Err(e) => {
+                eprintln!("unable to start client: {:?}", e);
+                return;
+            }
+        };
     println!("connected to broker");
     let producer = client.producer();
     //let mut receiver = client.take_consumer();
