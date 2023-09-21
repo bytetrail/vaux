@@ -761,7 +761,10 @@ impl MqttClient {
                     ErrorKind::Transport,
                 )),
             },
-            Err(e) => panic!("Unable to write packet(s) to broker: {}", e),
+            Err(e) => Err(MqttError::new(
+                &format!("Unable to write packet(s) to broker: {}", e),
+                ErrorKind::Transport,
+            )),
         }
     }
 
