@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr};
+use std::{io::Read, sync::Arc, time::Duration};
 
 use clap::{error::ErrorKind, Parser};
 use vaux_mqtt::{property::Property, publish::Publish, QoSLevel};
@@ -10,11 +10,17 @@ pub struct Args {
     qos: QoSLevel,
     #[arg(short, long, default_value = "hello-vaux")]
     topic: String,
-    #[arg(short, long, default_value = "127.0.0.1")]
+    #[arg(short, long, default_value = "localhost")]
     addr: String,
-    #[arg(short, long, requires = "password")]
+    #[arg(short = 's', long, requires = "trusted_ca")]
+    tls: bool,
+    #[arg(short, long, default_value = "1883")]
+    pub port: u16,
+    #[arg(short = 'c', long)]
+    trusted_ca: Option<String>,
+    #[arg(short = 'w', long, requires = "password")]
     username: Option<String>,
-    #[arg(short, long, requires = "username")]
+    #[arg(short = 'u', long, requires = "username")]
     password: Option<String>,
     message: String,
 }
@@ -42,51 +48,78 @@ impl clap::builder::TypedValueParser for QoSLevelParser {
 
 fn main() {
     let args = Args::parse();
-
-    let credentials = match (args.username, args.password) {
-        (Some(u), Some(p)) => Some((u, Vec::from(p.as_bytes()))),
-        _ => None,
-    };
-
-    let addr: Ipv4Addr = args.addr.parse().expect("unable to create addr");
-    let mut client = vaux_client::MqttClient::new(
-        IpAddr::V4(addr),
-        1883,
-        "vaux-publisher-001",
-        true,
-        10,
-        false,
-    );
-    match client.connect(true, &credentials) {
-        Ok(_) => {
-            let handle = client.start();
-            let producer = client.producer();
-            //let mut receiver = client.take_consumer();
-
-            let mut publish = Publish::default();
-            publish
-                .properties_mut()
-                .set_property(Property::PayloadFormat(
-                    vaux_mqtt::property::PayloadFormat::Utf8,
-                ));
-            publish
-                .properties_mut()
-                .set_property(Property::MessageExpiry(1000));
-
-            publish.topic_name = Some(args.topic);
-            publish.set_payload(Vec::from(args.message.as_bytes()));
-            publish.set_qos(args.qos);
-            publish.packet_id = Some(101);
-            if producer.send(vaux_mqtt::Packet::Publish(publish)).is_err() {
-                eprintln!("unable to send packet to broker");
-            } else {
-                println!("sent message");
+    let mut root_store = rustls::RootCertStore::empty();
+    if args.tls {
+        if let Some(ca) = &args.trusted_ca {
+            if !std::path::Path::new(ca).exists() {
+                eprintln!("trusted CA file does not exist");
+                return;
             }
-            client.stop();
-            if handle.unwrap().join().unwrap().is_err() {
-                eprintln!("error in client thread");
-            }
+            let cert = load_cert(ca).unwrap();
+            root_store.add(&cert).unwrap();
+        } else {
+            eprintln!("trusted CA file required for TLS");
+            return;
         }
-        Err(e) => eprintln!("{:#?}", e),
     }
+    let mut connection = vaux_client::MqttConnection::new();
+    if args.tls {
+        connection = connection.with_tls().with_trust_store(Arc::new(root_store))
+    }
+    connection = connection
+        .with_host(&args.addr)
+        .with_port(args.port)
+        .connect()
+        .unwrap();
+    let mut client = vaux_client::MqttClient::new("vaux-publisher-001", false, 10, false);
+    publish(&mut client, connection, args);
+}
+
+fn publish(
+    client: &mut vaux_client::MqttClient,
+    connection: vaux_client::MqttConnection,
+    args: Args,
+) {
+    let handle: Option<std::thread::JoinHandle<_>> =
+        match client.try_start(Duration::from_millis(5000), connection, true) {
+            Ok(h) => Some(h),
+            Err(e) => {
+                eprintln!("unable to start client: {:?}", e);
+                return;
+            }
+        };
+    println!("connected to broker");
+    let producer = client.producer();
+
+    let mut publish = Publish::default();
+    publish
+        .properties_mut()
+        .set_property(Property::PayloadFormat(
+            vaux_mqtt::property::PayloadFormat::Utf8,
+        ));
+    publish
+        .properties_mut()
+        .set_property(Property::MessageExpiry(1000));
+
+    publish.topic_name = Some(args.topic);
+    publish.set_payload(Vec::from(args.message.as_bytes()));
+    publish.set_qos(args.qos);
+    publish.packet_id = Some(101);
+    if producer.send(vaux_mqtt::Packet::Publish(publish)).is_err() {
+        eprintln!("unable to send packet to broker");
+    } else {
+        println!("sent message");
+    }
+    client.stop();
+    if handle.unwrap().join().unwrap().is_err() {
+        eprintln!("error in client thread");
+    }
+}
+
+fn load_cert(path: &str) -> Result<rustls::Certificate, std::io::Error> {
+    let mut cert_buffer = Vec::new();
+    let cert_file = std::fs::File::open(path)?;
+    let mut reader = std::io::BufReader::new(cert_file);
+    reader.read_to_end(&mut cert_buffer)?;
+    Ok(rustls::Certificate(cert_buffer))
 }

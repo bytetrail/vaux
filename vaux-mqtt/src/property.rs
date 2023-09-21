@@ -331,7 +331,7 @@ impl IntoIterator for PropertyBundle {
                     )
                 })
             })
-            .chain(self.properties.into_iter())
+            .chain(self.properties)
             .collect::<HashMap<PropertyType, Property>>()
             .into_iter()
     }

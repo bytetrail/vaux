@@ -1,8 +1,10 @@
 mod client;
+#[cfg(feature = "developer")]
+mod developer;
 
 use std::fmt::Display;
 
-pub use client::MqttClient;
+pub use client::{MqttClient, MqttConnection};
 use vaux_mqtt::Reason;
 
 #[derive(Default, Debug, PartialEq, Eq, Copy, Clone)]
@@ -10,9 +12,9 @@ use vaux_mqtt::Reason;
 pub enum ErrorKind {
     #[default]
     Codec,
-    Protocol,
+    Protocol(Reason),
     IO,
-    Connection(Reason),
+    Connection,
     Timeout,
     Transport,
 }
@@ -21,9 +23,9 @@ impl Display for ErrorKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let kind = match self {
             ErrorKind::Codec => "Codec",
-            ErrorKind::Protocol => "Protocol",
+            ErrorKind::Protocol(_r) => "Protocol",
             ErrorKind::IO => "IO",
-            ErrorKind::Connection(_r) => "Connection",
+            ErrorKind::Connection => "Connection",
             ErrorKind::Timeout => "Timeout",
             ErrorKind::Transport => "Transport",
         };
@@ -32,11 +34,10 @@ impl Display for ErrorKind {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct MqttError {
     message: String,
     kind: ErrorKind,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
 impl std::error::Error for MqttError {}
@@ -52,19 +53,6 @@ impl MqttError {
         Self {
             message: message.to_string(),
             kind,
-            source: None,
-        }
-    }
-
-    pub fn new_with_source(
-        message: &str,
-        kind: ErrorKind,
-        source: Box<dyn std::error::Error + Send + Sync>,
-    ) -> Self {
-        Self {
-            message: message.to_string(),
-            kind,
-            source: Some(source),
         }
     }
 
@@ -74,10 +62,6 @@ impl MqttError {
 
     pub fn message(&self) -> &str {
         &self.message
-    }
-
-    pub fn source(&self) -> Option<&(dyn std::error::Error + Send + Sync + 'static)> {
-        self.source.as_ref().map(|s| s.as_ref() as _)
     }
 }
 

@@ -1,11 +1,11 @@
 [package]
 name = "vaux-pub"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 
 
 [dependencies]
-vaux-client = {path="../vaux-client"}
-vaux-mqtt = {path="../vaux-mqtt"}
-clap = { version = "4.2", features = ["derive"] }
-
+vaux-client = { path = "../vaux-client", features = ["developer"] }
+vaux-mqtt = { path = "../vaux-mqtt" }
+clap = { version = "4.4", features = ["derive"] }
+rustls = "0.21.0"
