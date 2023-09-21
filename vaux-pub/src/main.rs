@@ -1,4 +1,4 @@
-use std::{io::Read, sync::Arc};
+use std::{io::Read, sync::Arc, time::Duration};
 
 use clap::{error::ErrorKind, Parser};
 use vaux_mqtt::{property::Property, publish::Publish, QoSLevel};
@@ -77,15 +77,13 @@ fn publish(
     connection: vaux_client::MqttConnection,
     args: Args,
 ) {
-    let handle = client.start(connection, true);
-    let mut count = 0;
-    let wait_limit = 10000;
-    while !client.connected() {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        count += 100;
-        print!(".");
-        if count > wait_limit {
-            eprintln!("unable to connect to broker");
+    let handle: Option<std::thread::JoinHandle<_>>;
+    match client.try_start(Duration::from_millis(5000), connection, true) {
+        Ok(h) => {
+            handle = Some(h);
+        }
+        Err(e) => {
+            eprintln!("unable to start client: {:?}", e);
             return;
         }
     }

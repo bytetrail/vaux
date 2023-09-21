@@ -3,19 +3,20 @@ mod client;
 mod developer;
 
 pub use client::{MqttClient, MqttConnection};
+use vaux_mqtt::Reason;
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[repr(u8)]
 pub enum ErrorKind {
     #[default]
     Codec,
-    Protocol,
+    Protocol(Reason),
     Connection,
     Timeout,
     Transport,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct MqttError {
     message: String,
     kind: ErrorKind,

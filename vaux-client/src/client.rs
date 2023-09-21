@@ -271,6 +271,7 @@ pub struct MqttClient {
     last_packet_id: u16,
     receive_max: u16,
     connected: Arc<Mutex<bool>>,
+    last_error: Arc<Mutex<Option<MqttError>>>,
     session_expiry: u32,
     client_id: Arc<Mutex<Option<String>>>,
     producer: crossbeam_channel::Sender<vaux_mqtt::Packet>,
@@ -311,6 +312,7 @@ impl MqttClient {
             auto_ack,
             auto_packet_id,
             last_packet_id: 0,
+            last_error: Arc::new(Mutex::new(None)),
             receive_max,
             connected: Arc::new(Mutex::new(false)),
             session_expiry: DEFAULT_SESSION_EXPIRY,
@@ -402,6 +404,45 @@ impl MqttClient {
         self.producer.send(vaux_mqtt::Packet::Subscribe(subscribe))
     }
 
+    pub fn try_start(
+        &mut self,
+        max_wait: Duration,
+        connection: MqttConnection,
+        clean_start: bool,
+    ) -> Result<JoinHandle<Result<()>>> {
+        let handle = self.start(connection, clean_start);
+        let start = std::time::Instant::now();
+        while !self.connected() {
+            let last_error = self.last_error.lock();
+            if let Ok(last_error) = last_error {
+                if let Some(last_error) = last_error.as_ref() {
+                    match handle.join() {
+                        Ok(result) => {
+                            if let Err(e) = result {
+                                return Err(e);
+                            }
+                        }
+                        Err(e) => {
+                            return Err(MqttError::new(
+                                &format!("unable to join thread: {:?}", e),
+                                ErrorKind::Transport,
+                            ));
+                        }
+                    }
+                    return Err(last_error.clone());
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            if start.elapsed() > max_wait {
+                return Err(MqttError::new(
+                    "timeout waiting for connection",
+                    ErrorKind::Timeout,
+                ));
+            }
+        }
+        Ok(handle)
+    }
+
     /// Starts the MQTT client thread. The MQTT client thread will send packets
     /// to the remote broker that it receives on the producer channel and make
     /// packets available on the consumer channel that it receives from the broker
@@ -422,7 +463,7 @@ impl MqttClient {
         &mut self,
         mut connection: MqttConnection,
         clean_start: bool,
-    ) -> Result<JoinHandle<Result<()>>> {
+    ) -> JoinHandle<Result<()>> {
         let packet_recv = self.packet_recv.take().unwrap();
         let packet_send = self.packet_send.take().unwrap();
         let auto_ack = self.auto_ack;
@@ -435,8 +476,9 @@ impl MqttClient {
         let session_expiry = self.session_expiry;
         let connected = self.connected.clone();
         let credentials = connection.credentials().clone();
+        let last_error = self.last_error.clone();
 
-        Ok(thread::spawn(move || {
+        thread::spawn(move || {
             let mut stream = if connection.tls {
                 MqttStream::new_tls(
                     connection.tls_conn.as_mut().unwrap(),
@@ -463,6 +505,10 @@ impl MqttClient {
             ) {
                 Ok(_) => {}
                 Err(e) => {
+                    let last_error = last_error.lock();
+                    if let Ok(mut last_error) = last_error {
+                        *last_error = Some(e.clone());
+                    }
                     stream.shutdown().unwrap();
                     return Err(e);
                 }
@@ -484,7 +530,7 @@ impl MqttClient {
                                     pending_qos1.lock().unwrap().append(&mut pending_publish);
                                     return Err(MqttError::new(
                                         &format!("disconnect received: {:?}", d),
-                                        ErrorKind::Protocol,
+                                        ErrorKind::Protocol(d.reason),
                                     ));
                                 }
                                 Packet::Publish(publish) => {
@@ -499,7 +545,9 @@ impl MqttClient {
                                                     stream.shutdown().unwrap();
                                                     return Err(MqttError::new(
                                                         "protocol error, no packet ID with QAS > 0",
-                                                        ErrorKind::Protocol,
+                                                        ErrorKind::Protocol(
+                                                            Reason::MalformedPacket,
+                                                        ),
                                                     ));
                                                 }
                                                 if MqttClient::send(
@@ -595,7 +643,7 @@ impl MqttClient {
                     }
                 }
             }
-        }))
+        })
     }
 
     pub fn stop(&mut self) {
@@ -615,13 +663,13 @@ impl MqttClient {
     ) -> Result<ConnAck> {
         let mut connect = Connect::default();
         connect.clean_start = clean_start;
-        let mut client_id_set: bool = false;
-        let set_id = client_id.lock().unwrap();
-        if set_id.is_some() {
-            connect.client_id = (*set_id.as_ref().unwrap()).to_string();
-            client_id_set = true;
+        // scoped mutex guard to set the connect packet client id
+        {
+            let set_id = client_id.lock().unwrap();
+            if set_id.is_some() {
+                connect.client_id = (*set_id.as_ref().unwrap()).to_string();
+            }
         }
-
         connect
             .properties_mut()
             .set_property(Property::SessionExpiryInterval(session_expiry));
@@ -643,38 +691,7 @@ impl MqttClient {
                         if let Some(packet) = p {
                             match packet {
                                 Packet::ConnAck(connack) => {
-                                    if connack.reason() != Reason::Success {
-                                        // TODO return the connack reason as MQTT error with reason code
-                                        let mut connected = connected.lock().unwrap();
-                                        *connected = false;
-                                        return Err(MqttError::new(
-                                            "connection refused",
-                                            ErrorKind::Protocol,
-                                        ));
-                                    } else {
-                                        let mut connected = connected.lock().unwrap();
-                                        *connected = true;
-                                    }
-                                    if !client_id_set {
-                                        match connack
-                                            .properties()
-                                            .get_property(&PropertyType::AssignedClientId)
-                                        {
-                                            Some(Property::AssignedClientId(id)) => {
-                                                let mut client_id = client_id.lock().unwrap();
-                                                *client_id = Some(id.to_owned());
-                                            }
-                                            _ => {
-                                                // handle error here for required property
-                                                Err(MqttError::new(
-                                                    "no assigned client id",
-                                                    ErrorKind::Protocol,
-                                                ))?;
-                                            }
-                                        }
-                                    }
-                                    // TODO set server properties based on ConnAck
-                                    Ok(connack)
+                                    Self::handle_connack(connack, connected, client_id)
                                 }
                                 Packet::Disconnect(_disconnect) => {
                                     // TODO return the disconnect reason as MQTT error
@@ -682,13 +699,13 @@ impl MqttClient {
                                 }
                                 _ => Err(MqttError::new(
                                     "unexpected packet type",
-                                    ErrorKind::Protocol,
+                                    ErrorKind::Protocol(Reason::ProtocolErr),
                                 )),
                             }
                         } else {
                             Err(MqttError::new(
                                 "no MQTT packet received",
-                                ErrorKind::Protocol,
+                                ErrorKind::Protocol(Reason::ProtocolErr),
                             ))
                         }
                     }
@@ -701,6 +718,47 @@ impl MqttClient {
             },
             Err(e) => panic!("Unable to write packet(s) to broker: {}", e),
         }
+    }
+
+    fn handle_connack(
+        connack: ConnAck,
+        connected: Arc<Mutex<bool>>,
+        client_id: Arc<Mutex<Option<String>>>,
+    ) -> Result<ConnAck> {
+        let set_id = client_id.lock().unwrap();
+        let client_id_set = set_id.is_some();
+        if connack.reason() != Reason::Success {
+            // TODO return the connack reason as MQTT error with reason code
+            let mut connected = connected.lock().unwrap();
+            *connected = false;
+            return Err(MqttError::new(
+                "connection refused",
+                ErrorKind::Protocol(connack.reason()),
+            ));
+        } else {
+            let mut connected = connected.lock().unwrap();
+            *connected = true;
+        }
+        if !client_id_set {
+            match connack
+                .properties()
+                .get_property(&PropertyType::AssignedClientId)
+            {
+                Some(Property::AssignedClientId(id)) => {
+                    let mut client_id = client_id.lock().unwrap();
+                    *client_id = Some(id.to_owned());
+                }
+                _ => {
+                    // handle error here for required property
+                    Err(MqttError::new(
+                        "no assigned client id",
+                        ErrorKind::Protocol(Reason::InvalidClientId),
+                    ))?;
+                }
+            }
+        }
+        // TODO set server properties based on ConnAck
+        Ok(connack)
     }
 
     pub fn read_next(
