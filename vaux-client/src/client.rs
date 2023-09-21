@@ -421,6 +421,7 @@ impl MqttClient {
     /// Example:
     /// ```
     /// use vaux_client::MqttClient;
+    /// use vaux_client::MqttConnection;
     /// use std::time::Duration;
     ///
     /// let mut client = MqttClient::default();
@@ -431,8 +432,10 @@ impl MqttClient {
     ///       handle = Some(h);
     ///       println!("connected to broker");
     ///   }
+    ///
     ///  Err(e) => {
     ///    println!("unable to connect to broker: {:?}", e);
+    ///   }
     /// }
     /// ```
     ///
