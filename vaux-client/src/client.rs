@@ -674,14 +674,16 @@ impl MqttClient {
                     }
                     // send any pending QOS-1 publish packets that we are able to send
                     while !pending_publish.is_empty() && qos_1_remaining > 0 {
-                        let packet = pending_publish.remove(0);
-                        // pending_publish_size -= packet.encoded_size();
-                        if let Err(e) = MqttClient::send(&mut stream, packet.clone()) {
-                            pending_publish.insert(0, packet);
-                            // TODO notify calling client of error
-                            eprintln!("ERROR sending packet to remote: {}", e.message());
-                        } else {
-                            qos_1_remaining += 1;
+                        while !pending_publish.is_empty() && qos_1_remaining > 0 {
+                            let packet = pending_publish.remove(0);
+                            // pending_publish_size -= packet.encoded_size();
+                            if let Err(e) = MqttClient::send(&mut stream, packet.clone()) {
+                                pending_publish.insert(0, packet);
+                                // TODO notify calling client of error
+                                eprintln!("ERROR sending packet to remote: {}", e.message());
+                            } else {
+                                qos_1_remaining += 1;
+                            }
                         }
                     }
                 }
@@ -812,20 +814,13 @@ impl MqttClient {
         match connection.read(&mut buffer) {
             Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
                 Ok(packet) => Ok(packet),
-                Err(e) => Err(MqttError {
-                    message: e.reason,
-                    kind: ErrorKind::Codec,
-                }),
+                Err(e) => Err(MqttError::new(&e.reason, ErrorKind::Codec)),
             },
             Err(e) => match e.kind() {
-                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => Err(MqttError {
-                    message: e.to_string(),
-                    kind: ErrorKind::Timeout,
-                }),
-                _ => Err(MqttError {
-                    message: e.to_string(),
-                    kind: ErrorKind::Transport,
-                }),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+                    Err(MqttError::new(&e.to_string(), ErrorKind::Timeout))
+                }
+                _ => Err(MqttError::new(&e.to_string(), ErrorKind::IO)),
             },
         }
     }
@@ -839,10 +834,10 @@ impl MqttClient {
         if let Err(e) = connection.write_all(&dest) {
             eprintln!("unexpected send error {:#?}", e);
             // TODO higher fidelity error handling
-            return Err(MqttError {
-                kind: ErrorKind::Transport,
-                message: e.to_string(),
-            });
+            return Err(MqttError::new(
+                &format!("unable to send packet: {}", e),
+                ErrorKind::IO,
+            ));
         }
         Ok(None)
     }

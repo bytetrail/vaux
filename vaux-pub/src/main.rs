@@ -18,7 +18,10 @@ pub struct Args {
     pub port: u16,
     #[arg(short = 'c', long)]
     trusted_ca: Option<String>,
-
+    #[arg(short = 'w', long, requires = "password")]
+    username: Option<String>,
+    #[arg(short = 'u', long, requires = "username")]
+    password: Option<String>,
     message: String,
 }
 

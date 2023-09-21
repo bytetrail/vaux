@@ -2,18 +2,36 @@ mod client;
 #[cfg(feature = "developer")]
 mod developer;
 
+use std::fmt::Display;
+
 pub use client::{MqttClient, MqttConnection};
 use vaux_mqtt::Reason;
 
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, PartialEq, Eq, Copy, Clone)]
 #[repr(u8)]
 pub enum ErrorKind {
     #[default]
     Codec,
     Protocol(Reason),
+    IO,
     Connection,
     Timeout,
     Transport,
+}
+
+impl Display for ErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let kind = match self {
+            ErrorKind::Codec => "Codec",
+            ErrorKind::Protocol(_r) => "Protocol",
+            ErrorKind::IO => "IO",
+            ErrorKind::Connection => "Connection",
+            ErrorKind::Timeout => "Timeout",
+            ErrorKind::Transport => "Transport",
+        };
+
+        write!(f, "{}", kind)
+    }
 }
 
 #[derive(Default, Debug, Clone)]

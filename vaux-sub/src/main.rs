@@ -24,6 +24,10 @@ pub struct Args {
     trusted_ca: Option<String>,
     #[arg(short, long)]
     clean_start: bool,
+    #[arg(short = 'w', long, requires = "password")]
+    username: Option<String>,
+    #[arg(short = 'u', long, requires = "username")]
+    password: Option<String>,
 }
 
 #[derive(Clone, Debug)]
