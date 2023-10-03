@@ -220,52 +220,49 @@ pub enum Packet {
 impl Size for Packet {
     fn size(&self) -> u32 {
         match self {
-            Packet::PingRequest(f) => f.size(),
-            Packet::PingResponse(f) => f.size(),
-            Packet::Connect(c) => c.size(),
-            Packet::ConnAck(c) => c.size(),
-            Packet::Publish(p) => p.size(),
-            Packet::PubAck(p) => p.size(),
-            Packet::PubComp(p) => p.size(),
-            Packet::PubRec(p) => p.size(),
-            Packet::PubRel(p) => p.size(),
-            Packet::Disconnect(d) => d.size(),
-            Packet::Subscribe(s) => s.size(),
-            Packet::SubAck(s) => s.size(),
+            Packet::PingRequest(fix) | Packet::PingResponse(fix) => fix.size(),
+            Packet::Connect(conn) => conn.size(),
+            Packet::ConnAck(ack) => ack.size(),
+            Packet::Publish(publ) => publ.size(),
+            Packet::PubAck(resp)
+            | Packet::PubComp(resp)
+            | Packet::PubRec(resp)
+            | Packet::PubRel(resp) => resp.size(),
+            Packet::Disconnect(disc) => disc.size(),
+            Packet::Subscribe(sub) => sub.size(),
+            Packet::SubAck(ack) => ack.size(),
         }
     }
 
     fn property_size(&self) -> u32 {
         match self {
-            Packet::PingRequest(f) => f.property_size(),
-            Packet::PingResponse(f) => f.property_size(),
-            Packet::Connect(c) => c.property_size(),
-            Packet::ConnAck(c) => c.property_size(),
+            Packet::PingRequest(fix) | Packet::PingResponse(fix) => fix.property_size(),
+            Packet::Connect(conn) => conn.property_size(),
+            Packet::ConnAck(ack) => ack.property_size(),
             Packet::Publish(p) => p.property_size(),
-            Packet::PubAck(p) => p.property_size(),
-            Packet::PubComp(p) => p.property_size(),
-            Packet::PubRec(p) => p.property_size(),
-            Packet::PubRel(p) => p.property_size(),
-            Packet::Disconnect(d) => d.property_size(),
-            Packet::Subscribe(s) => s.property_size(),
-            Packet::SubAck(s) => s.property_size(),
+            Packet::PubAck(resp)
+            | Packet::PubComp(resp)
+            | Packet::PubRec(resp)
+            | Packet::PubRel(resp) => resp.property_size(),
+            Packet::Disconnect(disc) => disc.property_size(),
+            Packet::Subscribe(sub) => sub.property_size(),
+            Packet::SubAck(ack) => ack.property_size(),
         }
     }
 
     fn payload_size(&self) -> u32 {
         match self {
-            Packet::PingRequest(f) => f.payload_size(),
-            Packet::PingResponse(f) => f.payload_size(),
-            Packet::Connect(c) => c.payload_size(),
-            Packet::ConnAck(c) => c.payload_size(),
+            Packet::PingRequest(fix) | Packet::PingResponse(fix) => fix.payload_size(),
+            Packet::Connect(con) => con.payload_size(),
+            Packet::ConnAck(ack) => ack.payload_size(),
             Packet::Publish(p) => p.payload_size(),
-            Packet::PubAck(p) => p.payload_size(),
-            Packet::PubComp(p) => p.payload_size(),
-            Packet::PubRec(p) => p.payload_size(),
-            Packet::PubRel(p) => p.payload_size(),
-            Packet::Disconnect(d) => d.payload_size(),
-            Packet::Subscribe(s) => s.payload_size(),
-            Packet::SubAck(s) => s.payload_size(),
+            Packet::PubAck(resp)
+            | Packet::PubComp(resp)
+            | Packet::PubRec(resp)
+            | Packet::PubRel(resp) => resp.payload_size(),
+            Packet::Disconnect(disc) => disc.payload_size(),
+            Packet::Subscribe(sub) => sub.payload_size(),
+            Packet::SubAck(ack) => ack.payload_size(),
         }
     }
 }
