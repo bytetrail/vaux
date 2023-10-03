@@ -816,21 +816,31 @@ impl MqttClient {
     fn read_next(
         connection: &mut dyn std::io::Read,
         max_packet_size: usize,
-        buffer: &mut [u8],
+        buffer: &mut Vec<u8>,
         offset: &mut usize,
     ) -> Result<Option<Packet>> {
+        let mut bytes_read = 0;
         loop {
             match connection.read(&mut buffer[*offset..max_packet_size]) {
                 Ok(len) => {
                     if len == 0 {
                         return Ok(None);
                     }
+                    bytes_read += len;
                     let bytes_mut = &mut BytesMut::from(&buffer[0..len + *offset]);
                     match decode(bytes_mut) {
                         Ok(data_read) => {
                             if let Some((packet, decode_len)) = data_read {
-                                if decode_len < len as u32 {
-                                    *offset = len - decode_len as usize;
+                                if decode_len < bytes_read as u32 {
+                                    // adjust offset to end of decoded bytes
+                                    *offset = decode_len as usize;
+                                } else if decode_len == bytes_read as u32 {
+                                    // reset the buffer to beginning
+                                    *offset = 0;
+                                }
+                                if *offset > 0 {
+                                    buffer.copy_within(*offset..*offset + bytes_read, 0);
+                                    *offset = 0;
                                 }
                                 return Ok(Some(packet));
                             } else {
