@@ -494,7 +494,7 @@ impl Property {
                 PropertyType::SubIdAvail => Ok(Property::SubIdAvail(get_bool(src)?)),
                 PropertyType::ShardSubAvail => Ok(Property::ShardSubAvail(get_bool(src)?)),
             },
-            Err(_) => todo!(),
+            Err(_) => Err(MqttCodecError::new("Error decoding property")),
         }
     }
 

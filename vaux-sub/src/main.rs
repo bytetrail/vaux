@@ -20,7 +20,7 @@ pub struct Args {
     port: u16,
     #[arg(short = 's', long, requires = "trusted_ca")]
     tls: bool,
-    #[arg(short = 'c', long)]
+    #[arg(short = 't', long)]
     trusted_ca: Option<String>,
     #[arg(short, long)]
     clean_start: bool,

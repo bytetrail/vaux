@@ -95,21 +95,22 @@ fn test_basic(
                         let result = decode(&mut BytesMut::from(&buffer[0..len]));
                         match result {
                             Ok(p) => {
-                                if let Some(packet) = p.as_ref() {
+                                if let Some(data_read) = p.as_ref() {
                                     if deep_check {
-                                        assert_eq!(expected_response, packet);
+                                        assert_eq!(expected_response, &data_read.0);
                                     } else {
                                         let packet_type: PacketType = expected_response.into();
-                                        assert_eq!(packet_type, packet.into());
+                                        assert_eq!(packet_type, (&data_read.0).into());
                                     }
+                                    Some(data_read.0.clone())
                                 } else {
                                     assert!(
                                         false,
                                         "expected {:?} packet type, found None",
                                         expected_response
                                     );
+                                    None
                                 }
-                                p
                             }
                             Err(e) => {
                                 assert!(false, "Unexpected error decoding ping response: {:?}", e);
@@ -164,15 +165,15 @@ impl MQTTClient {
                         Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
                             Ok(p) => {
                                 if let Some(packet) = p {
-                                    match packet {
-                                        Packet::ConnAck(connack) => {
-                                            return Some(connack);
-                                        }
-                                        Packet::Disconnect(_disconnect) => {
-                                            panic!("disconnect");
-                                        }
-                                        _ => panic!("unexpected packet returned from remote"),
-                                    }
+                                    // match packet {
+                                    //     Packet::ConnAck(connack) => {
+                                    //         return Some(connack);
+                                    //     }
+                                    //     Packet::Disconnect(_disconnect) => {
+                                    //         panic!("disconnect");
+                                    //     }
+                                    //     _ => panic!("unexpected packet returned from remote"),
+                                    // }
                                 } else {
                                     panic!("no packet returned");
                                 }

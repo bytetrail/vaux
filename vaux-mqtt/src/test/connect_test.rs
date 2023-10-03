@@ -186,9 +186,7 @@ fn test_problem_info_remaining() {
         .properties_mut()
         .set_property(Property::ReqProblemInfo(false));
     let remaining = connect.size();
-    println!("remaining:{}", remaining);
     let expected = CONNECT_MIN_REMAINING + 2;
-    println!("Prop size:{}", connect.properties().size());
     assert_eq!(
         expected, remaining,
         "[Problem Info false] expected {} remaining size",
@@ -198,8 +196,6 @@ fn test_problem_info_remaining() {
         .properties_mut()
         .clear_property(&PropertyType::ReqProblemInfo);
     let remaining = connect.size();
-    println!("remaining:{}", remaining);
-    println!("Prop size:{}", connect.properties().size());
     assert_eq!(
         CONNECT_MIN_REMAINING, remaining,
         "[Problem Info true] {} remaining size",

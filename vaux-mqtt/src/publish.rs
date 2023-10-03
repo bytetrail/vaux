@@ -54,6 +54,7 @@ impl Publish {
             }),
             p => Err(MqttCodecError {
                 reason: format!("unable to construct from {}", p),
+                kind: crate::codec::ErrorKind::MalformedPacket,
             }),
         }
     }
@@ -182,10 +183,9 @@ impl Decode for Publish {
         }
         self.props.decode(src)?;
         if src.remaining() > 0 {
-            match src.get(src.len() - src.remaining()..src.remaining()) {
-                Some(p) => self.payload = Some(Vec::from(p)),
-                None => return Err(MqttCodecError::new("unable to decode payload")),
-            }
+            let idx = src.len() - src.remaining();
+            let end = src.remaining();
+            self.payload = Some(src.copy_to_bytes(end - idx).to_vec());
         }
         Ok(())
     }

@@ -3,7 +3,7 @@ use std::{io::Read, sync::Arc, time::Duration};
 use clap::{error::ErrorKind, Parser};
 use vaux_mqtt::{property::Property, publish::Publish, QoSLevel};
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Clone, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
     #[arg(short, long, default_value = "0", value_parser = QoSLevelParser)]
@@ -72,7 +72,7 @@ fn main() {
         .connect()
         .unwrap();
     let mut client = vaux_client::MqttClient::new("vaux-publisher-001", false, 10, false);
-    publish(&mut client, connection, args);
+    publish(&mut client, connection, args.clone());
 }
 
 fn publish(
@@ -88,7 +88,6 @@ fn publish(
                 return;
             }
         };
-    println!("connected to broker");
     let producer = client.producer();
 
     let mut publish = Publish::default();
@@ -105,7 +104,10 @@ fn publish(
     publish.set_payload(Vec::from(args.message.as_bytes()));
     publish.set_qos(args.qos);
     publish.packet_id = Some(101);
-    if producer.send(vaux_mqtt::Packet::Publish(publish)).is_err() {
+    if producer
+        .send(vaux_mqtt::Packet::Publish(publish.clone()))
+        .is_err()
+    {
         eprintln!("unable to send packet to broker");
     } else {
         println!("sent message");

@@ -48,6 +48,7 @@ impl PubResp {
             }
             _ => Err(MqttCodecError {
                 reason: "unsupported response type".to_string(),
+                kind: crate::codec::ErrorKind::UnsupportedResponseType,
             }),
         }
     }
@@ -63,6 +64,7 @@ impl PubResp {
         } else {
             Err(MqttCodecError {
                 reason: "unsupported reason".to_string(),
+                kind: crate::codec::ErrorKind::UnsupportedReason,
             })
         }
     }
@@ -129,6 +131,7 @@ impl Encode for PubResp {
             _ => {
                 return Err(MqttCodecError {
                     reason: "usupported response type".to_string(),
+                    kind: crate::codec::ErrorKind::UnsupportedResponseType,
                 })
             }
         };
