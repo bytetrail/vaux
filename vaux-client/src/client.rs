@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
     time::Duration,
+    vec,
 };
 
 use bytes::BytesMut;
@@ -23,8 +24,8 @@ const DEFAULT_SESSION_EXPIRY: u32 = 0;
 const DEFAULT_HOST: &str = "localhost";
 pub const DEFAULT_PORT: u16 = 1883;
 pub const DEFAULT_SECURE_PORT: u16 = 8883;
-// 16K is the default max packet size for the broker
-const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024;
+// 64K is the default max packet size
+const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
 const MAX_QUEUE_LEN: usize = 100;
 
 pub type Result<T> = core::result::Result<T, MqttError>;
@@ -521,6 +522,9 @@ impl MqttClient {
         let last_error = self.last_error.clone();
 
         thread::spawn(move || {
+            let mut buffer = vec![0; max_packet_size];
+            let mut offset = 0;
+
             let mut stream = if connection.tls {
                 MqttStream::new_tls(
                     connection.tls_conn.as_mut().unwrap(),
@@ -562,7 +566,8 @@ impl MqttClient {
             let mut qos_1_remaining = receive_max;
             pending_publish.append(&mut pending_qos1.lock().unwrap());
             loop {
-                match MqttClient::read_next(&mut stream, max_packet_size) {
+                match MqttClient::read_next(&mut stream, max_packet_size, &mut buffer, &mut offset)
+                {
                     Ok(result) => {
                         if let Some(p) = result {
                             match &p {
@@ -731,8 +736,8 @@ impl MqttClient {
         match stream.write_all(&dest) {
             Ok(_) => match stream.read(&mut buffer) {
                 Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
-                    Ok(p) => {
-                        if let Some(packet) = p {
+                    Ok(data_read) => {
+                        if let Some((packet, _decode_len)) = data_read {
                             match packet {
                                 Packet::ConnAck(connack) => {
                                     Self::handle_connack(connack, connected, client_id)
@@ -808,22 +813,50 @@ impl MqttClient {
         Ok(connack)
     }
 
-    pub fn read_next(
+    fn read_next(
         connection: &mut dyn std::io::Read,
         max_packet_size: usize,
+        buffer: &mut [u8],
+        offset: &mut usize,
     ) -> Result<Option<Packet>> {
-        let mut buffer = vec![0u8; max_packet_size];
-        match connection.read(&mut buffer) {
-            Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
-                Ok(packet) => Ok(packet),
-                Err(e) => Err(MqttError::new(&e.reason, ErrorKind::Codec)),
-            },
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-                    Err(MqttError::new(&e.to_string(), ErrorKind::Timeout))
+        loop {
+            match connection.read(&mut buffer[*offset..max_packet_size]) {
+                Ok(len) => {
+                    if len == 0 {
+                        return Ok(None);
+                    }
+                    let bytes_mut = &mut BytesMut::from(&buffer[0..len + *offset]);
+                    match decode(bytes_mut) {
+                        Ok(data_read) => {
+                            if let Some((packet, decode_len)) = data_read {
+                                if decode_len < len as u32 {
+                                    *offset = len - decode_len as usize;
+                                }
+                                return Ok(Some(packet));
+                            } else {
+                                return Ok(None);
+                            }
+                        }
+                        Err(e) => match e.kind {
+                            vaux_mqtt::codec::ErrorKind::InsufficientData(_expected, _actual) => {
+                                *offset += len;
+                            }
+                            _ => {
+                                return Err(MqttError::new(
+                                    &e.to_string(),
+                                    crate::ErrorKind::Protocol(Reason::ProtocolErr),
+                                ));
+                            }
+                        },
+                    }
                 }
-                _ => Err(MqttError::new(&e.to_string(), ErrorKind::IO)),
-            },
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+                        return Err(MqttError::new(&e.to_string(), ErrorKind::Timeout))
+                    }
+                    _ => return Err(MqttError::new(&e.to_string(), ErrorKind::IO)),
+                },
+            }
         }
     }
 

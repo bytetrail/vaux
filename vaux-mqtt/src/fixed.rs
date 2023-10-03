@@ -1,7 +1,7 @@
 use bytes::{BufMut, BytesMut};
 
 use crate::{
-    codec::{put_var_u32, PACKET_RESERVED_BIT1, PACKET_RESERVED_NONE},
+    codec::{put_var_u32, ErrorKind, PACKET_RESERVED_BIT1, PACKET_RESERVED_NONE},
     Encode, MqttCodecError, PacketType, QoSLevel,
 };
 
@@ -62,6 +62,7 @@ impl FixedHeader {
         if flags & QOS_MASK == QOS_MASK {
             return Err(MqttCodecError {
                 reason: "unsupported QOS level".to_string(),
+                kind: ErrorKind::UnsupportedQosLevel,
             });
         }
         self.flags = flags;
