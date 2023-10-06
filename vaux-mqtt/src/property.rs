@@ -413,7 +413,7 @@ impl Encode for PropertyBundle {
 
 impl Decode for PropertyBundle {
     fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
-        let prop_size = get_var_u32(src) as usize;
+        let prop_size = get_var_u32(src)? as usize;
         if prop_size == 1 {
             return Err(MqttCodecError::new(
                 "MQTTv5 2.2.2.1 invalid property length",
@@ -464,7 +464,7 @@ impl Property {
                 PropertyType::ResponseTopic => Ok(Property::ResponseTopic(get_utf8(src)?)),
                 PropertyType::CorrelationData => Ok(Property::CorrelationData(get_bin(src)?)),
                 PropertyType::SubscriptionIdentifier => {
-                    Ok(Property::SubscriptionIdentifier(get_var_u32(src)))
+                    Ok(Property::SubscriptionIdentifier(get_var_u32(src)?))
                 }
                 PropertyType::SessionExpiryInterval => {
                     Ok(Property::SessionExpiryInterval(src.get_u32()))

@@ -333,7 +333,7 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecErro
         Ok(packet_header) => match packet_header {
             Some(packet_header) => {
                 let decode_len =
-                    packet_header.remaining + 2 + variable_byte_int_size(packet_header.remaining);
+                    packet_header.remaining + 1 + variable_byte_int_size(packet_header.remaining);
                 match packet_header.packet_type() {
                     PacketType::PingReq => {
                         Ok(Some((Packet::PingRequest(packet_header), decode_len)))
@@ -508,7 +508,7 @@ pub(crate) fn put_var_u32(val: u32, dest: &mut BytesMut) {
     }
 }
 
-pub(crate) fn get_var_u32(src: &mut BytesMut) -> u32 {
+pub(crate) fn get_var_u32(src: &mut BytesMut) -> Result<u32, MqttCodecError> {
     let mut result = 0_u32;
     let mut shift = 0;
     let mut next_byte = src.get_u8();
@@ -521,8 +521,13 @@ pub(crate) fn get_var_u32(src: &mut BytesMut) -> u32 {
         } else {
             next_byte = src.get_u8();
         }
+        if shift > 21 {
+            return Err(MqttCodecError::new(
+                "malformed packet: variable byte integer",
+            ));
+        }
     }
-    result
+    Ok(result)
 }
 
 pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MqttCodecError> {
@@ -542,7 +547,7 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
     let first_byte = src.get_u8();
     let packet_type = PacketType::from(first_byte);
     let flags = first_byte & 0x0f;
-    let packet_remaining = get_var_u32(src);
+    let packet_remaining = get_var_u32(src)?;
     match src.remaining() {
         val if val < packet_remaining as usize => {
             return Err(MqttCodecError {

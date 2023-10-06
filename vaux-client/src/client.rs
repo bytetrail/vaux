@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     io::{Read, Write},
-    net::{TcpStream, ToSocketAddrs},
+    net::TcpStream,
     sync::{Arc, Mutex},
     thread::{self, JoinHandle},
     time::Duration,
@@ -14,170 +14,13 @@ use vaux_mqtt::{
     Reason, Subscribe, Subscription,
 };
 
-#[cfg(feature = "developer")]
-use crate::developer;
-use crate::{ErrorKind, MqttError};
+use crate::{ErrorKind, MqttConnection, MqttError};
 
-const DEFAULT_CONNECTION_TIMEOUT: u64 = 30_000;
 const DEFAULT_RECV_MAX: u16 = 100;
-const DEFAULT_SESSION_EXPIRY: u32 = 0;
-const DEFAULT_HOST: &str = "localhost";
-pub const DEFAULT_PORT: u16 = 1883;
-pub const DEFAULT_SECURE_PORT: u16 = 8883;
+const DEFAULT_SESSION_EXPIRY: u32 = 1000;
 // 64K is the default max packet size
 const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
 const MAX_QUEUE_LEN: usize = 100;
-
-pub type Result<T> = core::result::Result<T, MqttError>;
-
-#[derive(Debug)]
-pub struct MqttConnection {
-    host: String,
-    port: Option<u16>,
-    username: Option<String>,
-    password: Option<String>,
-    tls: bool,
-    tcp_socket: Option<TcpStream>,
-    trusted_ca: Option<Arc<rustls::RootCertStore>>,
-    tls_conn: Option<rustls::ClientConnection>,
-    #[cfg(feature = "developer")]
-    verifier: developer::Verifier,
-}
-
-impl Default for MqttConnection {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl MqttConnection {
-    pub fn new() -> Self {
-        Self {
-            username: None,
-            password: None,
-            host: DEFAULT_HOST.to_string(),
-            port: None,
-            tls: false,
-            tcp_socket: None,
-            trusted_ca: None,
-            tls_conn: None,
-            #[cfg(feature = "developer")]
-            verifier: developer::Verifier,
-        }
-    }
-
-    fn credentials(&self) -> Option<(String, String)> {
-        if let Some(username) = &self.username {
-            if let Some(password) = &self.password {
-                return Some((username.clone(), password.clone()));
-            }
-        }
-        None
-    }
-
-    pub fn with_credentials(mut self, username: &str, password: &str) -> Self {
-        self.username = Some(username.to_string());
-        self.password = Some(password.to_string());
-        self
-    }
-
-    pub fn with_tls(mut self) -> Self {
-        self.tls = true;
-        if self.port.is_none() {
-            self.port = Some(DEFAULT_SECURE_PORT);
-        }
-        self
-    }
-
-    pub fn with_host(mut self, host: &str) -> Self {
-        self.host = host.to_string();
-        self
-    }
-
-    pub fn with_port(mut self, port: u16) -> Self {
-        self.port = Some(port);
-        self
-    }
-
-    pub fn with_trust_store(mut self, trusted_ca: Arc<rustls::RootCertStore>) -> Self {
-        self.trusted_ca = Some(trusted_ca);
-        self
-    }
-
-    pub fn connect(self) -> Result<Self> {
-        self.connect_with_timeout(Duration::from_millis(DEFAULT_CONNECTION_TIMEOUT))
-    }
-
-    pub fn connect_with_timeout(mut self, timeout: Duration) -> Result<Self> {
-        // if not set via with_tls or with_port, set the port to the default
-        if self.port.is_none() {
-            self.port = Some(DEFAULT_PORT);
-        }
-        let addr = self.host.clone() + ":" + &self.port.unwrap().to_string();
-        let socket_addr = addr.to_socket_addrs();
-        if let Err(e) = socket_addr {
-            return Err(MqttError::new(
-                &format!("unable to resolve host: {}", e),
-                ErrorKind::Connection,
-            ));
-        }
-        let socket_addr = socket_addr.unwrap().next().unwrap();
-
-        if self.tls {
-            if let Some(ca) = self.trusted_ca.clone() {
-                let mut config = rustls::ClientConfig::builder()
-                    .with_safe_defaults()
-                    .with_root_certificates(ca)
-                    .with_no_client_auth();
-                config.key_log = Arc::new(rustls::KeyLogFile::new());
-                #[cfg(feature = "developer")]
-                {
-                    self.verifier = developer::Verifier;
-                    config
-                        .dangerous()
-                        .set_certificate_verifier(Arc::new(self.verifier.clone()));
-                }
-                if let Ok(server_name) = self.host.as_str().try_into() {
-                    if let Ok(c) = rustls::ClientConnection::new(Arc::new(config), server_name) {
-                        self.tls_conn = Some(c);
-                    } else {
-                        return Err(MqttError::new(
-                            "unable to create TLS connection",
-                            ErrorKind::Connection,
-                        ));
-                    }
-                } else {
-                    return Err(MqttError::new(
-                        "unable to convert host to server name",
-                        ErrorKind::Connection,
-                    ));
-                }
-            } else {
-                return Err(MqttError::new(
-                    "no trusted CA(s) provided for TLS connection",
-                    ErrorKind::Connection,
-                ));
-            }
-        }
-
-        match TcpStream::connect_timeout(&socket_addr, timeout) {
-            Ok(stream) => {
-                self.tcp_socket = Some(stream);
-                Ok(self)
-            }
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::TimedOut => Err(MqttError {
-                    message: "timeout".to_string(),
-                    kind: ErrorKind::Timeout,
-                }),
-                _ => Err(MqttError::new(
-                    &format!("unable to connect: {}", e),
-                    ErrorKind::Connection,
-                )),
-            },
-        }
-    }
-}
 
 #[derive(Debug)]
 struct MqttStream<'a> {
@@ -454,7 +297,7 @@ impl MqttClient {
         max_wait: Duration,
         connection: MqttConnection,
         clean_start: bool,
-    ) -> Result<JoinHandle<Result<()>>> {
+    ) -> crate::Result<JoinHandle<crate::Result<()>>> {
         let handle = self.start(connection, clean_start);
         let start = std::time::Instant::now();
         while !self.connected() {
@@ -506,9 +349,9 @@ impl MqttClient {
         &mut self,
         mut connection: MqttConnection,
         clean_start: bool,
-    ) -> JoinHandle<Result<()>> {
-        let packet_recv = self.packet_recv.take().unwrap();
-        let packet_send = self.packet_send.take().unwrap();
+    ) -> JoinHandle<crate::Result<()>> {
+        let packet_recv = self.packet_recv.as_ref().unwrap().clone();
+        let packet_send = self.packet_send.as_ref().unwrap().clone();
         let auto_ack = self.auto_ack;
         let receive_max = self.receive_max;
         let pending_qos1 = self.pending_qos1.clone();
@@ -548,6 +391,8 @@ impl MqttClient {
                 session_expiry,
                 clean_start,
                 connected,
+                &mut buffer,
+                &mut offset,
             ) {
                 Ok(_) => {}
                 Err(e) => {
@@ -709,7 +554,9 @@ impl MqttClient {
         session_expiry: u32,
         clean_start: bool,
         connected: Arc<Mutex<bool>>,
-    ) -> Result<ConnAck> {
+        buffer: &mut Vec<u8>,
+        offset: &mut usize,
+    ) -> crate::Result<ConnAck> {
         let mut connect = Connect::default();
         connect.clean_start = clean_start;
         // scoped mutex guard to set the connect packet client id
@@ -727,44 +574,69 @@ impl MqttClient {
             connect.password = Some(password.into_bytes());
         }
         let connect_packet = Packet::Connect(Box::new(connect));
-        let mut buffer = [0u8; 128];
+        // let mut buffer = [0u8; 128];
         let mut dest = BytesMut::default();
         let result = encode(connect_packet, &mut dest);
         if let Err(e) = result {
             panic!("Failed to encode packet: {:?}", e);
         }
         match stream.write_all(&dest) {
-            Ok(_) => match stream.read(&mut buffer) {
-                Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
-                    Ok(data_read) => {
-                        if let Some((packet, _decode_len)) = data_read {
-                            match packet {
-                                Packet::ConnAck(connack) => {
-                                    Self::handle_connack(connack, connected, client_id)
-                                }
-                                Packet::Disconnect(_disconnect) => {
-                                    // TODO return the disconnect reason as MQTT error
-                                    panic!("disconnect");
-                                }
-                                _ => Err(MqttError::new(
-                                    "unexpected packet type",
-                                    ErrorKind::Protocol(Reason::ProtocolErr),
-                                )),
-                            }
-                        } else {
-                            Err(MqttError::new(
-                                "no MQTT packet received",
-                                ErrorKind::Protocol(Reason::ProtocolErr),
-                            ))
+            Ok(_) => {
+                match MqttClient::read_next(stream, DEFAULT_MAX_PACKET_SIZE, buffer, offset) {
+                    Ok(Some(packet)) => match packet {
+                        Packet::ConnAck(connack) => {
+                            Self::handle_connack(connack, connected, client_id)
                         }
-                    }
-                    Err(e) => Err(MqttError::new(&e.to_string(), ErrorKind::Codec)),
-                },
-                Err(e) => Err(MqttError::new(
-                    &format!("unable to read stream: {}", e),
-                    ErrorKind::Transport,
-                )),
-            },
+                        Packet::Disconnect(_disconnect) => {
+                            // TODO return the disconnect reason as MQTT error
+                            panic!("disconnect");
+                        }
+                        _ => Err(MqttError::new(
+                            "unexpected packet type",
+                            ErrorKind::Protocol(Reason::ProtocolErr),
+                        )),
+                    },
+                    Ok(None) => Err(MqttError::new(
+                        "no MQTT packet received",
+                        ErrorKind::Protocol(Reason::ProtocolErr),
+                    )),
+                    Err(e) => Err(MqttError::new(
+                        &format!("unable to read stream: {}", e),
+                        ErrorKind::Transport,
+                    )),
+                }
+            }
+
+            //     Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
+            //         Ok(data_read) => {
+            //             if let Some((packet, _decode_len)) = data_read {
+            //                 match packet {
+            //                     Packet::ConnAck(connack) => {
+            //                         Self::handle_connack(connack, connected, client_id)
+            //                     }
+            //                     Packet::Disconnect(_disconnect) => {
+            //                         // TODO return the disconnect reason as MQTT error
+            //                         panic!("disconnect");
+            //                     }
+            //                     _ => Err(MqttError::new(
+            //                         "unexpected packet type",
+            //                         ErrorKind::Protocol(Reason::ProtocolErr),
+            //                     )),
+            //                 }
+            //             } else {
+            //                 Err(MqttError::new(
+            //                     "no MQTT packet received",
+            //                     ErrorKind::Protocol(Reason::ProtocolErr),
+            //                 ))
+            //             }
+            //         }
+            //         Err(e) => Err(MqttError::new(&e.to_string(), ErrorKind::Codec)),
+            //     },
+            //     Err(e) => Err(MqttError::new(
+            //         &format!("unable to read stream: {}", e),
+            //         ErrorKind::Transport,
+            //     )),
+            // },
             Err(e) => Err(MqttError::new(
                 &format!("Unable to write packet(s) to broker: {}", e),
                 ErrorKind::Transport,
@@ -776,7 +648,7 @@ impl MqttClient {
         connack: ConnAck,
         connected: Arc<Mutex<bool>>,
         client_id: Arc<Mutex<Option<String>>>,
-    ) -> Result<ConnAck> {
+    ) -> crate::Result<ConnAck> {
         let set_id = client_id.lock().unwrap();
         let client_id_set = set_id.is_some();
         if connack.reason() != Reason::Success {
@@ -818,51 +690,50 @@ impl MqttClient {
         max_packet_size: usize,
         buffer: &mut Vec<u8>,
         offset: &mut usize,
-    ) -> Result<Option<Packet>> {
-        let mut bytes_read = 0;
+    ) -> crate::Result<Option<Packet>> {
+        let mut bytes_read = *offset;
         loop {
+            if bytes_read > 0 {
+                let bytes_mut = &mut BytesMut::from(&buffer[0..bytes_read]);
+                match decode(bytes_mut) {
+                    Ok(data_read) => {
+                        if let Some((packet, decode_len)) = data_read {
+                            if decode_len < bytes_read as u32 {
+                                buffer.copy_within(decode_len as usize..bytes_read, 0);
+                                // adjust offset to end of decoded bytes
+                                *offset = bytes_read - decode_len as usize;
+                            } else {
+                                *offset = 0;
+                            }
+                            return Ok(Some(packet));
+                        } else {
+                            return Ok(None);
+                        }
+                    }
+                    Err(e) => match e.kind {
+                        vaux_mqtt::codec::ErrorKind::InsufficientData(_expected, _actual) => {
+                            // fall through the the socket read
+                        }
+                        _ => {
+                            return Err(MqttError::new(
+                                &e.to_string(),
+                                crate::ErrorKind::Protocol(Reason::ProtocolErr),
+                            ));
+                        }
+                    },
+                }
+            }
             match connection.read(&mut buffer[*offset..max_packet_size]) {
                 Ok(len) => {
-                    if len == 0 {
+                    if len == 0 && bytes_read == 0 {
                         return Ok(None);
                     }
                     bytes_read += len;
-                    let bytes_mut = &mut BytesMut::from(&buffer[0..len + *offset]);
-                    match decode(bytes_mut) {
-                        Ok(data_read) => {
-                            if let Some((packet, decode_len)) = data_read {
-                                if decode_len < bytes_read as u32 {
-                                    // adjust offset to end of decoded bytes
-                                    *offset = decode_len as usize;
-                                } else if decode_len == bytes_read as u32 {
-                                    // reset the buffer to beginning
-                                    *offset = 0;
-                                }
-                                if *offset > 0 {
-                                    buffer.copy_within(*offset..*offset + bytes_read, 0);
-                                    *offset = 0;
-                                }
-                                return Ok(Some(packet));
-                            } else {
-                                return Ok(None);
-                            }
-                        }
-                        Err(e) => match e.kind {
-                            vaux_mqtt::codec::ErrorKind::InsufficientData(_expected, _actual) => {
-                                *offset += len;
-                            }
-                            _ => {
-                                return Err(MqttError::new(
-                                    &e.to_string(),
-                                    crate::ErrorKind::Protocol(Reason::ProtocolErr),
-                                ));
-                            }
-                        },
-                    }
+                    *offset = bytes_read;
                 }
                 Err(e) => match e.kind() {
                     std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-                        return Err(MqttError::new(&e.to_string(), ErrorKind::Timeout))
+                        return Err(MqttError::new(&e.to_string(), ErrorKind::Timeout));
                     }
                     _ => return Err(MqttError::new(&e.to_string(), ErrorKind::IO)),
                 },
@@ -870,7 +741,10 @@ impl MqttClient {
         }
     }
 
-    pub fn send(connection: &mut dyn std::io::Write, packet: Packet) -> Result<Option<Packet>> {
+    pub fn send(
+        connection: &mut dyn std::io::Write,
+        packet: Packet,
+    ) -> crate::Result<Option<Packet>> {
         let mut dest = BytesMut::default();
         let result = encode(packet, &mut dest);
         if let Err(e) = result {

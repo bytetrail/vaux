@@ -1,11 +1,15 @@
 mod client;
+mod connection;
 #[cfg(feature = "developer")]
 mod developer;
 
 use std::fmt::Display;
 
-pub use client::{MqttClient, MqttConnection};
+pub use client::MqttClient;
+pub use connection::MqttConnection;
 use vaux_mqtt::Reason;
+
+pub type Result<T> = core::result::Result<T, MqttError>;
 
 #[derive(Default, Debug, PartialEq, Eq, Copy, Clone)]
 #[repr(u8)]
@@ -64,5 +68,3 @@ impl MqttError {
         &self.message
     }
 }
-
-pub type Result<T> = core::result::Result<T, MqttError>;
