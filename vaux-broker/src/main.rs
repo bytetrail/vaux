@@ -13,7 +13,7 @@ use tokio::sync::RwLock;
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about=None)]
 struct Args {
-    #[clap(short = 'h', long)]
+    #[clap(short = 'l', long)]
     /// Listen address (default is "127.0.0.1")s
     listen_addr: Option<String>,
     #[clap(short, long)]
