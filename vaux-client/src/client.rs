@@ -23,6 +23,7 @@ const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
 const MAX_QUEUE_LEN: usize = 100;
 const DEFAULT_CLIENT_KEEP_ALIVE: u16 = 60;
 const MIN_KEEP_ALIVE: u16 = 30;
+const DEFAULT_LOOP_INTERVAL: u64 = 200;
 
 #[derive(Debug)]
 struct MqttStream<'a> {
@@ -567,9 +568,7 @@ impl MqttClient {
                     }
                     Err(e) => {
                         if e.kind() != ErrorKind::Timeout {
-                            // there may be nothing to read so this is not necessarily an error
-                            // TODO configure for disconnect/reconnect, PING or stop on timeouts
-                        } else {
+                            // TODO evaluate additional error types
                             if let Some(chan) = err_chan.as_ref() {
                                 if chan.send(e.clone()).is_err() {
                                     return Err(e);
@@ -577,10 +576,13 @@ impl MqttClient {
                             } else {
                                 return Err(e);
                             }
+                        } else {
                         }
                     }
                 };
-                if let Ok(mut packet) = packet_send.recv_timeout(Duration::from_millis(10)) {
+                if let Ok(mut packet) =
+                    packet_send.recv_timeout(Duration::from_millis(DEFAULT_LOOP_INTERVAL))
+                {
                     if let Packet::Publish(mut p) = packet.clone() {
                         if p.qos() == QoSLevel::AtLeastOnce {
                             if auto_packet_id {
@@ -643,7 +645,7 @@ impl MqttClient {
                 }
                 if last_active.elapsed() > Duration::from_secs(keep_alive as u64) {
                     // use idle time to attempt to resend any pending QOS-1 packets
-                    if pending_publish.is_empty() && qos_1_remaining > 0 {
+                    if !pending_publish.is_empty() && qos_1_remaining > 0 {
                         // send any pending QOS-1 publish packets that we are able to send
                         while !pending_publish.is_empty() && qos_1_remaining > 0 {
                             while !pending_publish.is_empty() && qos_1_remaining > 0 {
@@ -662,6 +664,8 @@ impl MqttClient {
                                 }
                             }
                         }
+                        // packet sent, update last active time
+                        last_active = std::time::Instant::now();
                     } else {
                         let ping = Packet::PingRequest(Default::default());
                         if let Err(e) = MqttClient::send(&mut stream, ping) {
@@ -673,9 +677,9 @@ impl MqttClient {
                                 return Err(e);
                             }
                         }
+                        // packet sent, update last active time
+                        last_active = std::time::Instant::now();
                     }
-                    // packet sent, update last active time
-                    last_active = std::time::Instant::now();
                 }
             }
         })
@@ -721,7 +725,7 @@ impl MqttClient {
         let connect_packet = Packet::Connect(Box::new(connect));
         // let mut buffer = [0u8; 128];
         let mut dest = BytesMut::default();
-        let result = encode(connect_packet, &mut dest);
+        let result = encode(&connect_packet, &mut dest);
         if let Err(e) = result {
             panic!("Failed to encode packet: {:?}", e);
         }
@@ -860,12 +864,11 @@ impl MqttClient {
         packet: Packet,
     ) -> crate::Result<Option<Packet>> {
         let mut dest = BytesMut::default();
-        let result = encode(packet, &mut dest);
+        let result = encode(&packet, &mut dest);
         if let Err(e) = result {
             panic!("Failed to encode packet: {:?}", e);
         }
         if let Err(e) = connection.write_all(&dest) {
-            eprintln!("unexpected send error {:#?}", e);
             // TODO higher fidelity error handling
             return Err(MqttError::new(
                 &format!("unable to send packet: {}", e),

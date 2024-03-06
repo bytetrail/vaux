@@ -81,7 +81,8 @@ fn main() {
 }
 
 fn subscribe(connection: vaux_client::MqttConnection, mut client: MqttClient, args: Args) {
-    client.start(connection, args.clean_start);
+    client.set_keep_alive(10);
+    let handle = client.start(connection, args.clean_start);
     let consumer = client.consumer();
     let producer = client.producer();
     let filter = vec![
@@ -140,6 +141,12 @@ fn subscribe(connection: vaux_client::MqttConnection, mut client: MqttClient, ar
                 }
             }
         }
+        Err(e) => {
+            eprintln!("{:?}", e);
+        }
+    }
+    match handle.join() {
+        Ok(_) => {}
         Err(e) => {
             eprintln!("{:?}", e);
         }
