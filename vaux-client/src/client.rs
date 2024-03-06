@@ -405,6 +405,7 @@ impl MqttClient {
         let connected = self.connected.clone();
         let credentials = connection.credentials();
         let last_error = self.last_error.clone();
+        let err_chan = self.err_chan.as_ref().map(|(s, _)| s.clone());
 
         thread::spawn(move || {
             let mut buffer = vec![0; max_packet_size];
@@ -491,8 +492,7 @@ impl MqttClient {
                                                 .is_err()
                                                 {
                                                     // TODO handle the pub ack next time through
-                                                    // push a message to the last error channel
-                                                    eprintln!("unable to send puback");
+                                                    // push a message to the last error channel\
                                                 }
                                             }
                                         }
@@ -524,6 +524,14 @@ impl MqttClient {
                         if e.kind() != ErrorKind::Timeout {
                             // there may be nothing to read so this is not necessarily an error
                             // TODO configure for disconnect/reconnect, PING or stop on timeouts
+                        } else {
+                            if let Some(chan) = err_chan.as_ref() {
+                                if chan.send(e.clone()).is_err() {
+                                    return Err(e);
+                                }
+                            } else {
+                                return Err(e);
+                            }
                         }
                     }
                 };
@@ -537,8 +545,17 @@ impl MqttClient {
                             } else if let Some(packet_id) = p.packet_id {
                                 pending_recv_ack.insert(packet_id, Packet::Publish(p.clone()));
                             } else {
-                                // TODO handle error
-                                eprintln!("no packet id");
+                                let err = MqttError::new(
+                                    "no packet ID for QoS > 0",
+                                    ErrorKind::Protocol(Reason::MalformedPacket),
+                                );
+                                if let Some(chan) = err_chan.as_ref() {
+                                    if chan.send(err.clone()).is_err() {
+                                        return Err(err);
+                                    }
+                                } else {
+                                    return Err(err);
+                                }
                             }
                             if qos_1_remaining > 0 {
                                 qos_1_remaining -= 1;
@@ -554,14 +571,26 @@ impl MqttClient {
                         }
                     } else if let Packet::Disconnect(_d) = packet.clone() {
                         if let Err(e) = MqttClient::send(&mut stream, packet) {
-                            eprintln!("ERROR sending packet to remote: {}", e.message());
+                            if let Some(chan) = err_chan.as_ref() {
+                                if chan.send(e.clone()).is_err() {
+                                    return Err(e);
+                                }
+                            } else {
+                                return Err(e);
+                            }
                         }
                         stream.shutdown().unwrap();
                         pending_qos1.lock().unwrap().append(&mut pending_publish);
                         return Ok(());
                     }
                     if let Err(e) = MqttClient::send(&mut stream, packet) {
-                        eprintln!("ERROR sending packet to remote: {}", e.message());
+                        if let Some(chan) = err_chan.as_ref() {
+                            if chan.send(e.clone()).is_err() {
+                                return Err(e);
+                            }
+                        } else {
+                            return Err(e);
+                        }
                     }
                     // send any pending QOS-1 publish packets that we are able to send
                     while !pending_publish.is_empty() && qos_1_remaining > 0 {
@@ -570,8 +599,13 @@ impl MqttClient {
                             // pending_publish_size -= packet.encoded_size();
                             if let Err(e) = MqttClient::send(&mut stream, packet.clone()) {
                                 pending_publish.insert(0, packet);
-                                // TODO notify calling client of error
-                                eprintln!("ERROR sending packet to remote: {}", e.message());
+                                if let Some(chan) = err_chan.as_ref() {
+                                    if chan.send(e.clone()).is_err() {
+                                        return Err(e);
+                                    }
+                                } else {
+                                    return Err(e);
+                                }
                             } else {
                                 qos_1_remaining += 1;
                             }
@@ -582,11 +616,15 @@ impl MqttClient {
         })
     }
 
-    pub fn stop(&mut self) {
+    pub fn stop(&mut self) -> Result<(), MqttError> {
         let disconnect = Packet::Disconnect(Default::default());
         if let Err(e) = self.producer.send(disconnect) {
-            eprintln!("unable to send disconnect: {}", e);
+            return Err(MqttError::new(
+                &format!("unable to send disconnect: {}", e),
+                ErrorKind::Transport,
+            ));
         }
+        Ok(())
     }
 
     fn send_connect(
@@ -663,6 +701,7 @@ impl MqttClient {
         let set_id = client_id.lock().unwrap();
         let client_id_set = set_id.is_some();
         if connack.reason() != Reason::Success {
+            // TODO return the connack reason as MQTT error with reason code
             let mut connected = connected.lock().unwrap();
             *connected = false;
             return Err(MqttError::new(
