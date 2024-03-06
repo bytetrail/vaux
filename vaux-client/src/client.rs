@@ -127,6 +127,10 @@ pub struct MqttClient {
     consumer: crossbeam_channel::Receiver<vaux_mqtt::Packet>,
     packet_send: Option<crossbeam_channel::Receiver<vaux_mqtt::Packet>>,
     packet_recv: Option<crossbeam_channel::Sender<vaux_mqtt::Packet>>,
+    err_chan: Option<(
+        crossbeam_channel::Sender<MqttError>,
+        crossbeam_channel::Receiver<MqttError>,
+    )>,
     subscriptions: Vec<Subscription>,
     pending_qos1: Arc<Mutex<Vec<Packet>>>,
     max_packet_size: usize,
@@ -157,6 +161,7 @@ impl MqttClient {
             crossbeam_channel::Sender<vaux_mqtt::Packet>,
             crossbeam_channel::Receiver<vaux_mqtt::Packet>,
         ) = crossbeam_channel::unbounded();
+
         Self {
             auto_ack,
             auto_packet_id,
@@ -168,6 +173,7 @@ impl MqttClient {
             client_id: Arc::new(Mutex::new(Some(client_id.to_string()))),
             producer,
             consumer,
+            err_chan: None,
             packet_send: Some(packet_send),
             packet_recv: Some(packet_recv),
             subscriptions: Vec::new(),
@@ -228,6 +234,42 @@ impl MqttClient {
     /// ```
     pub fn set_session_expiry(&mut self, session_expiry: u32) {
         self.session_expiry = session_expiry;
+    }
+
+    /// Sets up an error handler for the client. The error handler is used to receive
+    /// errors from the client. If the error handler is set, the client will send
+    /// errors to the error handler. The error handler is a channel that is used to
+    /// receive errors from the client. Only one error handler can be set at a time.
+    ///
+    /// Errors that occur on the client once a connection has been established will be
+    /// sent to the error handler. This includes transport, protocol, and codec errors.
+    /// PUBACK failures will be sent to the error handler if the client does not receive
+    /// a PUBACK for a QoS 1 message within the specified time or the PUBACK has a reason
+    /// code other than "Success".
+    ///
+    /// It is not recommended to use the automatic packet ID feature with an error handler
+    /// as the receiver of the error will not be able to determine which packet caused the
+    /// error if the packet ID is automatically generated.
+    pub fn set_error_handler(
+        &mut self,
+    ) -> Result<crossbeam_channel::Receiver<MqttError>, MqttError> {
+        if self.err_chan.is_some() {
+            return Err(MqttError::new(
+                "error handler already set",
+                ErrorKind::Protocol(Reason::ProtocolErr),
+            ));
+        }
+        let (sender, receiver) = crossbeam_channel::unbounded();
+        self.err_chan = Some((sender, receiver));
+
+        Ok(self.err_chan.as_ref().unwrap().1.clone())
+    }
+
+    /// Clears the error handler for the client. The error handler is used to
+    /// receive errors from the client. If the error handler is cleared, the
+    /// client will no longer send errors to the error handler.
+    pub fn clear_error_handler(&mut self) {
+        self.err_chan = None;
     }
 
     /// Helper method to subscribe to the topics in the topic filter. This helper
@@ -606,37 +648,6 @@ impl MqttClient {
                     )),
                 }
             }
-
-            //     Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
-            //         Ok(data_read) => {
-            //             if let Some((packet, _decode_len)) = data_read {
-            //                 match packet {
-            //                     Packet::ConnAck(connack) => {
-            //                         Self::handle_connack(connack, connected, client_id)
-            //                     }
-            //                     Packet::Disconnect(_disconnect) => {
-            //                         // TODO return the disconnect reason as MQTT error
-            //                         panic!("disconnect");
-            //                     }
-            //                     _ => Err(MqttError::new(
-            //                         "unexpected packet type",
-            //                         ErrorKind::Protocol(Reason::ProtocolErr),
-            //                     )),
-            //                 }
-            //             } else {
-            //                 Err(MqttError::new(
-            //                     "no MQTT packet received",
-            //                     ErrorKind::Protocol(Reason::ProtocolErr),
-            //                 ))
-            //             }
-            //         }
-            //         Err(e) => Err(MqttError::new(&e.to_string(), ErrorKind::Codec)),
-            //     },
-            //     Err(e) => Err(MqttError::new(
-            //         &format!("unable to read stream: {}", e),
-            //         ErrorKind::Transport,
-            //     )),
-            // },
             Err(e) => Err(MqttError::new(
                 &format!("Unable to write packet(s) to broker: {}", e),
                 ErrorKind::Transport,
@@ -652,7 +663,6 @@ impl MqttClient {
         let set_id = client_id.lock().unwrap();
         let client_id_set = set_id.is_some();
         if connack.reason() != Reason::Success {
-            // TODO return the connack reason as MQTT error with reason code
             let mut connected = connected.lock().unwrap();
             *connected = false;
             return Err(MqttError::new(
