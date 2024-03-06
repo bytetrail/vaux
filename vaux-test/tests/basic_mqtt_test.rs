@@ -164,7 +164,7 @@ impl MQTTClient {
                     Ok(_) => match self.connection.as_ref().unwrap().read(&mut buffer) {
                         Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
                             Ok(p) => {
-                                if let Some(packet) = p {
+                                if let Some(_packet) = p {
                                     // match packet {
                                     //     Packet::ConnAck(connack) => {
                                     //         return Some(connack);

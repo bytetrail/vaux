@@ -24,6 +24,7 @@ const MAX_QUEUE_LEN: usize = 100;
 const DEFAULT_CLIENT_KEEP_ALIVE: u16 = 60;
 const MIN_KEEP_ALIVE: u16 = 30;
 const DEFAULT_LOOP_INTERVAL: u64 = 200;
+const MIN_LOOP_INTERVAL: u64 = 25;
 
 #[derive(Debug)]
 struct MqttStream<'a> {
@@ -138,6 +139,7 @@ pub struct MqttClient {
     pending_qos1: Arc<Mutex<Vec<Packet>>>,
     max_packet_size: usize,
     keep_alive: u16,
+    loop_interval: u64,
 }
 
 impl Default for MqttClient {
@@ -184,6 +186,7 @@ impl MqttClient {
             pending_qos1: Arc::new(Mutex::new(Vec::new())),
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
+            loop_interval: DEFAULT_LOOP_INTERVAL,
         }
     }
 
@@ -306,6 +309,28 @@ impl MqttClient {
             self.keep_alive = MIN_KEEP_ALIVE;
         } else {
             self.keep_alive = keep_alive;
+        }
+    }
+
+    pub fn loop_interval(&self) -> u64 {
+        self.loop_interval
+    }
+
+    /// Sets the loop interval for the client. The loop interval is the number of
+    /// milliseconds that the client will wait for a packet to send prior continuing
+    /// with a subsequent read/write loop interval. The loop interval must be set
+    /// prior to calling start for the value to be used. The MQTT read/write loop
+    /// will not artificially delay the loop while there are additional packets to
+    /// send.
+    ///
+    /// The default loop interval is 200 milliseconds. The minimum loop interval
+    /// is 25 milliseconds. If a loop interval less than 25 milliseconds is set,
+    /// the client will use the minimum loop interval of 25 milliseconds.
+    pub fn set_loop_interval(&mut self, loop_interval: u64) {
+        if loop_interval < MIN_LOOP_INTERVAL {
+            self.loop_interval = MIN_LOOP_INTERVAL;
+        } else {
+            self.loop_interval = loop_interval;
         }
     }
 
@@ -444,6 +469,7 @@ impl MqttClient {
         let last_error = self.last_error.clone();
         let err_chan = self.err_chan.as_ref().map(|(s, _)| s.clone());
         let keep_alive = self.keep_alive;
+        let loop_interval = self.loop_interval;
 
         thread::spawn(move || {
             let mut buffer = vec![0; max_packet_size];
@@ -576,12 +602,11 @@ impl MqttClient {
                             } else {
                                 return Err(e);
                             }
-                        } else {
                         }
                     }
                 };
                 if let Ok(mut packet) =
-                    packet_send.recv_timeout(Duration::from_millis(DEFAULT_LOOP_INTERVAL))
+                    packet_send.recv_timeout(Duration::from_millis(loop_interval))
                 {
                     if let Packet::Publish(mut p) = packet.clone() {
                         if p.qos() == QoSLevel::AtLeastOnce {
@@ -703,7 +728,7 @@ impl MqttClient {
         session_expiry: u32,
         clean_start: bool,
         connected: Arc<Mutex<bool>>,
-        buffer: &mut Vec<u8>,
+        buffer: &mut [u8],
         offset: &mut usize,
     ) -> crate::Result<ConnAck> {
         let mut connect = Connect::default();
@@ -806,7 +831,7 @@ impl MqttClient {
     fn read_next(
         connection: &mut dyn std::io::Read,
         max_packet_size: usize,
-        buffer: &mut Vec<u8>,
+        buffer: &mut [u8],
         offset: &mut usize,
     ) -> crate::Result<Option<Packet>> {
         let mut bytes_read = *offset;
