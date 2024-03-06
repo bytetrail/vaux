@@ -21,6 +21,8 @@ const DEFAULT_SESSION_EXPIRY: u32 = 1000;
 // 64K is the default max packet size
 const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
 const MAX_QUEUE_LEN: usize = 100;
+const DEFAULT_CLIENT_KEEP_ALIVE: u16 = 60;
+const MIN_KEEP_ALIVE: u16 = 30;
 
 #[derive(Debug)]
 struct MqttStream<'a> {
@@ -134,6 +136,7 @@ pub struct MqttClient {
     subscriptions: Vec<Subscription>,
     pending_qos1: Arc<Mutex<Vec<Packet>>>,
     max_packet_size: usize,
+    keep_alive: u16,
 }
 
 impl Default for MqttClient {
@@ -179,6 +182,7 @@ impl MqttClient {
             subscriptions: Vec::new(),
             pending_qos1: Arc::new(Mutex::new(Vec::new())),
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
+            keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
         }
     }
 
@@ -250,6 +254,9 @@ impl MqttClient {
     /// It is not recommended to use the automatic packet ID feature with an error handler
     /// as the receiver of the error will not be able to determine which packet caused the
     /// error if the packet ID is automatically generated.
+    ///
+    /// The error handler as with other configuration settings must be set prior to calling
+    /// start for the error handler to be used.
     pub fn set_error_handler(
         &mut self,
     ) -> Result<crossbeam_channel::Receiver<MqttError>, MqttError> {
@@ -270,6 +277,35 @@ impl MqttClient {
     /// client will no longer send errors to the error handler.
     pub fn clear_error_handler(&mut self) {
         self.err_chan = None;
+    }
+
+    /// Sets the keep alive interval for the client. The keep alive interval is
+    /// the number of seconds that the client will send a PING packet to the
+    /// broker to keep the connection alive. If the client does not receive a
+    /// PINGRESP from the broker within the keep alive interval the client will
+    /// disconnect from the broker.
+    ///
+    /// The keep alive interval must be set prior to calling connect for the value
+    /// to be used.
+    ///
+    /// The default keep alive interval is 60 seconds. The minimum keep alive
+    /// interval is 30 seconds. If a keep alive interval less than 30 seconds is
+    /// set, the client will use the minimum keep alive interval of 30 seconds.
+    ///
+    /// Example:
+    /// ```
+    /// use vaux_client::MqttClient;
+    ///
+    /// let mut client = MqttClient::default();
+    /// // set the keep alive interval to 30 seconds
+    /// client.set_keep_alive(30);
+    /// ```
+    pub fn set_keep_alive(&mut self, keep_alive: u16) {
+        if keep_alive < MIN_KEEP_ALIVE {
+            self.keep_alive = MIN_KEEP_ALIVE;
+        } else {
+            self.keep_alive = keep_alive;
+        }
     }
 
     /// Helper method to subscribe to the topics in the topic filter. This helper
@@ -406,6 +442,7 @@ impl MqttClient {
         let credentials = connection.credentials();
         let last_error = self.last_error.clone();
         let err_chan = self.err_chan.as_ref().map(|(s, _)| s.clone());
+        let keep_alive = self.keep_alive;
 
         thread::spawn(move || {
             let mut buffer = vec![0; max_packet_size];
@@ -453,6 +490,7 @@ impl MqttClient {
             // let mut pending_publish_size = 0;
             let mut qos_1_remaining = receive_max;
             pending_publish.append(&mut pending_qos1.lock().unwrap());
+            let mut last_active = std::time::Instant::now();
             loop {
                 match MqttClient::read_next(&mut stream, max_packet_size, &mut buffer, &mut offset)
                 {
@@ -592,25 +630,44 @@ impl MqttClient {
                             return Err(e);
                         }
                     }
-                    // send any pending QOS-1 publish packets that we are able to send
-                    while !pending_publish.is_empty() && qos_1_remaining > 0 {
+                    // packet sent, update last active time
+                    last_active = std::time::Instant::now();
+                }
+                if last_active.elapsed() > Duration::from_secs(keep_alive as u64) {
+                    // use idle time to attempt to resend any pending QOS-1 packets
+                    if pending_publish.is_empty() && qos_1_remaining > 0 {
+                        // send any pending QOS-1 publish packets that we are able to send
                         while !pending_publish.is_empty() && qos_1_remaining > 0 {
-                            let packet = pending_publish.remove(0);
-                            // pending_publish_size -= packet.encoded_size();
-                            if let Err(e) = MqttClient::send(&mut stream, packet.clone()) {
-                                pending_publish.insert(0, packet);
-                                if let Some(chan) = err_chan.as_ref() {
-                                    if chan.send(e.clone()).is_err() {
+                            while !pending_publish.is_empty() && qos_1_remaining > 0 {
+                                let packet = pending_publish.remove(0);
+                                if let Err(e) = MqttClient::send(&mut stream, packet.clone()) {
+                                    pending_publish.insert(0, packet);
+                                    if let Some(chan) = err_chan.as_ref() {
+                                        if chan.send(e.clone()).is_err() {
+                                            return Err(e);
+                                        }
+                                    } else {
                                         return Err(e);
                                     }
                                 } else {
+                                    qos_1_remaining -= 1;
+                                }
+                            }
+                        }
+                    } else {
+                        let ping = Packet::PingRequest(Default::default());
+                        if let Err(e) = MqttClient::send(&mut stream, ping) {
+                            if let Some(chan) = err_chan.as_ref() {
+                                if chan.send(e.clone()).is_err() {
                                     return Err(e);
                                 }
                             } else {
-                                qos_1_remaining += 1;
+                                return Err(e);
                             }
                         }
                     }
+                    // packet sent, update last active time
+                    last_active = std::time::Instant::now();
                 }
             }
         })
