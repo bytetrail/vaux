@@ -496,7 +496,12 @@ impl MqttClient {
                 {
                     Ok(result) => {
                         if let Some(p) = result {
+                            let mut packet_to_consumer = true;
                             match &p {
+                                Packet::PingResponse(_pingresp) => {
+                                    // do not send to consumer
+                                    packet_to_consumer = false;
+                                }
                                 Packet::Disconnect(d) => {
                                     // TODO handle disconnect - verify shutdown behavior
                                     stream.shutdown().unwrap();
@@ -548,13 +553,15 @@ impl MqttClient {
                                 }
                                 _ => {}
                             }
-                            if let Err(e) = packet_recv.send(p.clone()) {
-                                stream.shutdown().unwrap();
-                                pending_qos1.lock().unwrap().append(&mut pending_publish);
-                                return Err(MqttError::new(
-                                    &format!("unable to send packet to consumer: {}", e),
-                                    ErrorKind::Transport,
-                                ));
+                            if packet_to_consumer {
+                                if let Err(e) = packet_recv.send(p.clone()) {
+                                    stream.shutdown().unwrap();
+                                    pending_qos1.lock().unwrap().append(&mut pending_publish);
+                                    return Err(MqttError::new(
+                                        &format!("unable to send packet to consumer: {}", e),
+                                        ErrorKind::Transport,
+                                    ));
+                                }
                             }
                         }
                     }
@@ -595,6 +602,7 @@ impl MqttClient {
                                     return Err(err);
                                 }
                             }
+                            // if we have additional capacity for QOS 1 PUBACK
                             if qos_1_remaining > 0 {
                                 qos_1_remaining -= 1;
                                 packet = Packet::Publish(p);
@@ -650,7 +658,7 @@ impl MqttClient {
                                         return Err(e);
                                     }
                                 } else {
-                                    qos_1_remaining -= 1;
+                                    qos_1_remaining += 1;
                                 }
                             }
                         }
