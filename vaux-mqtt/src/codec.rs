@@ -400,7 +400,7 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecErro
     }
 }
 
-pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+pub fn encode(packet: &Packet, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
     match packet {
         Packet::Connect(c) => c.encode(dest),
         Packet::ConnAck(c) => c.encode(dest),
@@ -410,7 +410,8 @@ pub fn encode(packet: Packet, dest: &mut BytesMut) -> Result<(), MqttCodecError>
             p.encode(dest)
         }
 
-        Packet::PingRequest(header) | Packet::PingResponse(header) => {
+        Packet::PingRequest(_header) | Packet::PingResponse(_header) => {
+            let header = FixedHeader::new(PacketType::from(packet));
             dest.put_u8(header.packet_type() as u8 | header.flags());
             dest.put_u8(0x_00);
             Ok(())

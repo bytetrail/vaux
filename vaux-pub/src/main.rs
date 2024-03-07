@@ -112,9 +112,18 @@ fn publish(
     } else {
         println!("sent message");
     }
-    client.stop();
-    if handle.unwrap().join().unwrap().is_err() {
-        eprintln!("error in client thread");
+    match client.stop() {
+        Ok(_) => (),
+        Err(e) => eprintln!("unable to stop client: {:?}", e),
+    }
+    if let Some(h) = handle {
+        match h.join() {
+            Ok(r) => match r {
+                Ok(_) => (),
+                Err(e) => eprintln!("client thread failed: {:?}", e),
+            },
+            Err(e) => eprintln!("unable to join client thread: {:?}", e),
+        }
     }
 }
 

@@ -80,7 +80,7 @@ fn test_basic(
         Ok(mut stream) => {
             let mut buffer = [0u8; 128];
             let mut dest = BytesMut::new();
-            let result = encode(request.clone(), &mut dest);
+            let result = encode(&request.clone(), &mut dest);
             if let Err(e) = result {
                 assert!(false, "Failed to encode packet: {:?}", e);
             }
@@ -156,7 +156,7 @@ impl MQTTClient {
                 self.connection = Some(stream);
                 let mut buffer = [0u8; 128];
                 let mut dest = BytesMut::default();
-                let result = encode(connect_packet, &mut dest);
+                let result = encode(&connect_packet, &mut dest);
                 if let Err(e) = result {
                     assert!(false, "Failed to encode packet: {:?}", e);
                 }
@@ -164,7 +164,7 @@ impl MQTTClient {
                     Ok(_) => match self.connection.as_ref().unwrap().read(&mut buffer) {
                         Ok(len) => match decode(&mut BytesMut::from(&buffer[0..len])) {
                             Ok(p) => {
-                                if let Some(packet) = p {
+                                if let Some(_packet) = p {
                                     // match packet {
                                     //     Packet::ConnAck(connack) => {
                                     //         return Some(connack);
@@ -198,7 +198,7 @@ impl MQTTClient {
         let packet = Packet::Disconnect(disconnect);
         let mut _buffer = [0u8; 128];
         let mut dest = BytesMut::default();
-        let result = encode(packet, &mut dest);
+        let result = encode(&packet, &mut dest);
         if let Err(e) = result {
             assert!(false, "Failed to encode packet: {:?}", e);
         }
