@@ -47,11 +47,15 @@ a version of the codec that may be used with in an MQTT client library that supp
 embedded devices. See _vaux-embedded_
 
 ## vaux-client
-_Future_ : MQTT v5 client library using the vaux-mqtt codec. This is currently a 
-placeholder project. 
+MQTT v5 client library using the vaux-mqtt codec. The vaux client provides a wrapper around 
+the basic MQTT v5.0 protocol that supports clients that need to operate in a continuous 
+read/write mode. Currently the vaux MQTT client provides this capability with a separate 
+thread for protocol management with channels supporting inbound and outbound traffic 
+management.
+
 
 ## vaux-broker
-A complete implementation of an MQTT v5 broker. See roadmap below.
+An in-progress effort on a complete implementation of an MQTT v5 broker. See roadmap below.
 
 ### Usage
 ```
