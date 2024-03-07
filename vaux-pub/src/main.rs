@@ -1,7 +1,7 @@
 use std::{io::Read, sync::Arc, time::Duration};
 
 use clap::{error::ErrorKind, Parser};
-use vaux_mqtt::{property::Property, publish::Publish, QoSLevel};
+use vaux_mqtt::{property::Property, publish::Publish, Packet, QoSLevel};
 
 #[derive(Parser, Clone, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -89,6 +89,7 @@ fn publish(
             }
         };
     let producer = client.producer();
+    let consumer = client.consumer();
 
     let mut publish = Publish::default();
     publish
@@ -112,6 +113,21 @@ fn publish(
     } else {
         println!("sent message");
     }
+
+    let mut packet = consumer.recv_timeout(Duration::from_millis(1000));
+    let mut ack_recv = false;
+    while !ack_recv {
+        if packet.is_err() {
+            println!("waiting for ack");
+        } else {
+            if let Ok(Packet::PubAck(ack)) = packet {
+                println!("received ack: {:?}", ack);
+                ack_recv = true;
+            }
+        }
+        packet = consumer.recv_timeout(Duration::from_millis(1000));
+    }
+
     match client.stop() {
         Ok(_) => (),
         Err(e) => eprintln!("unable to stop client: {:?}", e),

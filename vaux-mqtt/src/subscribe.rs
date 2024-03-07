@@ -61,6 +61,20 @@ pub struct SubAck {
     sub_reason: Vec<Reason>,
 }
 
+impl SubAck {
+    pub fn packet_id(&self) -> u16 {
+        self.packet_id
+    }
+
+    pub fn properties(&self) -> &PropertyBundle {
+        &self.props
+    }
+
+    pub fn reason(&self) -> &Vec<Reason> {
+        &self.sub_reason
+    }
+}
+
 impl Size for SubAck {
     fn size(&self) -> u32 {
         let prop_size = self.property_size();
