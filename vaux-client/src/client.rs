@@ -663,7 +663,7 @@ impl MqttClient {
                 {
                     if let Packet::Publish(mut p) = packet.clone() {
                         if p.qos() == QoSLevel::AtLeastOnce {
-                            if auto_packet_id {
+                            if auto_packet_id && p.packet_id.is_none() {
                                 last_packet_id += 1;
                                 p.packet_id = Some(last_packet_id);
                                 pending_recv_ack.insert(last_packet_id, Packet::Publish(p.clone()));
