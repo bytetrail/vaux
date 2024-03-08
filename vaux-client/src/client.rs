@@ -334,7 +334,8 @@ impl MqttClient {
         }
     }
 
-    /// Removes all filters for the client.
+    /// Removes all filters for the client. Any packets that were sent to the filter
+    /// channel will be sent to the general consumer channel.
     pub fn clear_all_filters(&mut self) -> Result<(), MqttError> {
         match self.filter_channel.write() {
             Ok(mut filter) => {
