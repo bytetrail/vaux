@@ -2,11 +2,11 @@ mod client;
 mod connection;
 #[cfg(feature = "developer")]
 mod developer;
-
-use std::fmt::Display;
+mod stream;
 
 pub use client::MqttClient;
 pub use connection::MqttConnection;
+use std::fmt::Display;
 use vaux_mqtt::Reason;
 
 pub type Result<T> = core::result::Result<T, MqttError>;
