@@ -254,6 +254,103 @@ impl MqttClient {
         }
     }
 
+    /// Adds a filter for the specified packet type. The filter is used to send
+    /// packets of the specified type to the specified channel. Packets that are
+    /// sent to the filter channel will be sent to the general consumer channel.
+    pub fn create_filter(
+        &mut self,
+        packet_type: PacketType,
+    ) -> Result<crossbeam_channel::Receiver<Packet>, MqttError> {
+        match self.filter_channel.write() {
+            Ok(mut filter) => {
+                let (sender, receiver) = crossbeam_channel::unbounded();
+                filter.insert(packet_type, (sender, receiver.clone()));
+                Ok(receiver)
+            }
+            Err(_) => {
+                // poisoned lock
+                return Err(MqttError::new(
+                    "poisoned lock, filter channel",
+                    ErrorKind::Transport,
+                ));
+            }
+        }
+    }
+
+    /// Determines if the client has a filter for the specified packet type.
+    pub fn has_filter(&self, packet_type: PacketType) -> Result<bool, MqttError> {
+        match self.filter_channel.read() {
+            Ok(filter) => Ok(filter.contains_key(&packet_type)),
+            Err(_) => {
+                // poisoned lock
+                return Err(MqttError::new(
+                    "poisoned lock, filter channel",
+                    ErrorKind::Transport,
+                ));
+            }
+        }
+    }
+
+    /// Gets a filter for the specified packet type. The filter is used to send
+    /// packets of the specified type to the specified channel. Packets that are
+    /// sent to the filter channel will be sent to the general consumer channel.
+    /// If the filter does not exist, None will be returned.
+    pub fn get_filter(
+        &self,
+        packet_type: PacketType,
+    ) -> Result<Option<crossbeam_channel::Receiver<Packet>>, MqttError> {
+        match self.filter_channel.read() {
+            Ok(filter) => {
+                if let Some((_sender, receiver)) = filter.get(&packet_type) {
+                    Ok(Some(receiver.clone()))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(_) => {
+                // poisoned lock
+                return Err(MqttError::new(
+                    "poisoned lock, filter channel",
+                    ErrorKind::Transport,
+                ));
+            }
+        }
+    }
+
+    /// Removes the filter for the specified packet type.
+    pub fn clear_filter(&mut self, packet_type: PacketType) -> Result<(), MqttError> {
+        match self.filter_channel.write() {
+            Ok(mut filter) => {
+                filter.remove(&packet_type);
+                Ok(())
+            }
+            Err(_) => {
+                // poisoned lock
+                return Err(MqttError::new(
+                    "poisoned lock, filter channel",
+                    ErrorKind::Transport,
+                ));
+            }
+        }
+    }
+
+    /// Removes all filters for the client.
+    pub fn clear_all_filters(&mut self) -> Result<(), MqttError> {
+        match self.filter_channel.write() {
+            Ok(mut filter) => {
+                filter.drain();
+                Ok(())
+            }
+            Err(_) => {
+                // poisoned lock
+                return Err(MqttError::new(
+                    "poisoned lock, filter channel",
+                    ErrorKind::Transport,
+                ));
+            }
+        }
+    }
+
     /// Helper method to subscribe to the topics in the topic filter. This helper
     /// subscribes with a QoS level of "At Most Once", or 0. A SUBACK will
     /// typically be returned on the consumer on a successful subscribe.
@@ -535,11 +632,11 @@ impl MqttClient {
                                         }
                                     }
                                     Err(_) => {
-                                        // poisened lock
+                                        // poisoned lock
                                         stream.shutdown().unwrap();
                                         pending_qos1.lock().unwrap().append(&mut pending_publish);
                                         return Err(MqttError::new(
-                                            "poisened lock, filter channel",
+                                            "poisoned lock, filter channel",
                                             ErrorKind::Transport,
                                         ));
                                     }
