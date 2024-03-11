@@ -119,11 +119,9 @@ fn publish(
     while !ack_recv {
         if packet.is_err() {
             println!("waiting for ack");
-        } else {
-            if let Ok(Packet::PubAck(ack)) = packet {
-                println!("received ack: {:?}", ack);
-                ack_recv = true;
-            }
+        } else if let Ok(Packet::PubAck(ack)) = packet {
+            println!("received ack: {:?}", ack);
+            ack_recv = true;
         }
         packet = consumer.recv_timeout(Duration::from_millis(1000));
     }

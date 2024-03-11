@@ -47,7 +47,7 @@ async fn main() {
         Ipv4Addr::from_str(DEFAULT_LISTEN_ADDR).unwrap()
     };
     let listen_port = args.port.unwrap_or(DEFAULT_PORT);
-    let listen_addr = SocketAddr::try_from((listen_addr, listen_port)).unwrap();
+    let listen_addr = SocketAddr::from((listen_addr, listen_port));
 
     let mut broker = Broker::new(listen_addr);
     // TODO initialize from storage for long lived sessions
