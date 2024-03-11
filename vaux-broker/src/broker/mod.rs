@@ -35,11 +35,10 @@ impl Default for Broker {
     /// port (1883) for unsecure traffic
     fn default() -> Self {
         Broker {
-            listen_addr: SocketAddr::try_from((
+            listen_addr: SocketAddr::from((
                 Ipv4Addr::from_str(DEFAULT_LISTEN_ADDR).unwrap(),
                 DEFAULT_PORT,
-            ))
-            .unwrap(),
+            )),
         }
     }
 }

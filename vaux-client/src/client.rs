@@ -269,10 +269,10 @@ impl MqttClient {
             }
             Err(_) => {
                 // poisoned lock
-                return Err(MqttError::new(
+                Err(MqttError::new(
                     "poisoned lock, filter channel",
                     ErrorKind::Transport,
-                ));
+                ))
             }
         }
     }
@@ -283,10 +283,10 @@ impl MqttClient {
             Ok(filter) => Ok(filter.contains_key(&packet_type)),
             Err(_) => {
                 // poisoned lock
-                return Err(MqttError::new(
+                Err(MqttError::new(
                     "poisoned lock, filter channel",
                     ErrorKind::Transport,
-                ));
+                ))
             }
         }
     }
@@ -309,10 +309,10 @@ impl MqttClient {
             }
             Err(_) => {
                 // poisoned lock
-                return Err(MqttError::new(
+                Err(MqttError::new(
                     "poisoned lock, filter channel",
                     ErrorKind::Transport,
-                ));
+                ))
             }
         }
     }
@@ -326,10 +326,10 @@ impl MqttClient {
             }
             Err(_) => {
                 // poisoned lock
-                return Err(MqttError::new(
+                Err(MqttError::new(
                     "poisoned lock, filter channel",
                     ErrorKind::Transport,
-                ));
+                ))
             }
         }
     }
@@ -344,10 +344,10 @@ impl MqttClient {
             }
             Err(_) => {
                 // poisoned lock
-                return Err(MqttError::new(
+                Err(MqttError::new(
                     "poisoned lock, filter channel",
                     ErrorKind::Transport,
-                ));
+                ))
             }
         }
     }
@@ -774,6 +774,7 @@ impl MqttClient {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn send_connect(
         stream: &mut MqttStream,
         credentials: Option<(String, String)>,
