@@ -809,31 +809,27 @@ impl MqttClient {
             panic!("Failed to encode packet: {:?}", e);
         }
         match stream.write_all(&dest) {
-            Ok(_) => {
-                match MqttClient::read_next(stream, DEFAULT_MAX_PACKET_SIZE, buffer, offset) {
-                    Ok(Some(packet)) => match packet {
-                        Packet::ConnAck(connack) => {
-                            Self::handle_connack(connack, connected, client_id)
-                        }
-                        Packet::Disconnect(_disconnect) => {
-                            // TODO return the disconnect reason as MQTT error
-                            panic!("disconnect");
-                        }
-                        _ => Err(MqttError::new(
-                            "unexpected packet type",
-                            ErrorKind::Protocol(Reason::ProtocolErr),
-                        )),
-                    },
-                    Ok(None) => Err(MqttError::new(
-                        "no MQTT packet received",
+            Ok(_) => match MqttClient::read_next(stream, DEFAULT_MAX_PACKET_SIZE, buffer, offset) {
+                Ok(Some(packet)) => match packet {
+                    Packet::ConnAck(connack) => Self::handle_connack(connack, connected, client_id),
+                    Packet::Disconnect(disconnect) => Err(MqttError::new(
+                        &format!("disconnect received: {}", disconnect.reason),
                         ErrorKind::Protocol(Reason::ProtocolErr),
                     )),
-                    Err(e) => Err(MqttError::new(
-                        &format!("unable to read stream: {}", e),
-                        ErrorKind::Transport,
+                    _ => Err(MqttError::new(
+                        "unexpected packet type",
+                        ErrorKind::Protocol(Reason::ProtocolErr),
                     )),
-                }
-            }
+                },
+                Ok(None) => Err(MqttError::new(
+                    "no MQTT packet received",
+                    ErrorKind::Protocol(Reason::ProtocolErr),
+                )),
+                Err(e) => Err(MqttError::new(
+                    &format!("unable to read stream: {}", e),
+                    ErrorKind::Transport,
+                )),
+            },
             Err(e) => Err(MqttError::new(
                 &format!("Unable to write packet(s) to broker: {}", e),
                 ErrorKind::Transport,

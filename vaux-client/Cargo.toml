@@ -1,13 +1,13 @@
 [package]
 name = "vaux-client"
-version = "0.4.13"
+version = "0.4.14"
 edition = "2021"
 
 [features]
 developer = ["rustls/dangerous_configuration"]
 
 [dependencies]
-vaux-mqtt = { version = "0.4.13", path = "../vaux-mqtt" }
+vaux-mqtt = { version = "0.4.14", path = "../vaux-mqtt" }
 bytes = "1.3"
 uuid = "1.0"
 crossbeam-channel = "0.5.8"
