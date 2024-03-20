@@ -814,7 +814,7 @@ impl MqttClient {
                     Packet::ConnAck(connack) => Self::handle_connack(connack, connected, client_id),
                     Packet::Disconnect(disconnect) => Err(MqttError::new(
                         &format!("disconnect received: {}", disconnect.reason),
-                        ErrorKind::Protocol(Reason::ProtocolErr),
+                        ErrorKind::Protocol(disconnect.reason),
                     )),
                     _ => Err(MqttError::new(
                         "unexpected packet type",
