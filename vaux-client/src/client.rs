@@ -22,6 +22,7 @@ const DEFAULT_CLIENT_KEEP_ALIVE: u16 = 60;
 const MIN_KEEP_ALIVE: u16 = 30;
 const DEFAULT_LOOP_INTERVAL: u64 = 200;
 const MIN_LOOP_INTERVAL: u64 = 25;
+const MAX_CONNECT_WAIT: u64 = 5000;
 
 type FilteredChannel = Arc<
     RwLock<
@@ -59,6 +60,7 @@ pub struct MqttClient {
     max_packet_size: usize,
     keep_alive: u16,
     loop_interval: u64,
+    max_connect_wait: Duration,
 }
 
 impl Default for MqttClient {
@@ -107,6 +109,7 @@ impl MqttClient {
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
             loop_interval: DEFAULT_LOOP_INTERVAL,
+            max_connect_wait: Duration::from_millis(MAX_CONNECT_WAIT),
         }
     }
 
@@ -352,6 +355,22 @@ impl MqttClient {
         }
     }
 
+    /// Gets the maximum connection wait time. This is the maximum time that
+    /// the client will wait for a connection to be established with the
+    /// remote broker before returning an error. The default maximum
+    /// connection wait time is 5 seconds.
+    pub fn max_connect_wait(&self) -> Duration {
+        self.max_connect_wait
+    }
+
+    /// Sets the maximum connection wait time. This is the maximum time that
+    /// the client will wait for a connection to be established with the
+    /// remote broker before returning an error. This value must be set prior
+    /// to calling try_start for the value to have any effect.
+    pub fn set_max_connect_wait(&mut self, max_connect_wait: Duration) {
+        self.max_connect_wait = max_connect_wait;
+    }
+
     /// Helper method to subscribe to the topics in the topic filter. This helper
     /// subscribes with a QoS level of "At Most Once", or 0. A SUBACK will
     /// typically be returned on the consumer on a successful subscribe.
@@ -423,9 +442,10 @@ impl MqttClient {
         let handle = self.start(connection, clean_start);
         let start = std::time::Instant::now();
         while !self.connected() {
-            let last_error = self.last_error.lock();
-            if let Ok(last_error) = last_error {
-                if let Some(last_error) = last_error.as_ref() {
+            if let Ok(last_error_guard) = self.last_error.try_lock() {
+                let last_error = last_error_guard.clone();
+                drop(last_error_guard);
+                if let Some(last_error) = last_error {
                     match handle.join() {
                         Ok(result) => {
                             result?;
@@ -437,7 +457,7 @@ impl MqttClient {
                             ));
                         }
                     }
-                    return Err(last_error.clone());
+                    return Err(last_error);
                 }
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -489,6 +509,7 @@ impl MqttClient {
         let keep_alive = self.keep_alive;
         let loop_interval = self.loop_interval;
         let filter_channel = self.filter_channel.clone();
+        let max_connect_wait = self.max_connect_wait;
 
         thread::spawn(move || {
             let mut buffer = vec![0; max_packet_size];
@@ -510,7 +531,7 @@ impl MqttClient {
                 ));
             }
 
-            match Self::send_connect(
+            match Self::connect(
                 &mut stream,
                 credentials,
                 client_id,
@@ -519,6 +540,7 @@ impl MqttClient {
                 connected,
                 &mut buffer,
                 &mut offset,
+                max_connect_wait,
             ) {
                 Ok(_) => {}
                 Err(e) => {
@@ -775,7 +797,7 @@ impl MqttClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn send_connect(
+    fn connect(
         stream: &mut MqttStream,
         credentials: Option<(String, String)>,
         client_id: Arc<Mutex<Option<String>>>,
@@ -784,6 +806,7 @@ impl MqttClient {
         connected: Arc<Mutex<bool>>,
         buffer: &mut [u8],
         offset: &mut usize,
+        max_connect_wait: Duration,
     ) -> crate::Result<ConnAck> {
         let mut connect = Connect::default();
         connect.clean_start = clean_start;
@@ -809,27 +832,51 @@ impl MqttClient {
             panic!("Failed to encode packet: {:?}", e);
         }
         match stream.write_all(&dest) {
-            Ok(_) => match MqttClient::read_next(stream, DEFAULT_MAX_PACKET_SIZE, buffer, offset) {
-                Ok(Some(packet)) => match packet {
-                    Packet::ConnAck(connack) => Self::handle_connack(connack, connected, client_id),
-                    Packet::Disconnect(disconnect) => Err(MqttError::new(
-                        &format!("disconnect received: {}", disconnect.reason),
-                        ErrorKind::Protocol(disconnect.reason),
-                    )),
-                    _ => Err(MqttError::new(
-                        "unexpected packet type",
-                        ErrorKind::Protocol(Reason::ProtocolErr),
-                    )),
-                },
-                Ok(None) => Err(MqttError::new(
-                    "no MQTT packet received",
-                    ErrorKind::Protocol(Reason::ProtocolErr),
-                )),
-                Err(e) => Err(MqttError::new(
-                    &format!("unable to read stream: {}", e),
-                    ErrorKind::Transport,
-                )),
-            },
+            Ok(_) => {
+                let start = std::time::Instant::now();
+                while start.elapsed() < max_connect_wait {
+                    match MqttClient::read_next(stream, DEFAULT_MAX_PACKET_SIZE, buffer, offset) {
+                        Ok(Some(packet)) => match packet {
+                            Packet::ConnAck(connack) => {
+                                return Self::handle_connack(connack, connected, client_id)
+                            }
+                            Packet::Disconnect(disconnect) => {
+                                return Err(MqttError::new(
+                                    &format!("disconnect received: {}", disconnect.reason),
+                                    ErrorKind::Protocol(disconnect.reason),
+                                ))
+                            }
+                            _ => {
+                                return Err(MqttError::new(
+                                    "unexpected packet type",
+                                    ErrorKind::Protocol(Reason::ProtocolErr),
+                                ))
+                            }
+                        },
+                        Ok(None) => {
+                            return Err(MqttError::new(
+                                "no MQTT packet received",
+                                ErrorKind::Protocol(Reason::ProtocolErr),
+                            ))
+                        }
+                        Err(e) => match e.kind {
+                            ErrorKind::Timeout => {
+                                thread::sleep(Duration::from_millis(100));
+                            }
+                            _ => {
+                                return Err(MqttError::new(
+                                    &format!("unable to read packet: {}", e),
+                                    ErrorKind::Transport,
+                                ));
+                            }
+                        },
+                    }
+                }
+                Err(MqttError::new(
+                    "unable to connect to broker",
+                    ErrorKind::Timeout,
+                ))
+            }
             Err(e) => Err(MqttError::new(
                 &format!("Unable to write packet(s) to broker: {}", e),
                 ErrorKind::Transport,
