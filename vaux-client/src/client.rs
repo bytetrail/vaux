@@ -872,10 +872,10 @@ impl MqttClient {
                         },
                     }
                 }
-                return Err(MqttError::new(
+                Err(MqttError::new(
                     "unable to connect to broker",
                     ErrorKind::Timeout,
-                ));
+                ))
             }
             Err(e) => Err(MqttError::new(
                 &format!("Unable to write packet(s) to broker: {}", e),
