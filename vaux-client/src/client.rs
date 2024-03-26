@@ -423,9 +423,10 @@ impl MqttClient {
         let handle = self.start(connection, clean_start);
         let start = std::time::Instant::now();
         while !self.connected() {
-            let last_error = self.last_error.lock();
-            if let Ok(last_error) = last_error {
-                if let Some(last_error) = last_error.as_ref() {
+            if let Ok(last_error_guard) = self.last_error.try_lock() {
+                let last_error = last_error_guard.clone();
+                drop(last_error_guard);
+                if let Some(last_error) = last_error {
                     match handle.join() {
                         Ok(result) => {
                             result?;
@@ -437,7 +438,7 @@ impl MqttClient {
                             ));
                         }
                     }
-                    return Err(last_error.clone());
+                    return Err(last_error);
                 }
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
