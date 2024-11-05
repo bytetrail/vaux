@@ -1,12 +1,19 @@
 use crate::{stream::MqttStream, ErrorKind, MqttConnection, MqttError};
 use bytes::BytesMut;
+use std::io::Write;
 use std::{
     collections::HashMap,
-    io::Write,
-    sync::{Arc, Mutex, RwLock},
-    thread::{self, JoinHandle},
+    sync::Arc,
+    thread::{self},
     time::Duration,
     vec,
+};
+use tokio::{
+    sync::{
+        mpsc::{self, error::SendError, Receiver, Sender},
+        Mutex, RwLock,
+    },
+    task::JoinHandle,
 };
 use vaux_mqtt::{
     decode, encode, property::Property, ConnAck, Connect, Packet, PacketType, PropertyType,
@@ -20,21 +27,10 @@ const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
 const MAX_QUEUE_LEN: usize = 100;
 const DEFAULT_CLIENT_KEEP_ALIVE: u16 = 60;
 const MIN_KEEP_ALIVE: u16 = 30;
-const DEFAULT_LOOP_INTERVAL: u64 = 200;
-const MIN_LOOP_INTERVAL: u64 = 25;
 const MAX_CONNECT_WAIT: u64 = 5000;
+const DEFAULT_CHANNEL_SIZE: usize = 128;
 
-type FilteredChannel = Arc<
-    RwLock<
-        HashMap<
-            PacketType,
-            (
-                crossbeam_channel::Sender<vaux_mqtt::Packet>,
-                crossbeam_channel::Receiver<vaux_mqtt::Packet>,
-            ),
-        >,
-    >,
->;
+type FilteredChannel = Arc<RwLock<HashMap<PacketType, Sender<vaux_mqtt::Packet>>>>;
 
 #[derive(Debug)]
 pub struct MqttClient {
@@ -47,19 +43,15 @@ pub struct MqttClient {
     last_error: Arc<Mutex<Option<MqttError>>>,
     session_expiry: u32,
     client_id: Arc<Mutex<Option<String>>>,
-    producer: crossbeam_channel::Sender<vaux_mqtt::Packet>,
-    consumer: crossbeam_channel::Receiver<vaux_mqtt::Packet>,
-    packet_send: Option<crossbeam_channel::Receiver<vaux_mqtt::Packet>>,
-    packet_recv: Option<crossbeam_channel::Sender<vaux_mqtt::Packet>>,
-    err_chan: Option<(
-        crossbeam_channel::Sender<MqttError>,
-        crossbeam_channel::Receiver<MqttError>,
-    )>,
+    producer: Sender<vaux_mqtt::Packet>,
+    consumer: Option<Receiver<vaux_mqtt::Packet>>,
+    packet_send: Option<Receiver<vaux_mqtt::Packet>>,
+    packet_recv: Option<Sender<vaux_mqtt::Packet>>,
+    err_chan: Option<Sender<MqttError>>,
     subscriptions: Vec<Subscription>,
     pending_qos1: Arc<Mutex<Vec<Packet>>>,
     max_packet_size: usize,
     keep_alive: u16,
-    loop_interval: u64,
     max_connect_wait: Duration,
 }
 
@@ -80,14 +72,10 @@ impl MqttClient {
     /// broker. If the client ID is not specified, a UUID will be generated and
     /// used as the client ID.
     pub fn new(client_id: &str, auto_ack: bool, receive_max: u16, auto_packet_id: bool) -> Self {
-        let (producer, packet_send): (
-            crossbeam_channel::Sender<vaux_mqtt::Packet>,
-            crossbeam_channel::Receiver<vaux_mqtt::Packet>,
-        ) = crossbeam_channel::unbounded();
-        let (packet_recv, consumer): (
-            crossbeam_channel::Sender<vaux_mqtt::Packet>,
-            crossbeam_channel::Receiver<vaux_mqtt::Packet>,
-        ) = crossbeam_channel::unbounded();
+        let (producer, packet_send): (Sender<vaux_mqtt::Packet>, Receiver<vaux_mqtt::Packet>) =
+            mpsc::channel(DEFAULT_CHANNEL_SIZE);
+        let (packet_recv, consumer): (Sender<vaux_mqtt::Packet>, Receiver<vaux_mqtt::Packet>) =
+            mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
         Self {
             auto_ack,
@@ -100,7 +88,7 @@ impl MqttClient {
             client_id: Arc::new(Mutex::new(Some(client_id.to_string()))),
             filter_channel: Arc::new(RwLock::new(HashMap::new())),
             producer,
-            consumer,
+            consumer: Some(consumer),
             err_chan: None,
             packet_send: Some(packet_send),
             packet_recv: Some(packet_recv),
@@ -108,7 +96,6 @@ impl MqttClient {
             pending_qos1: Arc::new(Mutex::new(Vec::new())),
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
-            loop_interval: DEFAULT_LOOP_INTERVAL,
             max_connect_wait: Duration::from_millis(MAX_CONNECT_WAIT),
         }
     }
@@ -116,17 +103,15 @@ impl MqttClient {
     /// Gets a new message producer channel. This channel is used to send MQTT packets
     /// to the remote broker. The producer channel is cloned and returned so that
     /// multiple threads can send messages to the remote broker.
-    pub fn producer(&self) -> crossbeam_channel::Sender<vaux_mqtt::Packet> {
+    pub fn producer(&self) -> Sender<vaux_mqtt::Packet> {
         self.producer.clone()
     }
 
-    /// Gets a new message consumer channel. This channel is used to receive MQTT packets
-    /// from the remote broker. The consumer channel is cloned and returned so that
-    /// multiple threads can receive messages from the remote broker. Consumers do not
-    /// get duplicate messages using this method. A consumer will only receive a message
-    /// once and no 2 consumers will receive the same message.
-    pub fn consumer(&mut self) -> crossbeam_channel::Receiver<vaux_mqtt::Packet> {
-        self.consumer.clone()
+    /// Takes the message consumer channel. This channel is used to receive MQTT packets
+    /// from the remote broker. The consumer channel is returned. This channel is used
+    /// only when no filtered channels consume a message.
+    pub fn take_consumer(&mut self) -> Option<Receiver<vaux_mqtt::Packet>> {
+        self.consumer.take()
     }
 
     pub fn max_packet_size(&self) -> usize {
@@ -137,8 +122,8 @@ impl MqttClient {
         self.max_packet_size = max_packet_size;
     }
 
-    pub fn connected(&self) -> bool {
-        *self.connected.lock().unwrap()
+    pub async fn connected(&self) -> bool {
+        *self.connected.lock().await
     }
 
     pub fn session_expiry(&self) -> u32 {
@@ -184,19 +169,16 @@ impl MqttClient {
     ///
     /// The error handler as with other configuration settings must be set prior to calling
     /// start for the error handler to be used.
-    pub fn set_error_handler(
-        &mut self,
-    ) -> Result<crossbeam_channel::Receiver<MqttError>, MqttError> {
+    pub fn set_error_handler(&mut self) -> Result<Receiver<MqttError>, MqttError> {
         if self.err_chan.is_some() {
             return Err(MqttError::new(
                 "error handler already set",
                 ErrorKind::Protocol(Reason::ProtocolErr),
             ));
         }
-        let (sender, receiver) = crossbeam_channel::unbounded();
-        self.err_chan = Some((sender, receiver));
-
-        Ok(self.err_chan.as_ref().unwrap().1.clone())
+        let (sender, receiver) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
+        self.err_chan = Some(sender);
+        Ok(receiver)
     }
 
     /// Clears the error handler for the client. The error handler is used to
@@ -235,124 +217,33 @@ impl MqttClient {
         }
     }
 
-    pub fn loop_interval(&self) -> u64 {
-        self.loop_interval
-    }
-
-    /// Sets the loop interval for the client. The loop interval is the number of
-    /// milliseconds that the client will wait for a packet to send prior continuing
-    /// with a subsequent read/write loop interval. The loop interval must be set
-    /// prior to calling start for the value to be used. The MQTT read/write loop
-    /// will not artificially delay the loop while there are additional packets to
-    /// send.
-    ///
-    /// The default loop interval is 200 milliseconds. The minimum loop interval
-    /// is 25 milliseconds. If a loop interval less than 25 milliseconds is set,
-    /// the client will use the minimum loop interval of 25 milliseconds.
-    pub fn set_loop_interval(&mut self, loop_interval: u64) {
-        if loop_interval < MIN_LOOP_INTERVAL {
-            self.loop_interval = MIN_LOOP_INTERVAL;
-        } else {
-            self.loop_interval = loop_interval;
-        }
-    }
-
     /// Adds a filter for the specified packet type. The filter is used to send
     /// packets of the specified type to the specified channel. Packets that are
     /// sent to the filter channel will be sent to the general consumer channel.
-    pub fn create_filter(
-        &mut self,
-        packet_type: PacketType,
-    ) -> Result<crossbeam_channel::Receiver<Packet>, MqttError> {
-        match self.filter_channel.write() {
-            Ok(mut filter) => {
-                let (sender, receiver) = crossbeam_channel::unbounded();
-                filter.insert(packet_type, (sender, receiver.clone()));
-                Ok(receiver)
-            }
-            Err(_) => {
-                // poisoned lock
-                Err(MqttError::new(
-                    "poisoned lock, filter channel",
-                    ErrorKind::Transport,
-                ))
-            }
-        }
+    pub async fn create_filter(&mut self, packet_type: PacketType) -> Receiver<Packet> {
+        let mut filter = self.filter_channel.write().await;
+        let (sender, receiver) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
+        filter.insert(packet_type, sender);
+        receiver
     }
 
     /// Determines if the client has a filter for the specified packet type.
-    pub fn has_filter(&self, packet_type: PacketType) -> Result<bool, MqttError> {
-        match self.filter_channel.read() {
-            Ok(filter) => Ok(filter.contains_key(&packet_type)),
-            Err(_) => {
-                // poisoned lock
-                Err(MqttError::new(
-                    "poisoned lock, filter channel",
-                    ErrorKind::Transport,
-                ))
-            }
-        }
-    }
-
-    /// Gets a filter for the specified packet type. The filter is used to send
-    /// packets of the specified type to the specified channel. Packets that are
-    /// sent to the filter channel will be sent to the general consumer channel.
-    /// If the filter does not exist, None will be returned.
-    pub fn get_filter(
-        &self,
-        packet_type: PacketType,
-    ) -> Result<Option<crossbeam_channel::Receiver<Packet>>, MqttError> {
-        match self.filter_channel.read() {
-            Ok(filter) => {
-                if let Some((_sender, receiver)) = filter.get(&packet_type) {
-                    Ok(Some(receiver.clone()))
-                } else {
-                    Ok(None)
-                }
-            }
-            Err(_) => {
-                // poisoned lock
-                Err(MqttError::new(
-                    "poisoned lock, filter channel",
-                    ErrorKind::Transport,
-                ))
-            }
-        }
+    pub async fn has_filter(&self, packet_type: PacketType) -> bool {
+        let filter = self.filter_channel.read().await;
+        filter.contains_key(&packet_type)
     }
 
     /// Removes the filter for the specified packet type.
-    pub fn clear_filter(&mut self, packet_type: PacketType) -> Result<(), MqttError> {
-        match self.filter_channel.write() {
-            Ok(mut filter) => {
-                filter.remove(&packet_type);
-                Ok(())
-            }
-            Err(_) => {
-                // poisoned lock
-                Err(MqttError::new(
-                    "poisoned lock, filter channel",
-                    ErrorKind::Transport,
-                ))
-            }
-        }
+    pub async fn clear_filter(&mut self, packet_type: PacketType) {
+        let mut filter = self.filter_channel.write().await;
+        filter.remove(&packet_type);
     }
 
     /// Removes all filters for the client. Any packets that were sent to the filter
     /// channel will be sent to the general consumer channel.
-    pub fn clear_all_filters(&mut self) -> Result<(), MqttError> {
-        match self.filter_channel.write() {
-            Ok(mut filter) => {
-                filter.drain();
-                Ok(())
-            }
-            Err(_) => {
-                // poisoned lock
-                Err(MqttError::new(
-                    "poisoned lock, filter channel",
-                    ErrorKind::Transport,
-                ))
-            }
-        }
+    pub async fn clear_all_filters(&mut self) {
+        let mut filter = self.filter_channel.write().await;
+        filter.drain();
     }
 
     /// Gets the maximum connection wait time. This is the maximum time that
@@ -374,12 +265,12 @@ impl MqttClient {
     /// Helper method to subscribe to the topics in the topic filter. This helper
     /// subscribes with a QoS level of "At Most Once", or 0. A SUBACK will
     /// typically be returned on the consumer on a successful subscribe.
-    pub fn subscribe(
+    pub async fn subscribe(
         &mut self,
         packet_id: u16,
         topic_filter: &[&str],
         qos: QoSLevel,
-    ) -> std::result::Result<(), Box<crossbeam_channel::SendError<Packet>>> {
+    ) -> std::result::Result<(), SendError<Packet>> {
         let mut subscribe = Subscribe::default();
         subscribe.set_packet_id(packet_id);
         for topic in topic_filter {
@@ -393,7 +284,7 @@ impl MqttClient {
         }
         self.producer
             .send(vaux_mqtt::Packet::Subscribe(subscribe))
-            .map_err(|e| e.into())
+            .await
     }
 
     /// Attempts to start an MQTT session with the remote broker. The client will
@@ -433,20 +324,20 @@ impl MqttClient {
     /// }
     /// ```
     ///
-    pub fn try_start(
+    pub async fn try_start(
         &mut self,
         max_wait: Duration,
         connection: MqttConnection,
         clean_start: bool,
     ) -> crate::Result<JoinHandle<crate::Result<()>>> {
-        let handle = self.start(connection, clean_start);
+        let handle = self.start(connection, clean_start).await;
         let start = std::time::Instant::now();
-        while !self.connected() {
+        while !self.connected().await {
             if let Ok(last_error_guard) = self.last_error.try_lock() {
                 let last_error = last_error_guard.clone();
                 drop(last_error_guard);
                 if let Some(last_error) = last_error {
-                    match handle.join() {
+                    match handle.await {
                         Ok(result) => {
                             result?;
                         }
@@ -487,13 +378,13 @@ impl MqttClient {
     /// Queued messages will be sent in the order they were received. Any messages
     /// that are queued when the client is stopped will remain queued until the client
     /// is started again or the client is dropped.
-    pub fn start(
+    pub async fn start(
         &mut self,
         mut connection: MqttConnection,
         clean_start: bool,
     ) -> JoinHandle<crate::Result<()>> {
         let packet_recv = self.packet_recv.as_ref().unwrap().clone();
-        let packet_send = self.packet_send.as_ref().unwrap().clone();
+        let mut packet_send = self.packet_send.take().unwrap();
         let auto_ack = self.auto_ack;
         let receive_max = self.receive_max;
         let pending_qos1 = self.pending_qos1.clone();
@@ -505,13 +396,12 @@ impl MqttClient {
         let connected = self.connected.clone();
         let credentials = connection.credentials();
         let last_error = self.last_error.clone();
-        let err_chan = self.err_chan.as_ref().map(|(s, _)| s.clone());
+        let err_chan = self.err_chan.as_ref().map(|e| e.clone());
         let keep_alive = self.keep_alive;
-        let loop_interval = self.loop_interval;
         let filter_channel = self.filter_channel.clone();
         let max_connect_wait = self.max_connect_wait;
 
-        thread::spawn(move || {
+        tokio::spawn(async move {
             let mut buffer = vec![0; max_packet_size];
             let mut offset = 0;
 
@@ -524,7 +414,7 @@ impl MqttClient {
                 MqttStream::new_tcp(connection.tcp_socket.take().unwrap())
             };
 
-            if let Err(e) = stream.set_read_timeout(Some(Duration::from_millis(100))) {
+            if let Err(e) = stream.set_read_timeout(Some(Duration::from_millis(1000))) {
                 return Err(MqttError::new(
                     &format!("unable to set read timeout: {}", e),
                     ErrorKind::Transport,
@@ -541,15 +431,14 @@ impl MqttClient {
                 &mut buffer,
                 &mut offset,
                 max_connect_wait,
-            ) {
+            )
+            .await
+            {
                 Ok(_) => {}
                 Err(e) => {
-                    let last_error = last_error.lock();
-                    if let Ok(mut last_error) = last_error {
-                        *last_error = Some(e.clone());
-                    }
+                    let last_error = last_error.lock().await.clone();
                     stream.shutdown().unwrap();
-                    return Err(e);
+                    return Err(last_error.unwrap_or(e));
                 }
             }
             let mut pending_recv_ack: HashMap<u16, Packet> = HashMap::new();
@@ -557,7 +446,7 @@ impl MqttClient {
             // TODO add size tracking to pending publish
             // let mut pending_publish_size = 0;
             let mut qos_1_remaining = receive_max;
-            pending_publish.append(&mut pending_qos1.lock().unwrap());
+            pending_publish.append(&mut *pending_qos1.lock().await);
             let mut last_active = std::time::Instant::now();
             loop {
                 match MqttClient::read_next(&mut stream, max_packet_size, &mut buffer, &mut offset)
@@ -573,7 +462,7 @@ impl MqttClient {
                                 Packet::Disconnect(d) => {
                                     // TODO handle disconnect - verify shutdown behavior
                                     stream.shutdown().unwrap();
-                                    pending_qos1.lock().unwrap().append(&mut pending_publish);
+                                    pending_qos1.lock().await.append(&mut pending_publish);
                                     return Err(MqttError::new(
                                         &format!("disconnect received: {:?}", d),
                                         ErrorKind::Protocol(d.reason),
@@ -593,7 +482,7 @@ impl MqttClient {
                                                         "protocol error, packet ID required with QoS > 0",
                                                         ErrorKind::Protocol(
                                                             Reason::MalformedPacket,
-                                                        ),
+                                                      ),
                                                     ));
                                                 }
                                                 if MqttClient::send(
@@ -604,6 +493,7 @@ impl MqttClient {
                                                 {
                                                     // TODO handle the pub ack next time through
                                                     // push a message to the last error channel\
+                                                    todo!()
                                                 }
                                             }
                                         }
@@ -622,44 +512,21 @@ impl MqttClient {
                                 _ => {}
                             }
                             if packet_to_consumer {
-                                match filter_channel.read() {
-                                    Ok(filter) => {
-                                        if let Some((sender, _receiver)) =
-                                            filter.get(&PacketType::from(&p))
-                                        {
-                                            if let Err(e) = sender.send(p.clone()) {
-                                                return Err(MqttError::new(
-                                                    &format!(
-                                                        "unable to send packet to consumer: {}",
-                                                        e
-                                                    ),
-                                                    ErrorKind::Transport,
-                                                ));
-                                            }
-                                        } else {
-                                            // no filter for packet type, send on the general channel
-                                            if let Err(e) = packet_recv.send(p.clone()) {
-                                                stream.shutdown().unwrap();
-                                                pending_qos1
-                                                    .lock()
-                                                    .unwrap()
-                                                    .append(&mut pending_publish);
-                                                return Err(MqttError::new(
-                                                    &format!(
-                                                        "unable to send packet to consumer: {}",
-                                                        e
-                                                    ),
-                                                    ErrorKind::Transport,
-                                                ));
-                                            }
-                                        }
-                                    }
-                                    Err(_) => {
-                                        // poisoned lock
-                                        stream.shutdown().unwrap();
-                                        pending_qos1.lock().unwrap().append(&mut pending_publish);
+                                let filter = filter_channel.read().await;
+                                if let Some(sender) = filter.get(&PacketType::from(&p)) {
+                                    if let Err(e) = sender.send(p.clone()).await {
                                         return Err(MqttError::new(
-                                            "poisoned lock, filter channel",
+                                            &format!("unable to send packet to consumer: {}", e),
+                                            ErrorKind::Transport,
+                                        ));
+                                    }
+                                } else {
+                                    // no filter for packet type, send on the general channel
+                                    if let Err(e) = packet_recv.try_send(p.clone()) {
+                                        stream.shutdown().unwrap();
+                                        pending_qos1.lock().await.append(&mut pending_publish);
+                                        return Err(MqttError::new(
+                                            &format!("unable to send packet to consumer: {}", e),
                                             ErrorKind::Transport,
                                         ));
                                     }
@@ -667,11 +534,12 @@ impl MqttClient {
                             }
                         }
                     }
+
                     Err(e) => {
                         if e.kind() != ErrorKind::Timeout {
                             // TODO evaluate additional error types
                             if let Some(chan) = err_chan.as_ref() {
-                                if chan.send(e.clone()).is_err() {
+                                if chan.try_send(e.clone()).is_err() {
                                     return Err(e);
                                 }
                             } else {
@@ -680,8 +548,8 @@ impl MqttClient {
                         }
                     }
                 };
-                if let Ok(mut packet) =
-                    packet_send.recv_timeout(Duration::from_millis(loop_interval))
+                if let Ok(mut packet) = packet_send.try_recv()
+                //recv_timeout(Duration::from_millis(loop_interval))
                 {
                     if let Packet::Publish(mut p) = packet.clone() {
                         if p.qos() == QoSLevel::AtLeastOnce {
@@ -697,7 +565,7 @@ impl MqttClient {
                                     ErrorKind::Protocol(Reason::MalformedPacket),
                                 );
                                 if let Some(chan) = err_chan.as_ref() {
-                                    if chan.send(err.clone()).is_err() {
+                                    if chan.send(err.clone()).await.is_err() {
                                         return Err(err);
                                     }
                                 } else {
@@ -720,7 +588,7 @@ impl MqttClient {
                     } else if let Packet::Disconnect(_d) = packet.clone() {
                         if let Err(e) = MqttClient::send(&mut stream, packet) {
                             if let Some(chan) = err_chan.as_ref() {
-                                if chan.send(e.clone()).is_err() {
+                                if chan.send(e.clone()).await.is_err() {
                                     return Err(e);
                                 }
                             } else {
@@ -728,12 +596,12 @@ impl MqttClient {
                             }
                         }
                         stream.shutdown().unwrap();
-                        pending_qos1.lock().unwrap().append(&mut pending_publish);
+                        pending_qos1.lock().await.append(&mut pending_publish);
                         return Ok(());
                     }
                     if let Err(e) = MqttClient::send(&mut stream, packet) {
                         if let Some(chan) = err_chan.as_ref() {
-                            if chan.send(e.clone()).is_err() {
+                            if chan.send(e.clone()).await.is_err() {
                                 return Err(e);
                             }
                         } else {
@@ -753,7 +621,7 @@ impl MqttClient {
                                 if let Err(e) = MqttClient::send(&mut stream, packet.clone()) {
                                     pending_publish.insert(0, packet);
                                     if let Some(chan) = err_chan.as_ref() {
-                                        if chan.send(e.clone()).is_err() {
+                                        if chan.send(e.clone()).await.is_err() {
                                             return Err(e);
                                         }
                                     } else {
@@ -770,7 +638,7 @@ impl MqttClient {
                         let ping = Packet::PingRequest(Default::default());
                         if let Err(e) = MqttClient::send(&mut stream, ping) {
                             if let Some(chan) = err_chan.as_ref() {
-                                if chan.send(e.clone()).is_err() {
+                                if chan.send(e.clone()).await.is_err() {
                                     return Err(e);
                                 }
                             } else {
@@ -785,9 +653,9 @@ impl MqttClient {
         })
     }
 
-    pub fn stop(&mut self) -> Result<(), MqttError> {
+    pub async fn stop(&mut self) -> Result<(), MqttError> {
         let disconnect = Packet::Disconnect(Default::default());
-        if let Err(e) = self.producer.send(disconnect) {
+        if let Err(e) = self.producer.send(disconnect).await {
             return Err(MqttError::new(
                 &format!("unable to send disconnect: {}", e),
                 ErrorKind::Transport,
@@ -797,8 +665,8 @@ impl MqttClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn connect(
-        stream: &mut MqttStream,
+    async fn connect<'a>(
+        stream: &mut MqttStream<'a>,
         credentials: Option<(String, String)>,
         client_id: Arc<Mutex<Option<String>>>,
         session_expiry: u32,
@@ -812,7 +680,7 @@ impl MqttClient {
         connect.clean_start = clean_start;
         // scoped mutex guard to set the connect packet client id
         {
-            let set_id = client_id.lock().unwrap();
+            let set_id = client_id.lock().await;
             if set_id.is_some() {
                 connect.client_id = (*set_id.as_ref().unwrap()).to_string();
             }
@@ -825,7 +693,7 @@ impl MqttClient {
             connect.password = Some(password.into_bytes());
         }
         let connect_packet = Packet::Connect(Box::new(connect));
-        // let mut buffer = [0u8; 128];
+        // let mut buffer = [0u8; DEFAULT_CHANNEL_SIZE];
         let mut dest = BytesMut::default();
         let result = encode(&connect_packet, &mut dest);
         if let Err(e) = result {
@@ -838,7 +706,7 @@ impl MqttClient {
                     match MqttClient::read_next(stream, DEFAULT_MAX_PACKET_SIZE, buffer, offset) {
                         Ok(Some(packet)) => match packet {
                             Packet::ConnAck(connack) => {
-                                return Self::handle_connack(connack, connected, client_id)
+                                return Self::handle_connack(connack, connected, client_id).await;
                             }
                             Packet::Disconnect(disconnect) => {
                                 return Err(MqttError::new(
@@ -884,23 +752,23 @@ impl MqttClient {
         }
     }
 
-    fn handle_connack(
+    async fn handle_connack(
         connack: ConnAck,
         connected: Arc<Mutex<bool>>,
         client_id: Arc<Mutex<Option<String>>>,
     ) -> crate::Result<ConnAck> {
-        let set_id = client_id.lock().unwrap();
+        let set_id = client_id.lock().await;
         let client_id_set = set_id.is_some();
         if connack.reason() != Reason::Success {
             // TODO return the connack reason as MQTT error with reason code
-            let mut connected = connected.lock().unwrap();
+            let mut connected = connected.lock().await;
             *connected = false;
             return Err(MqttError::new(
                 "connection refused",
                 ErrorKind::Protocol(connack.reason()),
             ));
         } else {
-            let mut connected = connected.lock().unwrap();
+            let mut connected = connected.lock().await;
             *connected = true;
         }
         if !client_id_set {
@@ -909,7 +777,7 @@ impl MqttClient {
                 .get_property(&PropertyType::AssignedClientId)
             {
                 Some(Property::AssignedClientId(id)) => {
-                    let mut client_id = client_id.lock().unwrap();
+                    let mut client_id = client_id.lock().await;
                     *client_id = Some(id.to_owned());
                 }
                 _ => {

@@ -1,6 +1,6 @@
 [package]
 name = "vaux-test"
-version = "0.4.15"
+version = "0.5.0"
 edition = "2021"
 
 [dependencies]
@@ -8,3 +8,4 @@ vaux-mqtt = { path = "../vaux-mqtt" }
 bytes = "1.1.0"
 tokio-util = { version = "0.7.0", features = ["codec"] }
 uuid = { version = "1.2.1", features = ["v4", "fast-rng"] }
+tokio = { version = "1.41", features = ["macros", "rt-multi-thread"] }

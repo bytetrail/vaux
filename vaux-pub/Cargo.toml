@@ -1,6 +1,6 @@
 [package]
 name = "vaux-pub"
-version = "0.4.15"
+version = "0.5.0"
 edition = "2021"
 
 
@@ -8,4 +8,5 @@ edition = "2021"
 vaux-client = { path = "../vaux-client", features = ["developer"] }
 vaux-mqtt = { path = "../vaux-mqtt" }
 clap = { version = "4.4", features = ["derive"] }
-rustls = "0.21.0"
+rustls = "0.23"
+tokio = { version = "1.41", features = ["macros", "rt-multi-thread"] }

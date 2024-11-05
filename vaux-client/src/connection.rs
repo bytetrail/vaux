@@ -4,6 +4,8 @@ use std::{
     time::Duration,
 };
 
+use rustls::pki_types::ServerName;
+
 #[cfg(feature = "developer")]
 use crate::developer;
 use crate::{ErrorKind, MqttError};
@@ -109,7 +111,6 @@ impl MqttConnection {
         if self.tls {
             if let Some(ca) = self.trusted_ca.clone() {
                 let mut config = rustls::ClientConfig::builder()
-                    .with_safe_defaults()
                     .with_root_certificates(ca)
                     .with_no_client_auth();
                 config.key_log = Arc::new(rustls::KeyLogFile::new());
@@ -120,7 +121,7 @@ impl MqttConnection {
                         .dangerous()
                         .set_certificate_verifier(Arc::new(self.verifier.clone()));
                 }
-                if let Ok(server_name) = self.host.as_str().try_into() {
+                if let Ok(server_name) = ServerName::try_from(self.host.clone()) {
                     if let Ok(c) = rustls::ClientConnection::new(Arc::new(config), server_name) {
                         self.tls_conn = Some(c);
                     } else {

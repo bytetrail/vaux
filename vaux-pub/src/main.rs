@@ -1,6 +1,9 @@
 use std::{io::Read, sync::Arc, time::Duration};
 
 use clap::{error::ErrorKind, Parser};
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::CertificateDer;
+use tokio::task::JoinHandle;
 use vaux_mqtt::{property::Property, publish::Publish, Packet, QoSLevel};
 
 #[derive(Parser, Clone, Debug)]
@@ -22,7 +25,10 @@ pub struct Args {
     username: Option<String>,
     #[arg(short = 'u', long, requires = "username")]
     password: Option<String>,
-    message: String,
+    #[arg(short = 'f', long, group = "payload")]
+    message_file: Option<String>,
+    #[arg(short = 'm', long, group = "payload")]
+    message: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -46,7 +52,8 @@ impl clap::builder::TypedValueParser for QoSLevelParser {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
     let mut root_store = rustls::RootCertStore::empty();
     if args.tls {
@@ -56,7 +63,7 @@ fn main() {
                 return;
             }
             let cert = load_cert(ca).unwrap();
-            root_store.add(&cert).unwrap();
+            root_store.add(cert).unwrap();
         } else {
             eprintln!("trusted CA file required for TLS");
             return;
@@ -72,24 +79,37 @@ fn main() {
         .connect()
         .unwrap();
     let mut client = vaux_client::MqttClient::new("vaux-publisher-001", false, 10, false);
-    publish(&mut client, connection, args.clone());
+    publish(&mut client, connection, args.clone()).await;
 }
 
-fn publish(
+async fn publish(
     client: &mut vaux_client::MqttClient,
     connection: vaux_client::MqttConnection,
     args: Args,
 ) {
-    let handle: Option<std::thread::JoinHandle<_>> =
-        match client.try_start(Duration::from_millis(5000), connection, true) {
-            Ok(h) => Some(h),
-            Err(e) => {
-                eprintln!("unable to start client: {:?}", e);
-                return;
-            }
-        };
+    let handle: Option<JoinHandle<_>> = match client
+        .try_start(Duration::from_millis(5000), connection, true)
+        .await
+    {
+        Ok(h) => Some(h),
+        Err(e) => {
+            eprintln!("unable to start client: {:?}", e);
+            return;
+        }
+    };
     let producer = client.producer();
-    let consumer = client.consumer();
+    let mut consumer = client.take_consumer().unwrap();
+    let topic = args.topic.clone();
+    let arg_message = if let Some(m) = args.message {
+        m
+    } else if let Some(f) = args.message_file {
+        let mut file = std::fs::File::open(f).unwrap();
+        let mut buffer = String::new();
+        file.read_to_string(&mut buffer).unwrap();
+        buffer
+    } else {
+        "hello world".to_string()
+    };
 
     let mut publish = Publish::default();
     publish
@@ -101,37 +121,35 @@ fn publish(
         .properties_mut()
         .set_property(Property::MessageExpiry(1000));
 
-    publish.topic_name = Some(args.topic);
-    publish.set_payload(Vec::from(args.message.as_bytes()));
+    let message = arg_message.clone();
+    publish.topic_name = Some(topic.clone());
+    publish.set_payload(Vec::from(message.as_bytes()));
     publish.set_qos(args.qos);
-    publish.packet_id = Some(101);
+    publish.packet_id = Some(1);
     if producer
         .send(vaux_mqtt::Packet::Publish(publish.clone()))
+        .await
         .is_err()
     {
         eprintln!("unable to send packet to broker");
-    } else {
-        println!("sent message");
     }
-
-    let mut packet = consumer.recv_timeout(Duration::from_millis(1000));
+    let mut packet = consumer.try_recv();
     let mut ack_recv = false;
     while !ack_recv {
         if packet.is_err() {
-            println!("waiting for ack");
         } else if let Ok(Packet::PubAck(ack)) = packet {
-            println!("received ack: {:?}", ack);
+            println!("ACK {}", ack.packet_id);
             ack_recv = true;
         }
-        packet = consumer.recv_timeout(Duration::from_millis(1000));
+        packet = consumer.try_recv();
     }
 
-    match client.stop() {
+    match client.stop().await {
         Ok(_) => (),
         Err(e) => eprintln!("unable to stop client: {:?}", e),
     }
     if let Some(h) = handle {
-        match h.join() {
+        match h.await {
             Ok(r) => match r {
                 Ok(_) => (),
                 Err(e) => eprintln!("client thread failed: {:?}", e),
@@ -141,10 +159,10 @@ fn publish(
     }
 }
 
-fn load_cert(path: &str) -> Result<rustls::Certificate, std::io::Error> {
+fn load_cert(path: &str) -> Result<CertificateDer, std::io::Error> {
     let mut cert_buffer = Vec::new();
     let cert_file = std::fs::File::open(path)?;
     let mut reader = std::io::BufReader::new(cert_file);
     reader.read_to_end(&mut cert_buffer)?;
-    Ok(rustls::Certificate(cert_buffer))
+    Ok(CertificateDer::from_pem_slice(&cert_buffer).unwrap())
 }
