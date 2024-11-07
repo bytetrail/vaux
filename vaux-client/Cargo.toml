@@ -1,14 +1,14 @@
 [package]
 name = "vaux-client"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 
 [features]
 developer = []
 
 [dependencies]
-vaux-mqtt = { version = "0.5.1", path = "../vaux-mqtt" }
+tokio = { version = "1.41.0", features = ["time", "rt-multi-thread", "macros"] }
+vaux-mqtt = { version = "0.5.2", path = "../vaux-mqtt" }
 bytes = "1.8"
 uuid = "1.11"
 rustls = { version = "0.23" }
-tokio = { version = "1.41.0", features = ["rt-multi-thread", "macros"] }
