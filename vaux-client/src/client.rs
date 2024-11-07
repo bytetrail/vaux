@@ -351,7 +351,7 @@ impl MqttClient {
                     return Err(last_error);
                 }
             }
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             if start.elapsed() > max_wait {
                 return Err(MqttError::new(
                     "timeout waiting for connection",
@@ -729,7 +729,7 @@ impl MqttClient {
                         }
                         Err(e) => match e.kind {
                             ErrorKind::Timeout => {
-                                thread::sleep(Duration::from_millis(100));
+                                tokio::time::sleep(Duration::from_millis(100)).await;
                             }
                             _ => {
                                 return Err(MqttError::new(
