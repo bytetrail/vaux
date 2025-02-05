@@ -415,7 +415,7 @@ impl MqttClient {
             let mut offset = 0;
 
             let mut stream = match connection.connect().await {
-                Ok(mut c) => c,
+                Ok(c) => c,
                 Err(e) => {
                     return Err(MqttError::new(
                         &format!("unable to connect to broker: {}", e),
@@ -471,7 +471,7 @@ impl MqttClient {
                                 }
                                 Packet::Disconnect(d) => {
                                     // TODO handle disconnect - verify shutdown behavior
-                                    stream.shutdown().await;
+                                    let _ = stream.shutdown().await;
                                     pending_qos1.lock().await.append(&mut pending_publish);
                                     return Err(MqttError::new(
                                         &format!("disconnect received: {:?}", d),
@@ -487,7 +487,7 @@ impl MqttClient {
                                                 if let Some(packet_id) = publish.packet_id {
                                                     puback.packet_id = packet_id;
                                                 } else {
-                                                    stream.shutdown();
+                                                    let _ = stream.shutdown().await;
                                                     return Err(MqttError::new(
                                                         "protocol error, packet ID required with QoS > 0",
                                                         ErrorKind::Protocol(
@@ -534,7 +534,7 @@ impl MqttClient {
                                 } else {
                                     // no filter for packet type, send on the general channel
                                     if let Err(e) = packet_recv.try_send(p.clone()) {
-                                        stream.shutdown().await;
+                                        let _ = stream.shutdown().await;
                                         pending_qos1.lock().await.append(&mut pending_publish);
                                         return Err(MqttError::new(
                                             &format!("unable to send packet to consumer: {}", e),
@@ -559,9 +559,7 @@ impl MqttClient {
                         }
                     }
                 };
-                if let Ok(mut packet) = packet_send.try_recv()
-                //recv_timeout(Duration::from_millis(loop_interval))
-                {
+                if let Ok(mut packet) = packet_send.try_recv() {
                     if let Packet::Publish(mut p) = packet.clone() {
                         if p.qos() == QoSLevel::AtLeastOnce {
                             if auto_packet_id && p.packet_id.is_none() {
@@ -606,7 +604,8 @@ impl MqttClient {
                                 return Err(e);
                             }
                         }
-                        stream.shutdown().await;
+                        // TODO handle shutdown error?
+                        let _ = stream.shutdown().await;
                         pending_qos1.lock().await.append(&mut pending_publish);
                         return Ok(());
                     }

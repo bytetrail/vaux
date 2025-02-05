@@ -73,7 +73,7 @@ async fn main() {
     if args.tls {
         connection = connection.with_tls().with_trust_store(Arc::new(root_store))
     }
-    let mut connection = connection.with_host(&args.addr).with_port(args.port);
+    let connection = connection.with_host(&args.addr).with_port(args.port);
     let mut client = vaux_client::MqttClient::new_with_connection(
         connection,
         "vaux-publisher-001",
@@ -85,7 +85,6 @@ async fn main() {
 }
 
 async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
-    println!("publish");
     let handle: Option<JoinHandle<_>> =
         match client.try_start(Duration::from_millis(5000), true).await {
             Ok(h) => Some(h),
@@ -94,7 +93,6 @@ async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
                 return;
             }
         };
-    println!("Started mqtt client");
     let producer = client.producer();
     let mut consumer = client.take_consumer().unwrap();
     let topic = args.topic.clone();
@@ -109,7 +107,6 @@ async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
         "hello world".to_string()
     };
 
-    println!("publishing: {}", &arg_message);
     let mut publish = Publish::default();
     publish
         .properties_mut()
@@ -125,7 +122,6 @@ async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
     publish.set_payload(Vec::from(message.as_bytes()));
     publish.set_qos(args.qos);
     publish.packet_id = Some(1);
-    println!("sending message");
     if producer
         .send(vaux_mqtt::Packet::Publish(publish.clone()))
         .await

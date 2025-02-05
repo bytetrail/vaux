@@ -52,7 +52,7 @@ impl clap::builder::TypedValueParser for QoSLevelParser {
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args = Args::parse();
     let mut root_store = rustls::RootCertStore::empty();
@@ -81,12 +81,14 @@ async fn main() {
         10,
         false,
     );
+    println!("subscribing to {}", args.addr);
     subscribe(client, args).await;
 }
 
 async fn subscribe(mut client: MqttClient, args: Args) {
     client.set_keep_alive(10);
     let handle = client.start(args.clean_start).await;
+    println!("started");
     let mut consumer = client.take_consumer().unwrap();
     let producer = client.producer();
     let filter = vec![
@@ -103,6 +105,7 @@ async fn subscribe(mut client: MqttClient, args: Args) {
     match producer.send(Packet::Subscribe(subscribe)).await {
         Ok(_) => {
             loop {
+                tokio::task::yield_now().await;
                 let iter = consumer.try_recv();
                 if let Ok(packet) = iter {
                     if let Packet::Publish(mut p) = packet {
