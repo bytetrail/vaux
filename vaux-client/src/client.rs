@@ -109,6 +109,21 @@ impl MqttClient {
         }
     }
 
+    /// Sets the connection for the client. The connection is used to connect to the
+    /// remote broker. The connection must be set prior to calling start for the
+    /// connection to be used.
+    /// Example:
+    /// ```
+    /// use vaux_client::MqttClient;
+    /// use vaux_client::MqttConnection;
+    /// let conn = MqttConnection::new().with_host("localhost").with_port(1883);    
+    /// let mut client = MqttClient::default();
+    /// client.set_connection(conn);
+    /// ```
+    pub fn set_connection(&mut self, connection: MqttConnection) {
+        self.connection = Some(connection);
+    }
+
     /// Gets a new message producer channel. This channel is used to send MQTT packets
     /// to the remote broker. The producer channel is cloned and returned so that
     /// multiple threads can send messages to the remote broker.
@@ -308,28 +323,18 @@ impl MqttClient {
     /// use vaux_client::MqttConnection;
     /// use std::time::Duration;
     ///
-    /// let mut client = MqttClient::default();
-    /// let connection: MqttConnection;
     ///
-    /// match MqttConnection::new().with_host("localhost").with_port(1883).connect() {
-    ///     Ok(c) => {
-    ///         connection = c;
-    ///     }
-    ///     Err(e) => {
-    ///         println!("unable to establish TCP connection: {:?}", e);
-    ///        return;
-    ///     }
-    /// }
-    /// let handle: Option<std::thread::JoinHandle<_>>;
-    /// match client.try_start(Duration::from_millis(5000), true) {
-    ///    Ok(h) => {
-    ///       handle = Some(h);
-    ///       println!("connected to broker");
-    ///   }
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let conn = MqttConnection::new().with_host("localhost").with_port(1883);
+    ///     let mut client = MqttClient::default();
+    ///     client.set_connection(conn);
     ///
-    ///  Err(e) => {
-    ///    println!("unable to connect to broker: {:?}", e);
-    ///   }
+    ///     let handle: Option<tokio::task::JoinHandle<_>> =
+    ///     match client.try_start(Duration::from_millis(5000), true).await {
+    ///         Ok(h) => Some(h),
+    ///         Err(e) => None,
+    ///     };
     /// }
     /// ```
     ///

@@ -122,6 +122,7 @@ async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
     publish.set_payload(Vec::from(message.as_bytes()));
     publish.set_qos(args.qos);
     publish.packet_id = Some(1);
+    println!("sending message");
     if producer
         .send(vaux_mqtt::Packet::Publish(publish.clone()))
         .await
