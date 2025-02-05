@@ -1,12 +1,6 @@
 use crate::{stream::AsyncMqttStream, ErrorKind, MqttConnection, MqttError};
 use bytes::BytesMut;
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    thread::{self},
-    time::Duration,
-    vec,
-};
+use std::{collections::HashMap, sync::Arc, time::Duration, vec};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::{
     sync::{
@@ -27,8 +21,10 @@ const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
 const MAX_QUEUE_LEN: usize = 100;
 const DEFAULT_CLIENT_KEEP_ALIVE: u16 = 60;
 const MIN_KEEP_ALIVE: u16 = 30;
-const MAX_CONNECT_WAIT: u64 = 5000;
+const MAX_CONNECT_WAIT: Duration = Duration::from_secs(5);
 const DEFAULT_CHANNEL_SIZE: usize = 128;
+// default read timeout for message loop, 25ms
+const DEFAULT_READ_TIMEOUT: Duration = Duration::from_millis(25);
 
 type FilteredChannel = Arc<RwLock<HashMap<PacketType, Sender<vaux_mqtt::Packet>>>>;
 
@@ -109,7 +105,7 @@ impl MqttClient {
             pending_qos1: Arc::new(Mutex::new(Vec::new())),
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
-            max_connect_wait: Duration::from_millis(MAX_CONNECT_WAIT),
+            max_connect_wait: MAX_CONNECT_WAIT,
         }
     }
 
@@ -456,8 +452,14 @@ impl MqttClient {
             pending_publish.append(&mut *pending_qos1.lock().await);
             let mut last_active = std::time::Instant::now();
             loop {
-                match MqttClient::read_next(&mut stream, max_packet_size, &mut buffer, &mut offset)
-                    .await
+                match MqttClient::read_next(
+                    &mut stream,
+                    max_packet_size,
+                    &mut buffer,
+                    &mut offset,
+                    DEFAULT_READ_TIMEOUT,
+                )
+                .await
                 {
                     Ok(result) => {
                         if let Some(p) = result {
@@ -714,8 +716,14 @@ impl MqttClient {
             Ok(_) => {
                 let start = std::time::Instant::now();
                 while start.elapsed() < max_connect_wait {
-                    match MqttClient::read_next(stream, DEFAULT_MAX_PACKET_SIZE, buffer, offset)
-                        .await
+                    match MqttClient::read_next(
+                        stream,
+                        DEFAULT_MAX_PACKET_SIZE,
+                        buffer,
+                        offset,
+                        max_connect_wait,
+                    )
+                    .await
                     {
                         Ok(Some(packet)) => match packet {
                             Packet::ConnAck(connack) => {
@@ -811,6 +819,7 @@ impl MqttClient {
         max_packet_size: usize,
         buffer: &mut [u8],
         offset: &mut usize,
+        timeout: Duration,
     ) -> crate::Result<Option<Packet>> {
         let mut bytes_read = *offset;
         loop {
@@ -844,20 +853,28 @@ impl MqttClient {
                     },
                 }
             }
-            match connection.read(&mut buffer[*offset..max_packet_size]).await {
-                Ok(len) => {
-                    if len == 0 && bytes_read == 0 {
-                        return Ok(None);
+            match tokio::time::timeout(timeout, {
+                connection.read(&mut buffer[*offset..max_packet_size])
+            })
+            .await
+            {
+                Ok(result) => match result {
+                    Ok(len) => {
+                        if len == 0 && bytes_read == 0 {
+                            return Ok(None);
+                        }
+                        bytes_read += len;
+                        *offset = bytes_read;
                     }
-                    bytes_read += len;
-                    *offset = bytes_read;
-                }
-                Err(e) => match e.kind() {
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-                        return Err(MqttError::new(&e.to_string(), ErrorKind::Timeout));
-                    }
-                    _ => return Err(MqttError::new(&e.to_string(), ErrorKind::IO)),
+                    Err(e) => match e.kind() {
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+                            return Err(MqttError::new(&e.to_string(), ErrorKind::Timeout))
+                        }
+
+                        _ => return Err(MqttError::new(&e.to_string(), ErrorKind::IO)),
+                    },
                 },
+                Err(e) => return Err(MqttError::new(&e.to_string(), ErrorKind::Timeout)),
             }
         }
     }

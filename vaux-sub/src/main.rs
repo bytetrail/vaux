@@ -4,7 +4,8 @@ use rustls::pki_types::CertificateDer;
 use std::{io::Read, sync::Arc};
 use vaux_client::MqttClient;
 use vaux_mqtt::{
-    property::Property, Packet, PropertyType, PubResp, QoSLevel, Subscribe, Subscription,
+    property::{PayloadFormat, Property},
+    Packet, PropertyType, PubResp, QoSLevel, Subscribe, Subscription,
 };
 
 #[derive(Parser, Debug)]
@@ -104,14 +105,23 @@ async fn subscribe(mut client: MqttClient, args: Args) {
             loop {
                 let iter = consumer.try_recv();
                 if let Ok(packet) = iter {
-                    if let Packet::Publish(p) = packet {
+                    if let Packet::Publish(mut p) = packet {
                         if p.properties().has_property(&PropertyType::PayloadFormat) {
-                            if let Property::PayloadFormat(_indicator) = p
+                            if let Property::PayloadFormat(indicator) = p
                                 .properties()
                                 .get_property(&PropertyType::PayloadFormat)
                                 .unwrap()
                             {
-                                println!("Message: {}", p.packet_id.unwrap());
+                                match indicator {
+                                    PayloadFormat::Utf8 => {
+                                        let message =
+                                            String::from_utf8(p.take_payload().unwrap()).unwrap();
+                                        println!("{}", message);
+                                    }
+                                    PayloadFormat::Bin => {
+                                        println!("received a binary payload");
+                                    }
+                                }
                             }
                         }
                         if args.auto_ack {

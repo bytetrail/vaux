@@ -85,6 +85,7 @@ async fn main() {
 }
 
 async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
+    println!("publish");
     let handle: Option<JoinHandle<_>> =
         match client.try_start(Duration::from_millis(5000), true).await {
             Ok(h) => Some(h),
@@ -93,6 +94,7 @@ async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
                 return;
             }
         };
+    println!("Started mqtt client");
     let producer = client.producer();
     let mut consumer = client.take_consumer().unwrap();
     let topic = args.topic.clone();
@@ -107,6 +109,7 @@ async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
         "hello world".to_string()
     };
 
+    println!("publishing: {}", &arg_message);
     let mut publish = Publish::default();
     publish
         .properties_mut()
@@ -122,6 +125,7 @@ async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
     publish.set_payload(Vec::from(message.as_bytes()));
     publish.set_qos(args.qos);
     publish.packet_id = Some(1);
+    println!("sending message");
     if producer
         .send(vaux_mqtt::Packet::Publish(publish.clone()))
         .await
@@ -129,6 +133,7 @@ async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
     {
         eprintln!("unable to send packet to broker");
     }
+    println!("sent message");
     let mut packet = consumer.try_recv();
     let mut ack_recv = false;
     while !ack_recv {
