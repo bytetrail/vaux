@@ -73,30 +73,26 @@ async fn main() {
     if args.tls {
         connection = connection.with_tls().with_trust_store(Arc::new(root_store))
     }
-    connection = connection
-        .with_host(&args.addr)
-        .with_port(args.port)
-        .connect()
-        .unwrap();
-    let mut client = vaux_client::MqttClient::new("vaux-publisher-001", false, 10, false);
-    publish(&mut client, connection, args.clone()).await;
+    let mut connection = connection.with_host(&args.addr).with_port(args.port);
+    let mut client = vaux_client::MqttClient::new_with_connection(
+        connection,
+        "vaux-publisher-001",
+        false,
+        10,
+        false,
+    );
+    publish(&mut client, args.clone()).await;
 }
 
-async fn publish(
-    client: &mut vaux_client::MqttClient,
-    connection: vaux_client::MqttConnection,
-    args: Args,
-) {
-    let handle: Option<JoinHandle<_>> = match client
-        .try_start(Duration::from_millis(5000), connection, true)
-        .await
-    {
-        Ok(h) => Some(h),
-        Err(e) => {
-            eprintln!("unable to start client: {:?}", e);
-            return;
-        }
-    };
+async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
+    let handle: Option<JoinHandle<_>> =
+        match client.try_start(Duration::from_millis(5000), true).await {
+            Ok(h) => Some(h),
+            Err(e) => {
+                eprintln!("unable to start client: {:?}", e);
+                return;
+            }
+        };
     let producer = client.producer();
     let mut consumer = client.take_consumer().unwrap();
     let topic = args.topic.clone();

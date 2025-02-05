@@ -7,6 +7,7 @@ mod stream;
 pub use client::MqttClient;
 pub use connection::MqttConnection;
 use std::fmt::Display;
+pub use stream::{AsyncMqttStream, MqttStream};
 use vaux_mqtt::Reason;
 
 pub type Result<T> = core::result::Result<T, MqttError>;

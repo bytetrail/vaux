@@ -72,18 +72,20 @@ async fn main() {
     if args.tls {
         connection = connection.with_tls().with_trust_store(Arc::new(root_store))
     }
-    connection = connection
-        .with_host(&args.addr)
-        .with_port(args.port)
-        .connect()
-        .unwrap();
-    let client = vaux_client::MqttClient::new("vaux-subscriber-001", false, 10, false);
-    subscribe(connection, client, args).await;
+    connection = connection.with_host(&args.addr).with_port(args.port);
+    let client = vaux_client::MqttClient::new_with_connection(
+        connection,
+        "vaux-subscriber-001",
+        false,
+        10,
+        false,
+    );
+    subscribe(client, args).await;
 }
 
-async fn subscribe(connection: vaux_client::MqttConnection, mut client: MqttClient, args: Args) {
+async fn subscribe(mut client: MqttClient, args: Args) {
     client.set_keep_alive(10);
-    let handle = client.start(connection, args.clean_start).await;
+    let handle = client.start(args.clean_start).await;
     let mut consumer = client.take_consumer().unwrap();
     let producer = client.producer();
     let filter = vec![

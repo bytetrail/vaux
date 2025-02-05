@@ -7,8 +7,16 @@ edition = "2021"
 developer = []
 
 [dependencies]
-tokio = { version = "1.41.0", features = ["time", "rt-multi-thread", "macros"] }
+tokio = { version = "1.41.0", features = [
+    "io-util",
+    "net",
+    "time",
+    "rt-multi-thread",
+    "macros",
+] }
 vaux-mqtt = { version = "0.5.2", path = "../vaux-mqtt" }
 bytes = "1.8"
 uuid = "1.11"
-rustls = { version = "0.23" }
+tokio-rustls = { version = "0.26" }
+async-std = "1.13.0"
+rustls = "0.23.22"

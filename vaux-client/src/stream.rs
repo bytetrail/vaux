@@ -1,96 +1,82 @@
-use std::{
-    io::{Read, Write},
-    net::TcpStream,
-    time::Duration,
-};
+use std::pin::Pin;
 
-#[derive(Debug)]
-pub struct MqttStream<'a> {
-    tcp: Option<TcpStream>,
-    tls: Option<rustls::Stream<'a, rustls::ClientConnection, TcpStream>>,
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpStream;
+use tokio_rustls::client::TlsStream;
+
+pub enum MqttStream {
+    TcpStream(TcpStream),
+    TlsStream(TlsStream<TcpStream>),
 }
 
-impl<'a> MqttStream<'a> {
-    pub fn new_tcp(tcp: TcpStream) -> Self {
-        Self {
-            tcp: Some(tcp),
-            tls: None,
-        }
-    }
+pub struct AsyncMqttStream(pub MqttStream);
 
-    pub fn new_tls(tls_conn: &'a mut rustls::ClientConnection, tcp: &'a mut TcpStream) -> Self {
-        Self {
-            tcp: None,
-            tls: Some(rustls::Stream::new(tls_conn, tcp)),
+impl AsyncRead for AsyncMqttStream {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        match self.get_mut().0 {
+            MqttStream::TcpStream(ref mut stream) => {
+                let stream = Pin::new(stream);
+                stream.poll_read(cx, buf)
+            }
+            MqttStream::TlsStream(ref mut stream) => {
+                let stream = Pin::new(stream);
+                stream.poll_read(cx, buf)
+            }
         }
-    }
-
-    pub fn set_read_timeout(&mut self, timeout: Option<Duration>) -> std::io::Result<()> {
-        if let Some(ref mut tcp) = self.tcp {
-            return tcp.set_read_timeout(timeout);
-        }
-        if let Some(ref mut tls) = self.tls {
-            return tls.sock.set_read_timeout(timeout);
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "no stream available",
-        ))
-    }
-
-    pub fn shutdown(&mut self) -> std::io::Result<()> {
-        if let Some(ref mut tcp) = self.tcp {
-            return tcp.shutdown(std::net::Shutdown::Both);
-        }
-        if let Some(ref mut tls) = self.tls {
-            return tls.sock.shutdown(std::net::Shutdown::Both);
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "no stream available",
-        ))
     }
 }
 
-impl<'a> Read for MqttStream<'a> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if let Some(ref mut tcp) = self.tcp {
-            return tcp.read(buf);
+impl AsyncWrite for AsyncMqttStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<Result<usize, std::io::Error>> {
+        match self.get_mut().0 {
+            MqttStream::TcpStream(ref mut stream) => {
+                let stream = Pin::new(stream);
+                stream.poll_write(cx, buf)
+            }
+            MqttStream::TlsStream(ref mut stream) => {
+                let stream = Pin::new(stream);
+                stream.poll_write(cx, buf)
+            }
         }
-        if let Some(ref mut tls) = self.tls {
-            return tls.read(buf);
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "no stream available",
-        ))
-    }
-}
-
-impl<'a> Write for MqttStream<'a> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if let Some(ref mut tcp) = self.tcp {
-            return tcp.write(buf);
-        }
-        if let Some(ref mut tls) = self.tls {
-            return tls.write(buf);
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "no stream available",
-        ))
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
-        if let Some(ref mut tcp) = self.tcp {
-            return tcp.flush();
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        match self.get_mut().0 {
+            MqttStream::TcpStream(ref mut stream) => {
+                let stream = Pin::new(stream);
+                stream.poll_flush(cx)
+            }
+            MqttStream::TlsStream(ref mut stream) => {
+                let stream = Pin::new(stream);
+                stream.poll_flush(cx)
+            }
         }
-        if let Some(ref mut tls) = self.tls {
-            return tls.flush();
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), std::io::Error>> {
+        match self.get_mut().0 {
+            MqttStream::TcpStream(ref mut stream) => {
+                let stream = Pin::new(stream);
+                stream.poll_shutdown(cx)
+            }
+            MqttStream::TlsStream(ref mut stream) => {
+                let stream = Pin::new(stream);
+                stream.poll_shutdown(cx)
+            }
         }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "no stream available",
-        ))
     }
 }

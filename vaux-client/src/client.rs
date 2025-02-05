@@ -1,6 +1,5 @@
-use crate::{stream::MqttStream, ErrorKind, MqttConnection, MqttError};
+use crate::{stream::AsyncMqttStream, ErrorKind, MqttConnection, MqttError};
 use bytes::BytesMut;
-use std::io::Write;
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -8,6 +7,7 @@ use std::{
     time::Duration,
     vec,
 };
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::{
     sync::{
         mpsc::{self, error::SendError, Receiver, Sender},
@@ -32,8 +32,8 @@ const DEFAULT_CHANNEL_SIZE: usize = 128;
 
 type FilteredChannel = Arc<RwLock<HashMap<PacketType, Sender<vaux_mqtt::Packet>>>>;
 
-#[derive(Debug)]
 pub struct MqttClient {
+    connection: Option<MqttConnection>,
     auto_ack: bool,
     auto_packet_id: bool,
     last_packet_id: u16,
@@ -67,6 +67,18 @@ impl Default for MqttClient {
 }
 
 impl MqttClient {
+    pub fn new_with_connection(
+        connection: MqttConnection,
+        client_id: &str,
+        auto_ack: bool,
+        receive_max: u16,
+        auto_packet_id: bool,
+    ) -> Self {
+        let mut client = Self::new(client_id, auto_ack, receive_max, auto_packet_id);
+        client.connection = Some(connection);
+        client
+    }
+
     /// Creates a new MQTT client with the specified host, port, client ID, and
     /// auto ack settings. The client ID is required and must be unique for the
     /// broker. If the client ID is not specified, a UUID will be generated and
@@ -78,6 +90,7 @@ impl MqttClient {
             mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
         Self {
+            connection: None,
             auto_ack,
             auto_packet_id,
             last_packet_id: 0,
@@ -312,7 +325,7 @@ impl MqttClient {
     ///     }
     /// }
     /// let handle: Option<std::thread::JoinHandle<_>>;
-    /// match client.try_start(Duration::from_millis(5000), connection, true) {
+    /// match client.try_start(Duration::from_millis(5000), true) {
     ///    Ok(h) => {
     ///       handle = Some(h);
     ///       println!("connected to broker");
@@ -327,10 +340,9 @@ impl MqttClient {
     pub async fn try_start(
         &mut self,
         max_wait: Duration,
-        connection: MqttConnection,
         clean_start: bool,
     ) -> crate::Result<JoinHandle<crate::Result<()>>> {
-        let handle = self.start(connection, clean_start).await;
+        let handle = self.start(clean_start).await;
         let start = std::time::Instant::now();
         while !self.connected().await {
             if let Ok(last_error_guard) = self.last_error.try_lock() {
@@ -378,11 +390,7 @@ impl MqttClient {
     /// Queued messages will be sent in the order they were received. Any messages
     /// that are queued when the client is stopped will remain queued until the client
     /// is started again or the client is dropped.
-    pub async fn start(
-        &mut self,
-        mut connection: MqttConnection,
-        clean_start: bool,
-    ) -> JoinHandle<crate::Result<()>> {
+    pub async fn start(&mut self, clean_start: bool) -> JoinHandle<crate::Result<()>> {
         let packet_recv = self.packet_recv.as_ref().unwrap().clone();
         let mut packet_send = self.packet_send.take().unwrap();
         let auto_ack = self.auto_ack;
@@ -394,35 +402,33 @@ impl MqttClient {
         let client_id = self.client_id.clone();
         let session_expiry = self.session_expiry;
         let connected = self.connected.clone();
-        let credentials = connection.credentials();
+        let credentials = self.connection.as_ref().and_then(|c| c.credentials());
         let last_error = self.last_error.clone();
         let err_chan = self.err_chan.as_ref().map(|e| e.clone());
         let keep_alive = self.keep_alive;
         let filter_channel = self.filter_channel.clone();
         let max_connect_wait = self.max_connect_wait;
+        let connection = self.connection.take();
 
         tokio::spawn(async move {
+            if connection.is_none() {
+                return Err(MqttError::new("connection not set", ErrorKind::Connection));
+            }
+            let connection = connection.unwrap();
             let mut buffer = vec![0; max_packet_size];
             let mut offset = 0;
 
-            let mut stream = if connection.tls {
-                MqttStream::new_tls(
-                    connection.tls_conn.as_mut().unwrap(),
-                    connection.tcp_socket.as_mut().unwrap(),
-                )
-            } else {
-                MqttStream::new_tcp(connection.tcp_socket.take().unwrap())
+            let mut stream = match connection.connect().await {
+                Ok(mut c) => c,
+                Err(e) => {
+                    return Err(MqttError::new(
+                        &format!("unable to connect to broker: {}", e),
+                        ErrorKind::Transport,
+                    ));
+                }
             };
 
-            if let Err(e) = stream.set_read_timeout(Some(Duration::from_millis(1000))) {
-                return Err(MqttError::new(
-                    &format!("unable to set read timeout: {}", e),
-                    ErrorKind::Transport,
-                ));
-            }
-
             match Self::connect(
-                &mut stream,
                 credentials,
                 client_id,
                 session_expiry,
@@ -431,13 +437,14 @@ impl MqttClient {
                 &mut buffer,
                 &mut offset,
                 max_connect_wait,
+                &mut stream,
             )
             .await
             {
                 Ok(_) => {}
                 Err(e) => {
                     let last_error = last_error.lock().await.clone();
-                    stream.shutdown().unwrap();
+                    //                    stream.shutdown().unwrap();
                     return Err(last_error.unwrap_or(e));
                 }
             }
@@ -450,6 +457,7 @@ impl MqttClient {
             let mut last_active = std::time::Instant::now();
             loop {
                 match MqttClient::read_next(&mut stream, max_packet_size, &mut buffer, &mut offset)
+                    .await
                 {
                     Ok(result) => {
                         if let Some(p) = result {
@@ -461,7 +469,7 @@ impl MqttClient {
                                 }
                                 Packet::Disconnect(d) => {
                                     // TODO handle disconnect - verify shutdown behavior
-                                    stream.shutdown().unwrap();
+                                    stream.shutdown().await;
                                     pending_qos1.lock().await.append(&mut pending_publish);
                                     return Err(MqttError::new(
                                         &format!("disconnect received: {:?}", d),
@@ -477,7 +485,7 @@ impl MqttClient {
                                                 if let Some(packet_id) = publish.packet_id {
                                                     puback.packet_id = packet_id;
                                                 } else {
-                                                    stream.shutdown().unwrap();
+                                                    stream.shutdown();
                                                     return Err(MqttError::new(
                                                         "protocol error, packet ID required with QoS > 0",
                                                         ErrorKind::Protocol(
@@ -489,6 +497,7 @@ impl MqttClient {
                                                     &mut stream,
                                                     Packet::PubAck(puback),
                                                 )
+                                                .await
                                                 .is_err()
                                                 {
                                                     // TODO handle the pub ack next time through
@@ -523,7 +532,7 @@ impl MqttClient {
                                 } else {
                                     // no filter for packet type, send on the general channel
                                     if let Err(e) = packet_recv.try_send(p.clone()) {
-                                        stream.shutdown().unwrap();
+                                        stream.shutdown().await;
                                         pending_qos1.lock().await.append(&mut pending_publish);
                                         return Err(MqttError::new(
                                             &format!("unable to send packet to consumer: {}", e),
@@ -586,7 +595,7 @@ impl MqttClient {
                             }
                         }
                     } else if let Packet::Disconnect(_d) = packet.clone() {
-                        if let Err(e) = MqttClient::send(&mut stream, packet) {
+                        if let Err(e) = MqttClient::send(&mut stream, packet).await {
                             if let Some(chan) = err_chan.as_ref() {
                                 if chan.send(e.clone()).await.is_err() {
                                     return Err(e);
@@ -595,11 +604,11 @@ impl MqttClient {
                                 return Err(e);
                             }
                         }
-                        stream.shutdown().unwrap();
+                        stream.shutdown().await;
                         pending_qos1.lock().await.append(&mut pending_publish);
                         return Ok(());
                     }
-                    if let Err(e) = MqttClient::send(&mut stream, packet) {
+                    if let Err(e) = MqttClient::send(&mut stream, packet).await {
                         if let Some(chan) = err_chan.as_ref() {
                             if chan.send(e.clone()).await.is_err() {
                                 return Err(e);
@@ -618,7 +627,8 @@ impl MqttClient {
                         while !pending_publish.is_empty() && qos_1_remaining > 0 {
                             while !pending_publish.is_empty() && qos_1_remaining > 0 {
                                 let packet = pending_publish.remove(0);
-                                if let Err(e) = MqttClient::send(&mut stream, packet.clone()) {
+                                if let Err(e) = MqttClient::send(&mut stream, packet.clone()).await
+                                {
                                     pending_publish.insert(0, packet);
                                     if let Some(chan) = err_chan.as_ref() {
                                         if chan.send(e.clone()).await.is_err() {
@@ -636,7 +646,7 @@ impl MqttClient {
                         last_active = std::time::Instant::now();
                     } else {
                         let ping = Packet::PingRequest(Default::default());
-                        if let Err(e) = MqttClient::send(&mut stream, ping) {
+                        if let Err(e) = MqttClient::send(&mut stream, ping).await {
                             if let Some(chan) = err_chan.as_ref() {
                                 if chan.send(e.clone()).await.is_err() {
                                     return Err(e);
@@ -666,7 +676,6 @@ impl MqttClient {
 
     #[allow(clippy::too_many_arguments)]
     async fn connect<'a>(
-        stream: &mut MqttStream<'a>,
         credentials: Option<(String, String)>,
         client_id: Arc<Mutex<Option<String>>>,
         session_expiry: u32,
@@ -675,6 +684,7 @@ impl MqttClient {
         buffer: &mut [u8],
         offset: &mut usize,
         max_connect_wait: Duration,
+        stream: &mut AsyncMqttStream,
     ) -> crate::Result<ConnAck> {
         let mut connect = Connect::default();
         connect.clean_start = clean_start;
@@ -699,11 +709,14 @@ impl MqttClient {
         if let Err(e) = result {
             panic!("Failed to encode packet: {:?}", e);
         }
-        match stream.write_all(&dest) {
+
+        match stream.write_all(&dest).await {
             Ok(_) => {
                 let start = std::time::Instant::now();
                 while start.elapsed() < max_connect_wait {
-                    match MqttClient::read_next(stream, DEFAULT_MAX_PACKET_SIZE, buffer, offset) {
+                    match MqttClient::read_next(stream, DEFAULT_MAX_PACKET_SIZE, buffer, offset)
+                        .await
+                    {
                         Ok(Some(packet)) => match packet {
                             Packet::ConnAck(connack) => {
                                 return Self::handle_connack(connack, connected, client_id).await;
@@ -793,8 +806,8 @@ impl MqttClient {
         Ok(connack)
     }
 
-    fn read_next(
-        connection: &mut dyn std::io::Read,
+    async fn read_next(
+        connection: &mut AsyncMqttStream,
         max_packet_size: usize,
         buffer: &mut [u8],
         offset: &mut usize,
@@ -831,7 +844,7 @@ impl MqttClient {
                     },
                 }
             }
-            match connection.read(&mut buffer[*offset..max_packet_size]) {
+            match connection.read(&mut buffer[*offset..max_packet_size]).await {
                 Ok(len) => {
                     if len == 0 && bytes_read == 0 {
                         return Ok(None);
@@ -849,8 +862,8 @@ impl MqttClient {
         }
     }
 
-    pub fn send(
-        connection: &mut dyn std::io::Write,
+    pub async fn send(
+        connection: &mut AsyncMqttStream,
         packet: Packet,
     ) -> crate::Result<Option<Packet>> {
         let mut dest = BytesMut::default();
@@ -858,7 +871,7 @@ impl MqttClient {
         if let Err(e) = result {
             panic!("Failed to encode packet: {:?}", e);
         }
-        if let Err(e) = connection.write_all(&dest) {
+        if let Err(e) = connection.write_all(&dest).await {
             // TODO higher fidelity error handling
             return Err(MqttError::new(
                 &format!("unable to send packet: {}", e),
