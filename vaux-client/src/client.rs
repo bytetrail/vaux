@@ -11,7 +11,7 @@ use tokio::{
 };
 use vaux_mqtt::{
     decode, encode, property::Property, ConnAck, Connect, Packet, PacketType, PropertyType,
-    PubResp, QoSLevel, Reason, Subscribe, Subscription,
+    PubResp, QoSLevel, Reason, Subscribe, SubscriptionFilter,
 };
 
 const DEFAULT_RECV_MAX: u16 = 100;
@@ -44,7 +44,7 @@ pub struct MqttClient {
     packet_send: Option<Receiver<vaux_mqtt::Packet>>,
     packet_recv: Option<Sender<vaux_mqtt::Packet>>,
     err_chan: Option<Sender<MqttError>>,
-    subscriptions: Vec<Subscription>,
+    subscriptions: Vec<SubscriptionFilter>,
     pending_qos1: Arc<Mutex<Vec<Packet>>>,
     max_packet_size: usize,
     keep_alive: u16,
@@ -298,7 +298,7 @@ impl MqttClient {
         let mut subscribe = Subscribe::default();
         subscribe.set_packet_id(packet_id);
         for topic in topic_filter {
-            let subscription = Subscription {
+            let subscription = SubscriptionFilter {
                 filter: (*topic).to_string(),
                 qos,
                 ..Default::default()

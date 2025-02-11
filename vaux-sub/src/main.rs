@@ -5,7 +5,7 @@ use std::{io::Read, sync::Arc};
 use vaux_client::MqttClient;
 use vaux_mqtt::{
     property::{PayloadFormat, Property},
-    Packet, PropertyType, PubResp, QoSLevel, Subscribe, Subscription,
+    Packet, PropertyType, PubResp, QoSLevel, Subscribe, SubscriptionFilter,
 };
 
 #[derive(Parser, Debug)]
@@ -93,7 +93,7 @@ async fn subscribe(mut client: MqttClient, args: Args) {
     let producer = client.producer();
     let filter = vec![
         // inbound device ops messages for this shadow on this site
-        Subscription {
+        SubscriptionFilter {
             filter: "hello-vaux".to_string(),
             qos: args.qos,
             no_local: false,

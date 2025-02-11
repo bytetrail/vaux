@@ -1,29 +1,31 @@
 use std::time::{Duration, Instant};
 
-use vaux_mqtt::{Connect, WillMessage};
+use vaux_mqtt::{subscribe::Subscription, Connect, WillMessage};
 
 #[derive(Debug, Clone)]
 pub struct Session {
-    _id: String,
+    id: String,
     last_active: Instant,
     connected: bool,
     orphaned: bool,
     keep_alive: Duration,
     pub session_expiry: Duration,
     will_message: Option<WillMessage>,
+    subscriptions: Vec<Subscription>,
 }
 
 impl Session {
     /// Creates a new session with the last active time set to Instant::now()
     pub fn new(id: String, keep_alive: Duration) -> Self {
         Session {
-            _id: id,
+            id: id,
             last_active: Instant::now(),
             connected: true,
             orphaned: false,
             keep_alive,
             session_expiry: Duration::new(0, 0),
             will_message: None,
+            subscriptions: Vec::new(),
         }
     }
 
@@ -45,13 +47,14 @@ impl Session {
         };
 
         Session {
-            _id: connect.client_id.to_string(),
+            id: connect.client_id.to_string(),
             last_active: Instant::now(),
             connected: true,
             orphaned: false,
             keep_alive,
             session_expiry,
             will_message,
+            subscriptions: Vec::new(),
         }
     }
 
