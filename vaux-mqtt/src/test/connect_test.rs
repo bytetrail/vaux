@@ -194,7 +194,7 @@ fn test_problem_info_remaining() {
     );
     connect
         .properties_mut()
-        .clear_property(&PropertyType::ReqProblemInfo);
+        .clear_property(PropertyType::ReqProblemInfo);
     let remaining = connect.size();
     assert_eq!(
         CONNECT_MIN_REMAINING, remaining,

@@ -1,4 +1,5 @@
 pub(crate) mod codec;
+pub(crate) mod config;
 pub(crate) mod session;
 
 use crate::broker::session::Session;
@@ -128,7 +129,7 @@ impl Broker {
                     let mut session = active_session.as_ref().unwrap().write().await;
                     if let Some(Property::SessionExpiryInterval(expiry)) = packet
                         .properties()
-                        .get_property(&PropertyType::SessionExpiryInterval)
+                        .get_property(PropertyType::SessionExpiryInterval)
                     {
                         session.session_expiry = Duration::from_secs(*expiry as u64);
                     }

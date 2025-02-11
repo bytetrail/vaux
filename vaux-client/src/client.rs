@@ -799,7 +799,7 @@ impl MqttClient {
         if !client_id_set {
             match connack
                 .properties()
-                .get_property(&PropertyType::AssignedClientId)
+                .get_property(PropertyType::AssignedClientId)
             {
                 Some(Property::AssignedClientId(id)) => {
                     let mut client_id = client_id.lock().await;

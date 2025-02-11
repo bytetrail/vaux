@@ -171,7 +171,7 @@ mod test {
         assert!(result.is_ok());
         assert!(connack
             .properties()
-            .has_property(&PropertyType::SessionExpiryInterval));
+            .has_property(PropertyType::SessionExpiryInterval));
         if let Property::SessionExpiryInterval(interval) =
             connack.properties()[PropertyType::SessionExpiryInterval]
         {
@@ -217,7 +217,7 @@ mod test {
         let result = connack.decode(&mut buf);
         assert!(result.is_ok(), "expected successful decode");
         assert!(
-            connack.properties().has_property(&PropertyType::RecvMax),
+            connack.properties().has_property(PropertyType::RecvMax),
             "expected property to be set"
         );
         if let Property::RecvMax(max) = connack.properties()[PropertyType::RecvMax] {

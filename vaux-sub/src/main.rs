@@ -109,10 +109,10 @@ async fn subscribe(mut client: MqttClient, args: Args) {
                 let iter = consumer.try_recv();
                 if let Ok(packet) = iter {
                     if let Packet::Publish(mut p) = packet {
-                        if p.properties().has_property(&PropertyType::PayloadFormat) {
+                        if p.properties().has_property(PropertyType::PayloadFormat) {
                             if let Property::PayloadFormat(indicator) = p
                                 .properties()
-                                .get_property(&PropertyType::PayloadFormat)
+                                .get_property(PropertyType::PayloadFormat)
                                 .unwrap()
                             {
                                 match indicator {

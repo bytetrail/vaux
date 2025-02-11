@@ -258,30 +258,30 @@ impl PropertyBundle {
         self.user_props.clear();
     }
 
-    pub fn supports_property(&self, prop_type: &PropertyType) -> bool {
-        self.supported.contains(prop_type)
+    pub fn supports_property(&self, prop_type: PropertyType) -> bool {
+        self.supported.contains(&prop_type)
     }
 
-    pub fn has_property(&self, prop_type: &PropertyType) -> bool {
-        self.properties.contains_key(prop_type)
+    pub fn has_property(&self, prop_type: PropertyType) -> bool {
+        self.properties.contains_key(&prop_type)
     }
 
-    pub fn get_property(&self, prop_type: &PropertyType) -> Option<&Property> {
-        self.properties.get(prop_type)
+    pub fn get_property(&self, prop_type: PropertyType) -> Option<&Property> {
+        self.properties.get(&prop_type)
     }
 
     pub fn set_property(&mut self, prop: Property) {
         if let Property::UserProperty(key, value) = prop {
             self.add_user_property(key, value);
-        } else if self.supports_property(&PropertyType::from(&prop)) {
+        } else if self.supports_property(PropertyType::from(&prop)) {
             self.properties.insert((&prop).into(), prop);
         } else {
             panic!("Unsupported property: {:?}", prop);
         }
     }
 
-    pub fn clear_property(&mut self, prop_type: &PropertyType) {
-        self.properties.remove(prop_type);
+    pub fn clear_property(&mut self, prop_type: PropertyType) {
+        self.properties.remove(&prop_type);
     }
 
     pub fn user_properties(&self) -> &HashMap<String, Vec<String>> {
