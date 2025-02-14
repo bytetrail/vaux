@@ -131,6 +131,10 @@ impl ClientBuilder {
         self
     }
 
+    /// Sets the client ID for the MQTT client. The client ID is a unique identifier for
+    /// the client and is used by the broker to identify the client. If the client ID is
+    /// not set, a random client ID will be generated.
+    /// Defaults to `vaux-client-{uuid}`.
     pub fn with_client_id(mut self, client_id: &str) -> Self {
         self.client_id = client_id.to_string();
         self
@@ -141,11 +145,18 @@ impl ClientBuilder {
         self
     }
 
+    /// Sets the keep alive interval for the client. The keep alive interval is the
+    /// maximum time that the client will wait between sending a PINGREQ packet to the
+    /// broker. If the client does not send a PINGREQ packet within this time, the
+    /// broker may assume that the client is no longer connected close the connection.
     pub fn with_keep_alive(mut self, keep_alive: Duration) -> Self {
         self.keep_alive = keep_alive;
         self
     }
 
+    /// Sets the maximum time that the client will wait for a connection to be
+    /// established. If the connection is not established within this time, the
+    /// client will return an error.
     pub fn with_max_connect_wait(mut self, max_connect_wait: Duration) -> Self {
         self.max_connect_wait = max_connect_wait;
         self
@@ -157,7 +168,7 @@ impl ClientBuilder {
     ///
     /// It is an error to attempt to create an MQTT client without setting the packet
     /// producer and consumer channels.
-    pub fn with_packet_producer_receiver(mut self, packet_producer: Receiver<Packet>) -> Self {
+    pub fn with_packet_producer(mut self, packet_producer: Receiver<Packet>) -> Self {
         self.packet_producer = Some(packet_producer);
         self
     }
@@ -168,7 +179,7 @@ impl ClientBuilder {
     ///
     /// It is an error to attempt to create an MQTT client without setting the packet
     /// producer and consumer channels.
-    pub fn with_packet_consumer_sender(mut self, packet_consumer: Sender<Packet>) -> Self {
+    pub fn with_packet_consumer(mut self, packet_consumer: Sender<Packet>) -> Self {
         self.packet_consumer = Some(packet_consumer);
         self
     }
@@ -194,7 +205,10 @@ impl ClientBuilder {
         self
     }
 
-    pub fn with_error_out(mut self, error_out: Sender<MqttError>) -> Self {
+    /// Sets the error handler for the MQTT client. The error handler is used to receive
+    /// errors from the MQTT client. The error handler is not required to be set for the
+    /// client to be created.
+    pub fn with_error_handler(mut self, error_out: Sender<MqttError>) -> Self {
         self.error_out = Some(error_out);
         self
     }

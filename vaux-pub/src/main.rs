@@ -78,8 +78,8 @@ async fn main() {
     let mut consumer = vaux_client::PacketChannel::new();
 
     let mut client = vaux_client::ClientBuilder::new(connection)
-        .with_packet_consumer_sender(consumer.sender())
-        .with_packet_producer_receiver(producer.take_receiver())
+        .with_packet_consumer(consumer.sender())
+        .with_packet_producer(producer.take_receiver())
         .with_auto_ack(true)
         .with_auto_packet_id(true)
         .with_receive_max(10)
