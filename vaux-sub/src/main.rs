@@ -1,7 +1,8 @@
 use clap::Parser;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
-use std::{io::Read, sync::Arc};
+use std::{io::Read, sync::Arc, time::Duration};
+use tokio::sync::mpsc::{Receiver, Sender};
 use vaux_client::MqttClient;
 use vaux_mqtt::{
     property::{PayloadFormat, Property},
@@ -52,7 +53,7 @@ impl clap::builder::TypedValueParser for QoSLevelParser {
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() {
     let args = Args::parse();
     let mut root_store = rustls::RootCertStore::empty();
@@ -74,23 +75,38 @@ async fn main() {
         connection = connection.with_tls().with_trust_store(Arc::new(root_store))
     }
     connection = connection.with_host(&args.addr).with_port(args.port);
-    let client = vaux_client::MqttClient::new_with_connection(
-        connection,
-        "vaux-subscriber-001",
-        false,
-        10,
-        false,
-    );
-    println!("subscribing to {}", args.addr);
-    subscribe(client, args).await;
+
+    let mut producer = vaux_client::PacketChannel::new();
+    let mut consumer = vaux_client::PacketChannel::new();
+
+    let mut client = vaux_client::ClientBuilder::new(connection)
+        .with_packet_consumer_sender(consumer.sender())
+        .with_packet_producer_receiver(producer.take_receiver())
+        .with_auto_ack(true)
+        .with_auto_packet_id(true)
+        .with_receive_max(10)
+        .with_session_expiry(1000)
+        .with_keep_alive(Duration::from_secs(30))
+        .with_max_connect_wait(Duration::from_secs(5))
+        .build()
+        .unwrap();
+
+    let mut packet_in = consumer.take_receiver();
+
+    subscribe(client, producer.sender(), &mut packet_in, args).await;
 }
 
-async fn subscribe(mut client: MqttClient, args: Args) {
-    client.set_keep_alive(10);
-    let handle = client.start(args.clean_start).await;
+async fn subscribe(
+    mut client: MqttClient,
+    packet_sender: Sender<Packet>,
+    packet_receiver: &mut Receiver<Packet>,
+    args: Args,
+) {
+    println!("starting");
+    let handle = client
+        .try_start(Duration::from_secs(10), args.clean_start)
+        .await;
     println!("started");
-    let mut consumer = client.take_consumer().unwrap();
-    let producer = client.producer();
     let filter = vec![
         // inbound device ops messages for this shadow on this site
         SubscriptionFilter {
@@ -102,11 +118,11 @@ async fn subscribe(mut client: MqttClient, args: Args) {
         },
     ];
     let subscribe = Subscribe::new(1, filter);
-    match producer.send(Packet::Subscribe(subscribe)).await {
+    match packet_sender.send(Packet::Subscribe(subscribe)).await {
         Ok(_) => {
             loop {
                 tokio::task::yield_now().await;
-                let iter = consumer.try_recv();
+                let iter = packet_receiver.try_recv();
                 if let Ok(packet) = iter {
                     if let Packet::Publish(mut p) = packet {
                         if p.properties().has_property(PropertyType::PayloadFormat) {
@@ -133,14 +149,14 @@ async fn subscribe(mut client: MqttClient, args: Args) {
                                 QoSLevel::AtLeastOnce => {
                                     let mut ack = PubResp::new_puback();
                                     ack.packet_id = p.packet_id.unwrap();
-                                    if let Err(e) = producer.send(Packet::PubAck(ack)).await {
+                                    if let Err(e) = packet_sender.send(Packet::PubAck(ack)).await {
                                         eprintln!("{:?}", e);
                                     }
                                 }
                                 QoSLevel::ExactlyOnce => {
                                     let mut ack = PubResp::new_pubrec();
                                     ack.packet_id = p.packet_id.unwrap();
-                                    if let Err(e) = producer.send(Packet::PubRec(ack)).await {
+                                    if let Err(e) = packet_sender.send(Packet::PubRec(ack)).await {
                                         eprintln!("{:?}", e);
                                     }
                                 }
@@ -149,13 +165,18 @@ async fn subscribe(mut client: MqttClient, args: Args) {
                         }
                     }
                 }
+                if !client.connected().await {
+                    break;
+                }
             }
         }
         Err(e) => {
             eprintln!("{:?}", e);
         }
     }
-    let _ = handle.await;
+    if let Ok(handle) = handle {
+        handle.await.unwrap();
+    }
 }
 
 fn load_cert(path: &str) -> Result<CertificateDer, std::io::Error> {

@@ -1,0 +1,231 @@
+use crate::{MqttConnection, MqttError};
+use std::{collections::HashMap, fmt::Display, time::Duration};
+use tokio::sync::{mpsc::Receiver, mpsc::Sender};
+use vaux_mqtt::{Packet, PacketType};
+
+const DEFAULT_RECV_MAX: u16 = 100;
+const DEFAULT_SESSION_EXPIRY: u32 = 1000;
+const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
+const DEFAULT_CLIENT_KEEP_ALIVE: Duration = Duration::from_secs(60);
+const MIN_KEEP_ALIVE: Duration = Duration::from_secs(30);
+const MAX_CONNECT_WAIT: Duration = Duration::from_secs(5);
+const DEFAULT_CLIENT_ID_PREFIX: &str = "vaux-client";
+const DEFAULT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_SEND_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuilderError {
+    ProducerRequired,
+    ConsumerRequired,
+    MinKeepAlive,
+}
+
+impl Display for BuilderError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BuilderError::ProducerRequired => write!(f, "producer channel is required"),
+            BuilderError::ConsumerRequired => write!(f, "consumer channel is required"),
+            BuilderError::MinKeepAlive => write!(f, "keep alive must be at least 30 seconds"),
+        }
+    }
+}
+
+pub struct ClientBuilder {
+    connection: MqttConnection,
+    auto_ack: bool,
+    auto_packet_id: bool,
+    receive_max: u16,
+    session_expiry: u32,
+    client_id: String,
+    max_packet_size: usize,
+    keep_alive: Duration,
+    max_connect_wait: Duration,
+    packet_producer: Option<Receiver<vaux_mqtt::Packet>>,
+    packet_consumer: Option<Sender<vaux_mqtt::Packet>>,
+    filtered_consumer: Option<HashMap<PacketType, Sender<vaux_mqtt::Packet>>>,
+    error_out: Option<Sender<MqttError>>,
+    send_timeout: Duration,
+    receive_timeout: Duration,
+}
+
+impl Default for ClientBuilder {
+    fn default() -> Self {
+        Self {
+            connection: MqttConnection::new(),
+            auto_ack: true,
+            auto_packet_id: true,
+            receive_max: DEFAULT_RECV_MAX,
+            session_expiry: DEFAULT_SESSION_EXPIRY,
+            client_id: format!("{}-{}", DEFAULT_CLIENT_ID_PREFIX, uuid::Uuid::new_v4()),
+            max_packet_size: DEFAULT_MAX_PACKET_SIZE,
+            keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
+            max_connect_wait: MAX_CONNECT_WAIT,
+            packet_producer: None,
+            packet_consumer: None,
+            filtered_consumer: None,
+            error_out: None,
+            send_timeout: DEFAULT_SEND_TIMEOUT,
+            receive_timeout: DEFAULT_RECEIVE_TIMEOUT,
+        }
+    }
+}
+
+impl ClientBuilder {
+    pub fn new(connection: MqttConnection) -> Self {
+        Self {
+            connection: connection,
+            ..Default::default()
+        }
+    }
+
+    /// Sets the maximum duration that the MQTT client will wait for a packet send to
+    /// complete. If the send does not complete within this duration, the client will
+    /// return an error. This is useful for preventing the client from blocking
+    /// indefinitely on a send operation.
+    pub fn with_send_timeout(mut self, timeout: Duration) -> Self {
+        self.send_timeout = timeout;
+        self
+    }
+
+    /// Sets the maximum duration that the MQTT client will wait for a packet receive to
+    /// complete. If the receive does not complete within this duration, the client will
+    /// return an error. This is useful for preventing the client from blocking
+    /// indefinitely on a receive operation.
+    ///
+    /// This value must be within the range of 100ms to 10s.
+    pub fn with_receive_timeout(mut self, timeout: Duration) -> Self {
+        self.receive_timeout = timeout;
+        self
+    }
+
+    /// Enables or disables automatic acknowledgement of packets. If enabled, the client
+    /// will automatically acknowledge packets that require acknowledgement. If disabled,
+    /// the client will not acknowledge packets that require acknowledgement and the
+    /// calling client is responsible for acknowledging packets that require
+    /// acknowledgement.
+    pub fn with_auto_ack(mut self, auto_ack: bool) -> Self {
+        self.auto_ack = auto_ack;
+        self
+    }
+
+    /// Enables or disables automatic packet ID assignment. If enabled, the client will
+    /// automatically assign packet IDs to packets that require them. If disabled, the
+    /// client will not assign packet IDs to packets that require them. In some cases
+    /// it may be desirable to disable automatic packet ID assignment, such as when
+    /// using a custom packet ID assignment scheme or when the calling client is
+    /// correlating packets with responses such as when `auto_ack` is disabled.
+    ///
+    /// Defaults to true.
+    pub fn with_auto_packet_id(mut self, auto_packet_id: bool) -> Self {
+        self.auto_packet_id = auto_packet_id;
+        self
+    }
+
+    pub fn with_receive_max(mut self, receive_max: u16) -> Self {
+        self.receive_max = receive_max;
+        self
+    }
+
+    pub fn with_session_expiry(mut self, session_expiry: u32) -> Self {
+        self.session_expiry = session_expiry;
+        self
+    }
+
+    pub fn with_client_id(mut self, client_id: &str) -> Self {
+        self.client_id = client_id.to_string();
+        self
+    }
+
+    pub fn with_max_packet_size(mut self, max_packet_size: usize) -> Self {
+        self.max_packet_size = max_packet_size;
+        self
+    }
+
+    pub fn with_keep_alive(mut self, keep_alive: Duration) -> Self {
+        self.keep_alive = keep_alive;
+        self
+    }
+
+    pub fn with_max_connect_wait(mut self, max_connect_wait: Duration) -> Self {
+        self.max_connect_wait = max_connect_wait;
+        self
+    }
+
+    /// Sets the packet producer and consumer channels for the client. The packet
+    /// producer channel is used to send packets to the remote broker from a client
+    /// of the MqttClient instance.
+    ///
+    /// It is an error to attempt to create an MQTT client without setting the packet
+    /// producer and consumer channels.
+    pub fn with_packet_producer_receiver(mut self, packet_producer: Receiver<Packet>) -> Self {
+        self.packet_producer = Some(packet_producer);
+        self
+    }
+
+    /// Sets the packet consumer sender channel for the client. The packet consumer
+    /// channel is used to receive packets from the remote broker to the client of
+    /// the MqttClient instance.
+    ///
+    /// It is an error to attempt to create an MQTT client without setting the packet
+    /// producer and consumer channels.
+    pub fn with_packet_consumer_sender(mut self, packet_consumer: Sender<Packet>) -> Self {
+        self.packet_consumer = Some(packet_consumer);
+        self
+    }
+
+    /// Adds a filtered consumer to the client. The filtered consumer is used to
+    /// receive packets of a specific type from the remote broker to the client of
+    /// the MqttClient instance. The MQTT client will filter packets of the specified
+    /// type and send them to the filtered consumer. Packets sent to a filtered consumer
+    /// are not sent to the packet consumer.
+    ///
+    /// Filtered consumers do not have to be set for the client to be created.
+    pub fn with_filtered_consumer(
+        mut self,
+        packet_type: PacketType,
+        sender: Sender<Packet>,
+    ) -> Self {
+        if self.filtered_consumer.is_none() {
+            self.filtered_consumer = Some(HashMap::new());
+        }
+        if let Some(consumer) = self.filtered_consumer.as_mut() {
+            consumer.insert(packet_type, sender);
+        }
+        self
+    }
+
+    pub fn with_error_out(mut self, error_out: Sender<MqttError>) -> Self {
+        self.error_out = Some(error_out);
+        self
+    }
+
+    pub fn build(self) -> Result<crate::MqttClient, BuilderError> {
+        if self.packet_producer.is_none() {
+            return Err(BuilderError::ProducerRequired);
+        }
+        if self.packet_consumer.is_none() {
+            return Err(BuilderError::ConsumerRequired);
+        }
+        if self.keep_alive < MIN_KEEP_ALIVE {
+            return Err(BuilderError::MinKeepAlive);
+        }
+
+        let mut client = crate::MqttClient::new_with_connection(
+            self.connection,
+            &self.client_id,
+            self.auto_ack,
+            self.receive_max,
+            self.auto_packet_id,
+        );
+        client.set_session_expiry(self.session_expiry);
+        client.set_max_packet_size(self.max_packet_size);
+        client.set_keep_alive(self.keep_alive);
+        client.set_max_connect_wait(self.max_connect_wait);
+        client.set_packet_in(self.packet_producer.unwrap());
+        client.set_packet_out(self.packet_consumer.unwrap());
+        if let Some(error_out) = self.error_out {
+            client.set_error_out(error_out);
+        }
+        Ok(client)
+    }
+}

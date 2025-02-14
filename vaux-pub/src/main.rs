@@ -74,17 +74,33 @@ async fn main() {
         connection = connection.with_tls().with_trust_store(Arc::new(root_store))
     }
     let connection = connection.with_host(&args.addr).with_port(args.port);
-    let mut client = vaux_client::MqttClient::new_with_connection(
-        connection,
-        "vaux-publisher-001",
-        false,
-        10,
-        false,
-    );
-    publish(&mut client, args.clone()).await;
+    let mut producer = vaux_client::PacketChannel::new();
+    let mut consumer = vaux_client::PacketChannel::new();
+
+    let mut client = vaux_client::ClientBuilder::new(connection)
+        .with_packet_consumer_sender(consumer.sender())
+        .with_packet_producer_receiver(producer.take_receiver())
+        .with_auto_ack(true)
+        .with_auto_packet_id(true)
+        .with_receive_max(10)
+        .with_session_expiry(1000)
+        .with_max_packet_size(1000)
+        .with_keep_alive(Duration::from_secs(10))
+        .with_max_connect_wait(Duration::from_secs(5))
+        .build()
+        .unwrap();
+
+    let mut packet_in = consumer.take_receiver();
+
+    publish(&mut client, producer.sender(), &mut packet_in, args.clone()).await;
 }
 
-async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
+async fn publish(
+    client: &mut vaux_client::MqttClient,
+    packet_out: tokio::sync::mpsc::Sender<Packet>,
+    packet_in: &mut tokio::sync::mpsc::Receiver<Packet>,
+    args: Args,
+) {
     let handle: Option<JoinHandle<_>> =
         match client.try_start(Duration::from_millis(5000), true).await {
             Ok(h) => Some(h),
@@ -93,8 +109,6 @@ async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
                 return;
             }
         };
-    let producer = client.producer();
-    let mut consumer = client.take_consumer().unwrap();
     let topic = args.topic.clone();
     let arg_message = if let Some(m) = args.message {
         m
@@ -123,7 +137,7 @@ async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
     publish.set_qos(args.qos);
     publish.packet_id = Some(1);
     println!("sending message");
-    if producer
+    if packet_out
         .send(vaux_mqtt::Packet::Publish(publish.clone()))
         .await
         .is_err()
@@ -131,7 +145,7 @@ async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
         eprintln!("unable to send packet to broker");
     }
     println!("sent message");
-    let mut packet = consumer.try_recv();
+    let mut packet = packet_in.try_recv();
     let mut ack_recv = false;
     while !ack_recv {
         if packet.is_err() {
@@ -139,7 +153,7 @@ async fn publish(client: &mut vaux_client::MqttClient, args: Args) {
             println!("ACK {}", ack.packet_id);
             ack_recv = true;
         }
-        packet = consumer.try_recv();
+        packet = packet_in.try_recv();
     }
 
     match client.stop().await {
