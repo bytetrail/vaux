@@ -286,6 +286,7 @@ impl MqttClient {
         let packet_out = self.packet_out.clone().unwrap();
         let credentials = self.connection.as_ref().unwrap().credentials().clone();
         let connected = self.connected.clone();
+        let filter_channel = self.filter_channel.clone();
         if let Some(connection) = self.connection.as_mut() {
             match connection.connect().await {
                 Ok(c) => c,
@@ -334,13 +335,21 @@ impl MqttClient {
                                 match session.handle_packet(packet).await {
                                     Ok(Some(packet)) => {
                                         // check filter channels
-
-                                        packet_out.send(packet).await.map_err(|e| {
-                                            MqttError::new(
-                                                &format!("unable to send packet: {}", e),
-                                                ErrorKind::Transport,
-                                            )
-                                        })?;
+                                        if let Some(filter_out) = filter_channel.get(&PacketType::from(&packet)) {
+                                            if let Err(e) = filter_out.send(packet.clone()).await {
+                                                return Err(MqttError::new(
+                                                    &format!("unable to send packet: {}", e),
+                                                    ErrorKind::Transport,
+                                                ));
+                                            }
+                                        } else {
+                                            packet_out.send(packet).await.map_err(|e| {
+                                                MqttError::new(
+                                                    &format!("unable to send packet: {}", e),
+                                                    ErrorKind::Transport,
+                                                )
+                                            })?;
+                                        }
                                     }
                                     Ok(None) => {
                                         // do nothing
