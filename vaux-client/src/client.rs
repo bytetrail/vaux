@@ -313,7 +313,6 @@ impl MqttClient {
             {
                 Ok(_) => *connected.write().await = true,
                 Err(e) => {
-                    println!("session connect error: {}", e);
                     return Err(e);
                 }
             }
@@ -322,10 +321,9 @@ impl MqttClient {
                     _ = MqttClient::keep_alive_timer(keep_alive) => {
                         match session.keep_alive().await {
                             Ok(_) => {
-                                println!("keep alive");
+                                // do nothing
                             }
                             Err(e) => {
-                                println!("keep alive error: {}", e);
                                 return Err(e);
                             }
                         }
@@ -345,21 +343,17 @@ impl MqttClient {
                                         })?;
                                     }
                                     Ok(None) => {
-                                        println!("session.handle_packet returned None");
                                         // do nothing
                                     }
                                     Err(e) => {
-                                        println!("session.handle_packet error: {}", e);
                                         return Err(e);
                                     }
                                 }
                             }
                             Ok(None) => {
-                                println!("session.read_next() returned None");
                                 // do nothing
                             }
                             Err(e) => {
-                                println!("session.read_next() error: {}", e);
                                 return Err(e);
                             }
                         }
@@ -367,12 +361,10 @@ impl MqttClient {
                     pending_packet = packet_in_receiver.recv() => {
                         match pending_packet {
                             Some(inbound_packet) => {
-                                println!("packet_in.recv() received packet");
                                 match session.write_next(inbound_packet).await {
                                     Ok(_) => {
                                     }
                                     Err(e) => {
-                                        println!("session.write_next() error: {}", e);
                                         return Err(e);
                                     }
                                 }

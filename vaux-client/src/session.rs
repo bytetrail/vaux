@@ -221,15 +221,12 @@ impl ClientSession {
             }
             Packet::Disconnect(d) => {
                 self.send_packet(Packet::Disconnect(d)).await?;
-                println!("disconnect sent");
                 // TODO handle shutdown error?
                 let _ = self.stream.shutdown().await;
-                println!("shutdown complete");
                 self.pending_qos1
                     .lock()
                     .await
                     .append(&mut self.pending_publish);
-                println!("setting connected to false");
                 *self.connected.write().await = false;
                 return Ok(());
             }
