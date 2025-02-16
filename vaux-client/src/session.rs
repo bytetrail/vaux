@@ -1,27 +1,24 @@
 use crate::MqttClient;
 use crate::{stream::AsyncMqttStream, ErrorKind, MqttError};
 use bytes::BytesMut;
-use std::io::Write;
 use std::{collections::HashMap, sync::Arc, time::Duration, vec};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use vaux_mqtt::{
-    decode, encode, property::Property, ConnAck, Connect, Packet, PacketType, PropertyType,
-    PubResp, QoSLevel, Reason, SubscriptionFilter,
+    decode, encode, property::Property, ConnAck, Connect, Packet, PropertyType, PubResp, QoSLevel,
+    Reason, SubscriptionFilter,
 };
 
 const MAX_QUEUE_LEN: usize = 100;
 
 pub(crate) struct ClientSession {
     client_id: Arc<Mutex<Option<String>>>,
-    connected: Arc<Mutex<bool>>,
+    connected: Arc<RwLock<bool>>,
     stream: AsyncMqttStream,
-
     last_active: std::time::Instant,
 
     session_expiry: u32,
     subscriptions: Vec<SubscriptionFilter>,
-    send_timeout: Duration,
     pending_publish: Vec<Packet>,
     pending_recv_ack: HashMap<u16, Packet>,
     receive_max: usize,
@@ -30,7 +27,6 @@ pub(crate) struct ClientSession {
 
     read_buffer: Vec<u8>,
     read_offset: usize,
-    read_timeout: Duration,
     max_packet_size: usize,
 
     auto_packet_id: bool,
@@ -39,20 +35,8 @@ pub(crate) struct ClientSession {
 }
 
 impl ClientSession {
-    pub fn max_packet_size(&self) -> usize {
-        self.max_packet_size
-    }
-
-    pub fn auto_packet_id(&self) -> bool {
-        self.auto_packet_id
-    }
-
-    pub fn auto_ack(&self) -> bool {
-        self.auto_ack
-    }
-
-    pub fn last_packet_id(&self) -> u16 {
-        self.last_packet_id
+    pub(crate) async fn connected(&self) -> bool {
+        *self.connected.read().await
     }
 
     pub(crate) async fn connect<'a>(
@@ -199,7 +183,7 @@ impl ClientSession {
         }
     }
 
-    async fn write_next(&mut self, packet: Packet) -> Result<(), MqttError> {
+    pub(crate) async fn write_next(&mut self, packet: Packet) -> Result<(), MqttError> {
         match packet {
             Packet::Publish(mut p) => {
                 if p.qos() == QoSLevel::AtLeastOnce {
@@ -243,6 +227,8 @@ impl ClientSession {
                     .lock()
                     .await
                     .append(&mut self.pending_publish);
+                let mut connected = self.connected.write().await;
+                *connected = false;
                 return Ok(());
             }
             _ => self.send_packet(packet).await,
@@ -251,72 +237,67 @@ impl ClientSession {
 
     pub(crate) async fn handle_packet(
         &mut self,
-        packet: Option<Packet>,
+        packet: Packet,
     ) -> Result<Option<Packet>, MqttError> {
-        print!("r");
-        std::io::stdout().flush().unwrap();
-        if let Some(p) = packet {
-            let mut packet_to_consumer = true;
-            match &p {
-                Packet::PingResponse(_pingresp) => {
-                    // do not send to consumer
-                    packet_to_consumer = false;
-                }
-                Packet::Disconnect(d) => {
-                    // TODO handle disconnect - verify shutdown behavior
-                    let _ = self.stream.shutdown().await;
-                    self.pending_qos1
-                        .lock()
-                        .await
-                        .append(&mut self.pending_publish);
-                    return Err(MqttError::new(
-                        &format!("disconnect received: {:?}", d),
-                        ErrorKind::Protocol(d.reason),
-                    ));
-                }
-                Packet::Publish(publish) => {
-                    match publish.qos() {
-                        vaux_mqtt::QoSLevel::AtMostOnce => {}
-                        vaux_mqtt::QoSLevel::AtLeastOnce => {
-                            if self.auto_ack {
-                                let mut puback = PubResp::new_puback();
-                                if let Some(packet_id) = publish.packet_id {
-                                    puback.packet_id = packet_id;
-                                } else {
-                                    let _ = self.stream.shutdown().await;
-                                    return Err(MqttError::new(
-                                        "protocol error, packet ID required with QoS > 0",
-                                        ErrorKind::Protocol(Reason::MalformedPacket),
-                                    ));
-                                }
-                                if self.send_packet(Packet::PubAck(puback)).await.is_err() {
-                                    // TODO handle the pub ack next time through
-                                    // push a message to the last error channel\
-                                    todo!()
-                                }
+        let mut packet_to_consumer = true;
+        match &packet {
+            Packet::PingResponse(_pingresp) => {
+                // do not send to consumer
+                packet_to_consumer = false;
+            }
+            Packet::Disconnect(d) => {
+                // TODO handle disconnect - verify shutdown behavior
+                let _ = self.stream.shutdown().await;
+                self.pending_qos1
+                    .lock()
+                    .await
+                    .append(&mut self.pending_publish);
+                return Err(MqttError::new(
+                    &format!("disconnect received: {:?}", d),
+                    ErrorKind::Protocol(d.reason),
+                ));
+            }
+            Packet::Publish(publish) => {
+                match publish.qos() {
+                    vaux_mqtt::QoSLevel::AtMostOnce => {}
+                    vaux_mqtt::QoSLevel::AtLeastOnce => {
+                        if self.auto_ack {
+                            let mut puback = PubResp::new_puback();
+                            if let Some(packet_id) = publish.packet_id {
+                                puback.packet_id = packet_id;
+                            } else {
+                                let _ = self.stream.shutdown().await;
+                                return Err(MqttError::new(
+                                    "protocol error, packet ID required with QoS > 0",
+                                    ErrorKind::Protocol(Reason::MalformedPacket),
+                                ));
+                            }
+                            if self.send_packet(Packet::PubAck(puback)).await.is_err() {
+                                // TODO handle the pub ack next time through
+                                // push a message to the last error channel\
+                                todo!()
                             }
                         }
-                        vaux_mqtt::QoSLevel::ExactlyOnce => todo!(),
                     }
+                    vaux_mqtt::QoSLevel::ExactlyOnce => todo!(),
                 }
-                Packet::PubAck(puback) => {
-                    if let Some(_p) = self.pending_recv_ack.remove(&puback.packet_id) {
-                        if self.qos_1_remaining < self.receive_max {
-                            self.qos_1_remaining += 1;
-                        }
-                    } else {
-                        // TODO PUBACK that was not expected
+            }
+            Packet::PubAck(puback) => {
+                if let Some(_p) = self.pending_recv_ack.remove(&puback.packet_id) {
+                    if self.qos_1_remaining < self.receive_max {
+                        self.qos_1_remaining += 1;
                     }
+                } else {
+                    // TODO PUBACK that was not expected
                 }
-                _ => {}
             }
-            if packet_to_consumer {
-                return Ok(Some(p));
-            } else {
-                return Ok(None);
-            }
+            _ => {}
         }
-        Ok(None)
+        if packet_to_consumer {
+            return Ok(Some(packet));
+        } else {
+            return Ok(None);
+        }
     }
 
     async fn handle_connack(&mut self, connack: ConnAck) -> crate::Result<ConnAck> {
@@ -324,14 +305,14 @@ impl ClientSession {
         let client_id_set = set_id.is_some();
         if connack.reason() != Reason::Success {
             // TODO return the connack reason as MQTT error with reason code
-            let mut connected = self.connected.lock().await;
+            let mut connected = self.connected.write().await;
             *connected = false;
             return Err(MqttError::new(
                 "connection refused",
                 ErrorKind::Protocol(connack.reason()),
             ));
         } else {
-            let mut connected = self.connected.lock().await;
+            let mut connected = self.connected.write().await;
             *connected = true;
         }
         if !client_id_set {
@@ -356,7 +337,7 @@ impl ClientSession {
         Ok(connack)
     }
 
-    async fn handle_idle(&mut self) -> Result<(), MqttError> {
+    pub(crate) async fn keep_alive(&mut self) -> Result<(), MqttError> {
         if !self.pending_publish.is_empty() && self.qos_1_remaining > 0 {
             // send any pending QOS-1 publish packets that we are able to send
             while !self.pending_publish.is_empty() && self.qos_1_remaining > 0 {
@@ -424,12 +405,11 @@ impl TryFrom<&mut MqttClient> for ClientSession {
 
         Ok(Self {
             client_id: Arc::clone(&client.client_id),
-            connected: Arc::new(Mutex::new(false)),
+            connected: Arc::new(RwLock::new(false)),
             stream: client.connection.take().unwrap().take_stream().unwrap(),
             last_active: std::time::Instant::now(),
             session_expiry: client.session_expiry(),
             subscriptions: vec![],
-            send_timeout: client.send_timeout,
             pending_publish: vec![],
             pending_recv_ack: HashMap::new(),
             receive_max: client.receive_max as usize,
@@ -437,7 +417,6 @@ impl TryFrom<&mut MqttClient> for ClientSession {
             pending_qos1: Arc::new(Mutex::new(vec![])),
             read_buffer: vec![0u8; client.max_packet_size],
             read_offset: 0,
-            read_timeout: client.receive_timeout,
             max_packet_size: client.max_packet_size,
             auto_packet_id: client.auto_packet_id,
             last_packet_id: 0,

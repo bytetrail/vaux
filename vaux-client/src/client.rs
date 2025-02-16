@@ -1,9 +1,7 @@
 use crate::session::ClientSession;
-use crate::{stream::AsyncMqttStream, ErrorKind, MqttConnection, MqttError};
-use bytes::BytesMut;
+use crate::{ErrorKind, MqttConnection, MqttError};
 use std::io::Write;
-use std::{collections::HashMap, sync::Arc, time::Duration, vec};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::select;
 use tokio::{
     sync::{
@@ -12,10 +10,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use vaux_mqtt::{
-    decode, encode, property::Property, ConnAck, Connect, Packet, PacketType, PropertyType,
-    PubResp, QoSLevel, Reason, Subscribe, SubscriptionFilter,
-};
+use vaux_mqtt::{Packet, PacketType, QoSLevel, Subscribe, SubscriptionFilter};
 
 const DEFAULT_RECV_MAX: u16 = 100;
 const DEFAULT_SESSION_EXPIRY: u32 = 1000;
@@ -61,7 +56,6 @@ pub struct MqttClient {
     pub(crate) auto_ack: bool,
     pub(crate) receive_max: u16,
     pub(crate) auto_packet_id: bool,
-    last_packet_id: u16,
     filter_channel: FilteredChannel,
     connected: Arc<Mutex<bool>>,
     //last_error: Arc<Mutex<Option<MqttError>>>,
@@ -72,7 +66,7 @@ pub struct MqttClient {
     pub(crate) err_chan: Option<Sender<MqttError>>,
     pending_qos1: Arc<Mutex<Vec<Packet>>>,
     pub(crate) max_packet_size: usize,
-    keep_alive: Duration,
+    pub(crate) keep_alive: Duration,
     max_connect_wait: Duration,
     pub(crate) send_timeout: Duration,
     pub(crate) receive_timeout: Duration,
@@ -112,7 +106,6 @@ impl MqttClient {
             connection: None,
             auto_ack,
             auto_packet_id,
-            last_packet_id: 0,
             receive_max,
             connected: Arc::new(Mutex::new(false)),
             session_expiry: DEFAULT_SESSION_EXPIRY,
@@ -284,10 +277,12 @@ impl MqttClient {
             return Err(MqttError::new("connection not set", ErrorKind::Connection));
         }
         let max_connect_wait = self.max_connect_wait;
+        let keep_alive = self.keep_alive;
         let connection = self.connection.take().unwrap();
         let credentials = connection.credentials();
         let mut packet_in = self.packet_in.take().unwrap();
-        let mut stream = match connection.connect().await {
+        let packet_out = self.packet_out.clone().unwrap();
+        let stream = match connection.connect().await {
             Ok(c) => c,
             Err(e) => {
                 return Err(MqttError::new(
@@ -320,9 +315,37 @@ impl MqttClient {
                 print!(".");
                 std::io::stdout().flush().unwrap();
                 select! {
-                    packet = session.read_next() => {
-                        match packet {
-                            Ok(p) => println!("packet: {:?}", p),
+                    _ = MqttClient::keep_alive_timer(keep_alive) => {
+                        match session.keep_alive().await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        }
+                    }
+                    packet_result = session.read_next() => {
+                        match packet_result {
+                            Ok(Some(packet)) => {
+                                match session.handle_packet(packet).await {
+                                    Ok(Some(packet)) => {
+                                        packet_out.send(packet).await.map_err(|e| {
+                                            MqttError::new(
+                                                &format!("unable to send packet: {}", e),
+                                                ErrorKind::Transport,
+                                            )
+                                        })?;
+                                    }
+                                    Ok(None) => {
+                                        // do nothing
+                                    }
+                                    Err(e) => {
+                                        return Err(e);
+                                    }
+                                }
+                            }
+                            Ok(None) => {
+                                // do nothing
+                            }
                             Err(e) => {
                                 return Err(e);
                             }
@@ -331,7 +354,12 @@ impl MqttClient {
                     pending_packet = packet_in.recv() => {
                         match pending_packet {
                             Some(inbound_packet) => {
-
+                                match session.write_next(inbound_packet).await {
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        return Err(e);
+                                    }
+                                }
                             }
                             None => {
                                 return Err(MqttError::new("packet_in channel closed", ErrorKind::Transport));
@@ -339,8 +367,15 @@ impl MqttClient {
                         }
                     }
                 };
+                if !session.connected().await {
+                    return Ok(());
+                }
             }
         }))
+    }
+
+    async fn keep_alive_timer(keep_alive: Duration) {
+        tokio::time::sleep(keep_alive).await;
     }
 
     pub async fn stop(&mut self) -> Result<(), MqttError> {
