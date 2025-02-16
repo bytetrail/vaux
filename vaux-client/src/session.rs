@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, RwLock};
 use vaux_mqtt::{
     decode, encode, property::Property, ConnAck, Connect, Packet, PropertyType, PubResp, QoSLevel,
-    Reason, SubscriptionFilter,
+    Reason,
 };
 
 const MAX_QUEUE_LEN: usize = 100;
@@ -18,7 +18,6 @@ pub(crate) struct ClientSession {
     last_active: std::time::Instant,
 
     session_expiry: u32,
-    subscriptions: Vec<SubscriptionFilter>,
     pending_publish: Vec<Packet>,
     pending_recv_ack: HashMap<u16, Packet>,
     receive_max: usize,
@@ -411,7 +410,6 @@ impl TryFrom<&mut MqttClient> for ClientSession {
             stream: client.connection.take().unwrap().take_stream().unwrap(),
             last_active: std::time::Instant::now(),
             session_expiry: client.session_expiry(),
-            subscriptions: vec![],
             pending_publish: vec![],
             pending_recv_ack: HashMap::new(),
             receive_max: client.receive_max as usize,

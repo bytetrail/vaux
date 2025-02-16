@@ -64,13 +64,11 @@ pub struct MqttClient {
     pub(crate) auto_packet_id: bool,
     filter_channel: FilteredChannel,
     connected: Arc<RwLock<bool>>,
-    //last_error: Arc<Mutex<Option<MqttError>>>,
     session_expiry: u32,
     pub(crate) client_id: Arc<Mutex<Option<String>>>,
     pub(crate) packet_in: Option<PacketChannel>,
     pub(crate) packet_out: Option<Sender<vaux_mqtt::Packet>>,
     pub(crate) err_chan: Option<Sender<MqttError>>,
-    pending_qos1: Arc<Mutex<Vec<Packet>>>,
     pub(crate) max_packet_size: usize,
     pub(crate) keep_alive: Duration,
     max_connect_wait: Duration,
@@ -118,7 +116,6 @@ impl MqttClient {
             packet_in: None,
             packet_out: None,
             err_chan: None,
-            pending_qos1: Arc::new(Mutex::new(Vec::new())),
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
             max_connect_wait: MAX_CONNECT_WAIT,
@@ -314,6 +311,7 @@ impl MqttClient {
             {
                 Ok(_) => *connected.write().await = true,
                 Err(e) => {
+                    *connected.write().await = false;
                     return Err(e);
                 }
             }
@@ -325,6 +323,7 @@ impl MqttClient {
                                 // do nothing
                             }
                             Err(e) => {
+                                *connected.write().await = false;
                                 return Err(e);
                             }
                         }
@@ -337,6 +336,7 @@ impl MqttClient {
                                         // check filter channels
                                         if let Some(filter_out) = filter_channel.get(&PacketType::from(&packet)) {
                                             if let Err(e) = filter_out.send(packet.clone()).await {
+                                                *connected.write().await = false;
                                                 return Err(MqttError::new(
                                                     &format!("unable to send packet: {}", e),
                                                     ErrorKind::Transport,
@@ -355,6 +355,7 @@ impl MqttClient {
                                         // do nothing
                                     }
                                     Err(e) => {
+                                        *connected.write().await = false;
                                         return Err(e);
                                     }
                                 }
@@ -363,6 +364,7 @@ impl MqttClient {
                                 // do nothing
                             }
                             Err(e) => {
+                                *connected.write().await = false;
                                 return Err(e);
                             }
                         }
@@ -374,11 +376,13 @@ impl MqttClient {
                                     Ok(_) => {
                                     }
                                     Err(e) => {
+                                        *connected.write().await = false;
                                         return Err(e);
                                     }
                                 }
                             }
                             None => {
+                                *connected.write().await = false;
                                 return Err(MqttError::new("packet_in channel closed", ErrorKind::Transport));
                             }
                         }
@@ -390,10 +394,6 @@ impl MqttClient {
                 }
             }
         }))
-    }
-
-    async fn keep_alive_timer(keep_alive: Duration) {
-        tokio::time::sleep(keep_alive).await;
     }
 
     pub async fn stop(&mut self) -> Result<(), MqttError> {
@@ -414,32 +414,7 @@ impl MqttClient {
         Ok(())
     }
 
-    // pub async fn send(
-    //     connection: &mut AsyncMqttStream,
-    //     send_timeout: Duration,
-    //     packet: Packet,
-    // ) -> crate::Result<Option<Packet>> {
-    //     let mut dest = BytesMut::default();
-    //     let result = encode(&packet, &mut dest);
-    //     if let Err(e) = result {
-    //         panic!("Failed to encode packet: {:?}", e);
-    //     }
-    //     match tokio::time::timeout(send_timeout, connection.write_all(&dest)).await {
-    //         Ok(result) => match result {
-    //             Ok(_) => Ok(None),
-    //             Err(e) => {
-    //                 return Err(MqttError::new(
-    //                     &format!("unable to send packet: {}", e),
-    //                     ErrorKind::IO,
-    //                 ));
-    //             }
-    //         },
-    //         Err(e) => {
-    //             return Err(MqttError::new(
-    //                 &format!("unable to send packet: {}", e),
-    //                 ErrorKind::Timeout,
-    //             ));
-    //         }
-    //     }
-    // }
+    async fn keep_alive_timer(keep_alive: Duration) {
+        tokio::time::sleep(keep_alive).await;
+    }
 }
