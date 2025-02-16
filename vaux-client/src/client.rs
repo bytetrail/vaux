@@ -5,7 +5,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::{
     sync::{
         mpsc::{self, error::SendError, Receiver, Sender},
-        Mutex, RwLock,
+        Mutex,
     },
     task::JoinHandle,
 };
@@ -134,33 +134,19 @@ impl MqttClient {
         }
     }
 
-    /// Sets the connection for the client. The connection is used to connect to the
-    /// remote broker. The connection must be set prior to calling start for the
-    /// connection to be used.
-    /// Example:
-    /// ```
-    /// use vaux_client::MqttClient;
-    /// use vaux_client::MqttConnection;
-    /// let conn = MqttConnection::new().with_host("localhost").with_port(1883);    
-    /// let mut client = MqttClient::default();
-    /// client.set_connection(conn);
-    /// ```
-    pub fn set_connection(&mut self, connection: MqttConnection) {
-        self.connection = Some(connection);
-    }
-
-    pub fn set_packet_in(&mut self, packet_in: Receiver<vaux_mqtt::Packet>) {
+    pub(crate) fn set_packet_in(&mut self, packet_in: Receiver<vaux_mqtt::Packet>) {
         self.packet_in = Some(packet_in);
     }
 
-    pub fn set_packet_out(&mut self, packet_out: Sender<vaux_mqtt::Packet>) {
+    pub(crate) fn set_packet_out(&mut self, packet_out: Sender<vaux_mqtt::Packet>) {
         self.packet_out = Some(packet_out);
     }
+
     pub fn max_packet_size(&self) -> usize {
         self.max_packet_size
     }
 
-    pub fn set_max_packet_size(&mut self, max_packet_size: usize) {
+    pub(crate) fn set_max_packet_size(&mut self, max_packet_size: usize) {
         self.max_packet_size = max_packet_size;
     }
 
@@ -190,7 +176,7 @@ impl MqttClient {
     /// // set the session expiry to 1 day
     /// client.set_session_expiry(60 * 60 * 24);
     /// ```
-    pub fn set_session_expiry(&mut self, session_expiry: u32) {
+    pub(crate) fn set_session_expiry(&mut self, session_expiry: u32) {
         self.session_expiry = session_expiry;
     }
 
@@ -211,7 +197,7 @@ impl MqttClient {
     ///
     /// The error handler as with other configuration settings must be set prior to calling
     /// start for the error handler to be used.
-    pub fn set_error_out(&mut self, error_out: Sender<MqttError>) {
+    pub(crate) fn set_error_out(&mut self, error_out: Sender<MqttError>) {
         self.err_chan = Some(error_out);
     }
 
@@ -236,7 +222,7 @@ impl MqttClient {
     /// // set the keep alive interval to 30 seconds
     /// client.set_keep_alive(30);
     /// ```
-    pub fn set_keep_alive(&mut self, keep_alive: Duration) {
+    pub(crate) fn set_keep_alive(&mut self, keep_alive: Duration) {
         if keep_alive < MIN_KEEP_ALIVE {
             self.keep_alive = MIN_KEEP_ALIVE;
         } else {
@@ -256,7 +242,7 @@ impl MqttClient {
     /// the client will wait for a connection to be established with the
     /// remote broker before returning an error. This value must be set prior
     /// to calling try_start for the value to have any effect.
-    pub fn set_max_connect_wait(&mut self, max_connect_wait: Duration) {
+    pub(crate) fn set_max_connect_wait(&mut self, max_connect_wait: Duration) {
         self.max_connect_wait = max_connect_wait;
     }
 
