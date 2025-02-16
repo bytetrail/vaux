@@ -4,6 +4,7 @@ use clap::{error::ErrorKind, Parser};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
 use tokio::task::JoinHandle;
+use vaux_client::PacketChannel;
 use vaux_mqtt::{property::Property, publish::Publish, Packet, QoSLevel};
 
 #[derive(Parser, Clone, Debug)]
@@ -79,7 +80,10 @@ async fn main() {
 
     let mut client = vaux_client::ClientBuilder::new(connection)
         .with_packet_consumer(consumer.sender())
-        .with_packet_producer(producer.take_receiver())
+        .with_packet_producer(PacketChannel::new_from_channel(
+            producer.sender(),
+            producer.take_receiver(),
+        ))
         .with_receive_timeout(Duration::from_millis(100))
         .with_send_timeout(Duration::from_millis(100))
         .with_auto_ack(true)
@@ -146,6 +150,11 @@ async fn publish(
         eprintln!("unable to send packet to broker");
     }
     println!("sent message");
+    if args.qos == QoSLevel::AtMostOnce {
+        return;
+    } else {
+        println!("waiting for PUBACK");
+    }
     let mut packet = packet_in.try_recv();
     let mut ack_recv = false;
     while !ack_recv {

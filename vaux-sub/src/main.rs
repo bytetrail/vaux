@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
-use vaux_client::MqttClient;
+use vaux_client::{MqttClient, PacketChannel};
 use vaux_mqtt::{
     property::{PayloadFormat, Property},
     Packet, PropertyType, PubResp, QoSLevel, Subscribe, SubscriptionFilter,
@@ -85,7 +85,10 @@ async fn main() {
 
     let mut client = vaux_client::ClientBuilder::new(connection)
         .with_packet_consumer(consumer.sender())
-        .with_packet_producer(producer.take_receiver())
+        .with_packet_producer(PacketChannel::new_from_channel(
+            producer.sender(),
+            producer.take_receiver(),
+        ))
         .with_auto_ack(true)
         .with_auto_packet_id(true)
         .with_receive_max(10)
@@ -126,6 +129,7 @@ async fn subscribe(
     let subscribe = Subscribe::new(1, filter);
     match packet_sender.send(Packet::Subscribe(subscribe)).await {
         Ok(_) => {
+            println!("subscribed");
             loop {
                 tokio::task::yield_now().await;
                 let iter = packet_receiver.try_recv();
@@ -181,6 +185,7 @@ async fn subscribe(
         }
     }
     if let Ok(handle) = handle {
+        println!("waiting for handle");
         handle.await.unwrap();
     }
 }

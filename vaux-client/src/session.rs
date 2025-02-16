@@ -221,14 +221,16 @@ impl ClientSession {
             }
             Packet::Disconnect(d) => {
                 self.send_packet(Packet::Disconnect(d)).await?;
+                println!("disconnect sent");
                 // TODO handle shutdown error?
                 let _ = self.stream.shutdown().await;
+                println!("shutdown complete");
                 self.pending_qos1
                     .lock()
                     .await
                     .append(&mut self.pending_publish);
-                let mut connected = self.connected.write().await;
-                *connected = false;
+                println!("setting connected to false");
+                *self.connected.write().await = false;
                 return Ok(());
             }
             _ => self.send_packet(packet).await,
@@ -368,7 +370,10 @@ impl ClientSession {
         let mut dest = BytesMut::default();
         let result = encode(&packet, &mut dest);
         if let Err(e) = result {
-            panic!("Failed to encode packet: {:?}", e);
+            return Err(MqttError::new(
+                &format!("Failed to encode packet: {:?}", e),
+                ErrorKind::Protocol(Reason::MalformedPacket),
+            ));
         }
         if let Err(e) = self.stream.write_all(&dest).await {
             return Err(MqttError::new(

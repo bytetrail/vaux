@@ -91,13 +91,13 @@ impl MqttConnection {
         self.stream.take()
     }
 
-    pub(crate) async fn connect(self) -> crate::Result<()> {
+    pub(crate) async fn connect(&mut self) -> crate::Result<()> {
         self.connect_with_timeout(Duration::from_millis(DEFAULT_CONNECTION_TIMEOUT))
             .await?;
         Ok(())
     }
 
-    pub(crate) async fn connect_with_timeout(mut self, timeout: Duration) -> crate::Result<()> {
+    pub(crate) async fn connect_with_timeout(&mut self, timeout: Duration) -> crate::Result<()> {
         // if not set via with_tls or with_port, set the port to the default
         if self.port.is_none() {
             self.port = Some(DEFAULT_PORT);

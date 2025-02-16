@@ -1,4 +1,4 @@
-use crate::{MqttConnection, MqttError};
+use crate::{MqttConnection, MqttError, PacketChannel};
 use std::{collections::HashMap, fmt::Display, time::Duration};
 use tokio::sync::{mpsc::Receiver, mpsc::Sender};
 use vaux_mqtt::{Packet, PacketType};
@@ -40,7 +40,7 @@ pub struct ClientBuilder {
     max_packet_size: usize,
     keep_alive: Duration,
     max_connect_wait: Duration,
-    packet_producer: Option<Receiver<vaux_mqtt::Packet>>,
+    packet_producer: Option<PacketChannel>,
     packet_consumer: Option<Sender<vaux_mqtt::Packet>>,
     filtered_consumer: Option<HashMap<PacketType, Sender<vaux_mqtt::Packet>>>,
     error_out: Option<Sender<MqttError>>,
@@ -168,7 +168,7 @@ impl ClientBuilder {
     ///
     /// It is an error to attempt to create an MQTT client without setting the packet
     /// producer and consumer channels.
-    pub fn with_packet_producer(mut self, packet_producer: Receiver<Packet>) -> Self {
+    pub fn with_packet_producer(mut self, packet_producer: PacketChannel) -> Self {
         self.packet_producer = Some(packet_producer);
         self
     }

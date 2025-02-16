@@ -1,6 +1,6 @@
 use crate::session::ClientSession;
 use crate::{ErrorKind, MqttConnection, MqttError};
-use std::io::Write;
+use async_std::sync::RwLock;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::select;
 use tokio::{
@@ -16,7 +16,6 @@ const DEFAULT_RECV_MAX: u16 = 100;
 const DEFAULT_SESSION_EXPIRY: u32 = 1000;
 // 64K is the default max packet size
 const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
-const MAX_QUEUE_LEN: usize = 100;
 const DEFAULT_CLIENT_KEEP_ALIVE: Duration = Duration::from_secs(60);
 const MIN_KEEP_ALIVE: Duration = Duration::from_secs(30);
 const MAX_CONNECT_WAIT: Duration = Duration::from_secs(5);
@@ -34,6 +33,13 @@ impl PacketChannel {
         let (sender, receiver): (Sender<vaux_mqtt::Packet>, Receiver<vaux_mqtt::Packet>) =
             mpsc::channel(DEFAULT_CHANNEL_SIZE);
         Self(sender, Some(receiver))
+    }
+
+    pub fn new_from_channel(
+        sender: Sender<vaux_mqtt::Packet>,
+        receiver: Receiver<vaux_mqtt::Packet>,
+    ) -> Self {
+        Self(sender.clone(), Some(receiver))
     }
 
     pub fn new_with_size(size: usize) -> Self {
@@ -57,19 +63,17 @@ pub struct MqttClient {
     pub(crate) receive_max: u16,
     pub(crate) auto_packet_id: bool,
     filter_channel: FilteredChannel,
-    connected: Arc<Mutex<bool>>,
+    connected: Arc<RwLock<bool>>,
     //last_error: Arc<Mutex<Option<MqttError>>>,
     session_expiry: u32,
     pub(crate) client_id: Arc<Mutex<Option<String>>>,
-    pub(crate) packet_in: Option<Receiver<vaux_mqtt::Packet>>,
+    pub(crate) packet_in: Option<PacketChannel>,
     pub(crate) packet_out: Option<Sender<vaux_mqtt::Packet>>,
     pub(crate) err_chan: Option<Sender<MqttError>>,
     pending_qos1: Arc<Mutex<Vec<Packet>>>,
     pub(crate) max_packet_size: usize,
     pub(crate) keep_alive: Duration,
     max_connect_wait: Duration,
-    pub(crate) send_timeout: Duration,
-    pub(crate) receive_timeout: Duration,
 }
 
 impl Default for MqttClient {
@@ -107,7 +111,7 @@ impl MqttClient {
             auto_ack,
             auto_packet_id,
             receive_max,
-            connected: Arc::new(Mutex::new(false)),
+            connected: Arc::new(RwLock::new(false)),
             session_expiry: DEFAULT_SESSION_EXPIRY,
             client_id: Arc::new(Mutex::new(Some(client_id.to_string()))),
             filter_channel: HashMap::new(),
@@ -118,12 +122,10 @@ impl MqttClient {
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
             max_connect_wait: MAX_CONNECT_WAIT,
-            send_timeout: Duration::from_secs(5),
-            receive_timeout: Duration::from_secs(5),
         }
     }
 
-    pub(crate) fn set_packet_in(&mut self, packet_in: Receiver<vaux_mqtt::Packet>) {
+    pub(crate) fn set_packet_in(&mut self, packet_in: PacketChannel) {
         self.packet_in = Some(packet_in);
     }
 
@@ -136,7 +138,7 @@ impl MqttClient {
     }
 
     pub async fn connected(&self) -> bool {
-        *self.connected.lock().await
+        *self.connected.read().await
     }
 
     pub fn session_expiry(&self) -> u32 {
@@ -191,8 +193,9 @@ impl MqttClient {
             // self.subscriptions.push(subscription.clone());
             subscribe.add_subscription(subscription);
         }
-        if let Some(packet_out) = self.packet_out.as_ref() {
-            packet_out
+        if let Some(packet_in_sender) = self.packet_in.as_ref() {
+            packet_in_sender
+                .0
                 .send(vaux_mqtt::Packet::Subscribe(subscribe))
                 .await
         } else {
@@ -278,19 +281,22 @@ impl MqttClient {
         }
         let max_connect_wait = self.max_connect_wait;
         let keep_alive = self.keep_alive;
-        let connection = self.connection.take().unwrap();
-        let credentials = connection.credentials();
-        let mut packet_in = self.packet_in.take().unwrap();
+
+        let mut packet_in_receiver = self.packet_in.as_mut().unwrap().1.take().unwrap();
         let packet_out = self.packet_out.clone().unwrap();
-        let stream = match connection.connect().await {
-            Ok(c) => c,
-            Err(e) => {
-                return Err(MqttError::new(
-                    &format!("unable to connect to broker socket: {}", e),
-                    ErrorKind::Transport,
-                ));
-            }
-        };
+        let credentials = self.connection.as_ref().unwrap().credentials().clone();
+        let connected = self.connected.clone();
+        if let Some(connection) = self.connection.as_mut() {
+            match connection.connect().await {
+                Ok(c) => c,
+                Err(e) => {
+                    return Err(MqttError::new(
+                        &format!("unable to connect to broker socket: {}", e),
+                        ErrorKind::Transport,
+                    ));
+                }
+            };
+        }
         let mut session = match ClientSession::try_from(self) {
             Ok(s) => s,
             Err(e) => {
@@ -300,25 +306,26 @@ impl MqttClient {
                 ));
             }
         };
-
         Ok(tokio::spawn(async move {
             match session
                 .connect(max_connect_wait, credentials, clean_start)
                 .await
             {
-                Ok(_) => {}
+                Ok(_) => *connected.write().await = true,
                 Err(e) => {
+                    println!("session connect error: {}", e);
                     return Err(e);
                 }
             }
             loop {
-                print!(".");
-                std::io::stdout().flush().unwrap();
                 select! {
                     _ = MqttClient::keep_alive_timer(keep_alive) => {
                         match session.keep_alive().await {
-                            Ok(_) => {}
+                            Ok(_) => {
+                                println!("keep alive");
+                            }
                             Err(e) => {
+                                println!("keep alive error: {}", e);
                                 return Err(e);
                             }
                         }
@@ -328,6 +335,8 @@ impl MqttClient {
                             Ok(Some(packet)) => {
                                 match session.handle_packet(packet).await {
                                     Ok(Some(packet)) => {
+                                        // check filter channels
+
                                         packet_out.send(packet).await.map_err(|e| {
                                             MqttError::new(
                                                 &format!("unable to send packet: {}", e),
@@ -336,27 +345,34 @@ impl MqttClient {
                                         })?;
                                     }
                                     Ok(None) => {
+                                        println!("session.handle_packet returned None");
                                         // do nothing
                                     }
                                     Err(e) => {
+                                        println!("session.handle_packet error: {}", e);
                                         return Err(e);
                                     }
                                 }
                             }
                             Ok(None) => {
+                                println!("session.read_next() returned None");
                                 // do nothing
                             }
                             Err(e) => {
+                                println!("session.read_next() error: {}", e);
                                 return Err(e);
                             }
                         }
                     }
-                    pending_packet = packet_in.recv() => {
+                    pending_packet = packet_in_receiver.recv() => {
                         match pending_packet {
                             Some(inbound_packet) => {
+                                println!("packet_in.recv() received packet");
                                 match session.write_next(inbound_packet).await {
-                                    Ok(_) => {}
+                                    Ok(_) => {
+                                    }
                                     Err(e) => {
+                                        println!("session.write_next() error: {}", e);
                                         return Err(e);
                                     }
                                 }
@@ -368,6 +384,7 @@ impl MqttClient {
                     }
                 };
                 if !session.connected().await {
+                    *connected.write().await = false;
                     return Ok(());
                 }
             }
@@ -380,8 +397,8 @@ impl MqttClient {
 
     pub async fn stop(&mut self) -> Result<(), MqttError> {
         let disconnect = Packet::Disconnect(Default::default());
-        if let Some(packet_out) = self.packet_out.as_ref() {
-            if let Err(e) = packet_out.send(disconnect).await {
+        if let Some(packet_in) = self.packet_in.as_ref() {
+            if let Err(e) = packet_in.0.send(disconnect).await {
                 return Err(MqttError::new(
                     &format!("unable to send disconnect: {}", e),
                     ErrorKind::Transport,
