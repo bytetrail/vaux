@@ -1,7 +1,7 @@
 use crate::{MqttConnection, MqttError, PacketChannel};
 use std::{collections::HashMap, fmt::Display, time::Duration};
-use tokio::sync::{mpsc::Receiver, mpsc::Sender};
-use vaux_mqtt::{Packet, PacketType};
+use tokio::sync::mpsc::Sender;
+use vaux_mqtt::{Packet, PacketType, WillMessage};
 
 const DEFAULT_RECV_MAX: u16 = 100;
 const DEFAULT_SESSION_EXPIRY: u32 = 1000;
@@ -46,6 +46,7 @@ pub struct ClientBuilder {
     error_out: Option<Sender<MqttError>>,
     send_timeout: Duration,
     receive_timeout: Duration,
+    will_message: Option<WillMessage>,
 }
 
 impl Default for ClientBuilder {
@@ -66,6 +67,7 @@ impl Default for ClientBuilder {
             error_out: None,
             send_timeout: DEFAULT_SEND_TIMEOUT,
             receive_timeout: DEFAULT_RECEIVE_TIMEOUT,
+            will_message: None,
         }
     }
 }
@@ -73,7 +75,7 @@ impl Default for ClientBuilder {
 impl ClientBuilder {
     pub fn new(connection: MqttConnection) -> Self {
         Self {
-            connection: connection,
+            connection,
             ..Default::default()
         }
     }
@@ -213,6 +215,15 @@ impl ClientBuilder {
         self
     }
 
+    /// Sets the will message for the MQTT client. The will message is a message that
+    /// the broker will send to the specified topic if the client disconnects
+    /// unexpectedly. The will message is not required to be set for the client to be created.
+    ///
+    pub fn with_will_message(mut self, will_message: WillMessage) -> Self {
+        self.will_message = Some(will_message);
+        self
+    }
+
     pub fn build(self) -> Result<crate::MqttClient, BuilderError> {
         if self.packet_producer.is_none() {
             return Err(BuilderError::ProducerRequired);
@@ -240,6 +251,7 @@ impl ClientBuilder {
         if let Some(error_out) = self.error_out {
             client.set_error_out(error_out);
         }
+        client.set_will_message(self.will_message);
         Ok(client)
     }
 }

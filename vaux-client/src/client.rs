@@ -72,6 +72,7 @@ pub struct MqttClient {
     pub(crate) max_packet_size: usize,
     pub(crate) keep_alive: Duration,
     max_connect_wait: Duration,
+    pub(crate) will_message: Option<vaux_mqtt::WillMessage>,
 }
 
 impl Default for MqttClient {
@@ -119,6 +120,7 @@ impl MqttClient {
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
             max_connect_wait: MAX_CONNECT_WAIT,
+            will_message: None,
         }
     }
 
@@ -168,6 +170,10 @@ impl MqttClient {
 
     pub(crate) fn set_max_connect_wait(&mut self, max_connect_wait: Duration) {
         self.max_connect_wait = max_connect_wait;
+    }
+
+    pub(crate) fn set_will_message(&mut self, will_message: Option<vaux_mqtt::WillMessage>) {
+        self.will_message = will_message;
     }
 
     /// Helper method to subscribe to the topics in the topic filter. This helper
@@ -278,7 +284,7 @@ impl MqttClient {
         }
         let max_connect_wait = self.max_connect_wait;
         let keep_alive = self.keep_alive;
-
+        let will_message = self.will_message.clone();
         let mut packet_in_receiver = self.packet_in.as_mut().unwrap().1.take().unwrap();
         let packet_out = self.packet_out.clone().unwrap();
         let credentials = self.connection.as_ref().unwrap().credentials().clone();
@@ -306,7 +312,7 @@ impl MqttClient {
         };
         Ok(tokio::spawn(async move {
             match session
-                .connect(max_connect_wait, credentials, clean_start)
+                .connect(max_connect_wait, credentials, clean_start, will_message)
                 .await
             {
                 Ok(_) => *connected.write().await = true,

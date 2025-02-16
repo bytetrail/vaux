@@ -191,12 +191,13 @@ impl Subscription {
     }
 
     fn id_from_properties(props: &PropertyBundle) -> Option<u32> {
-        if let Some(sub_id_prop) = props.get_property(PropertyType::SubscriptionIdentifier) {
-            if let Property::SubscriptionIdentifier(id) = sub_id_prop {
-                return Some(*id);
-            }
+        if let Some(Property::SubscriptionIdentifier(id)) =
+            props.get_property(PropertyType::SubscriptionIdentifier)
+        {
+            Some(*id)
+        } else {
+            None
         }
-        None
     }
 }
 

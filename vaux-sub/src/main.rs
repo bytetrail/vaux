@@ -1,11 +1,7 @@
 use clap::Parser;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
-use std::{
-    io::{Read, Write},
-    sync::Arc,
-    time::Duration,
-};
+use std::{io::Read, sync::Arc, time::Duration};
 use tokio::sync::mpsc::{Receiver, Sender};
 use vaux_client::{MqttClient, PacketChannel};
 use vaux_mqtt::{
@@ -83,7 +79,7 @@ async fn main() {
     let mut producer = vaux_client::PacketChannel::new();
     let mut consumer = vaux_client::PacketChannel::new();
 
-    let mut client = vaux_client::ClientBuilder::new(connection)
+    let client = vaux_client::ClientBuilder::new(connection)
         .with_packet_consumer(consumer.sender())
         .with_packet_producer(PacketChannel::new_from_channel(
             producer.sender(),
@@ -133,45 +129,43 @@ async fn subscribe(
             loop {
                 tokio::task::yield_now().await;
                 let iter = packet_receiver.try_recv();
-                if let Ok(packet) = iter {
-                    if let Packet::Publish(mut p) = packet {
-                        if p.properties().has_property(PropertyType::PayloadFormat) {
-                            if let Property::PayloadFormat(indicator) = p
-                                .properties()
-                                .get_property(PropertyType::PayloadFormat)
-                                .unwrap()
-                            {
-                                match indicator {
-                                    PayloadFormat::Utf8 => {
-                                        let message =
-                                            String::from_utf8(p.take_payload().unwrap()).unwrap();
-                                        println!("{}", message);
-                                    }
-                                    PayloadFormat::Bin => {
-                                        println!("received a binary payload");
-                                    }
+                if let Ok(Packet::Publish(mut p)) = iter {
+                    if p.properties().has_property(PropertyType::PayloadFormat) {
+                        if let Property::PayloadFormat(indicator) = p
+                            .properties()
+                            .get_property(PropertyType::PayloadFormat)
+                            .unwrap()
+                        {
+                            match indicator {
+                                PayloadFormat::Utf8 => {
+                                    let message =
+                                        String::from_utf8(p.take_payload().unwrap()).unwrap();
+                                    println!("{}", message);
+                                }
+                                PayloadFormat::Bin => {
+                                    println!("received a binary payload");
                                 }
                             }
                         }
-                        if args.auto_ack {
-                            // check for QOS 1 or 2
-                            match p.qos() {
-                                QoSLevel::AtLeastOnce => {
-                                    let mut ack = PubResp::new_puback();
-                                    ack.packet_id = p.packet_id.unwrap();
-                                    if let Err(e) = packet_sender.send(Packet::PubAck(ack)).await {
-                                        eprintln!("{:?}", e);
-                                    }
+                    }
+                    if args.auto_ack {
+                        // check for QOS 1 or 2
+                        match p.qos() {
+                            QoSLevel::AtLeastOnce => {
+                                let mut ack = PubResp::new_puback();
+                                ack.packet_id = p.packet_id.unwrap();
+                                if let Err(e) = packet_sender.send(Packet::PubAck(ack)).await {
+                                    eprintln!("{:?}", e);
                                 }
-                                QoSLevel::ExactlyOnce => {
-                                    let mut ack = PubResp::new_pubrec();
-                                    ack.packet_id = p.packet_id.unwrap();
-                                    if let Err(e) = packet_sender.send(Packet::PubRec(ack)).await {
-                                        eprintln!("{:?}", e);
-                                    }
-                                }
-                                _ => {}
                             }
+                            QoSLevel::ExactlyOnce => {
+                                let mut ack = PubResp::new_pubrec();
+                                ack.packet_id = p.packet_id.unwrap();
+                                if let Err(e) = packet_sender.send(Packet::PubRec(ack)).await {
+                                    eprintln!("{:?}", e);
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -186,7 +180,7 @@ async fn subscribe(
     }
     if let Ok(handle) = handle {
         println!("waiting for handle");
-        handle.await.unwrap();
+        let _ = handle.await.unwrap();
     }
 }
 

@@ -4,6 +4,7 @@ use bytes::BytesMut;
 use std::{collections::HashMap, sync::Arc, time::Duration, vec};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, RwLock};
+use vaux_mqtt::WillMessage;
 use vaux_mqtt::{
     decode, encode, property::Property, ConnAck, Connect, Packet, PropertyType, PubResp, QoSLevel,
     Reason,
@@ -38,11 +39,12 @@ impl ClientSession {
         *self.connected.read().await
     }
 
-    pub(crate) async fn connect<'a>(
+    pub(crate) async fn connect(
         &mut self,
         max_connect_wait: Duration,
         credentials: Option<(String, String)>,
         clean_start: bool,
+        will: Option<WillMessage>,
     ) -> crate::Result<ConnAck> {
         let mut connect = Connect::default();
         connect.clean_start = clean_start;
@@ -58,6 +60,9 @@ impl ClientSession {
         if let Some((username, password)) = credentials {
             connect.username = Some(username);
             connect.password = Some(password.into_bytes());
+        }
+        if let Some(will) = will {
+            connect.will_message = Some(will);
         }
         let connect_packet = Packet::Connect(Box::new(connect));
         // let mut buffer = [0u8; DEFAULT_CHANNEL_SIZE];
@@ -203,17 +208,15 @@ impl ClientSession {
                     // if we have additional capacity for QOS 1 PUBACK
                     if self.qos_1_remaining > 0 {
                         self.qos_1_remaining -= 1;
+                    } else if self.pending_publish.len() < MAX_QUEUE_LEN {
+                        self.pending_publish.push(Packet::Publish(p));
+                        return Ok(());
                     } else {
-                        if self.pending_publish.len() < MAX_QUEUE_LEN {
-                            self.pending_publish.push(Packet::Publish(p));
-                            return Ok(());
-                        } else {
-                            let err = MqttError::new(
-                                "unable to send packet, queue full",
-                                ErrorKind::Protocol(Reason::ProtocolErr),
-                            );
-                            return Err(err);
-                        }
+                        let err = MqttError::new(
+                            "unable to send packet, queue full",
+                            ErrorKind::Protocol(Reason::ProtocolErr),
+                        );
+                        return Err(err);
                     }
                 }
                 self.send_packet(Packet::Publish(p)).await
@@ -227,7 +230,7 @@ impl ClientSession {
                     .await
                     .append(&mut self.pending_publish);
                 *self.connected.write().await = false;
-                return Ok(());
+                Ok(())
             }
             _ => self.send_packet(packet).await,
         }
@@ -292,9 +295,9 @@ impl ClientSession {
             _ => {}
         }
         if packet_to_consumer {
-            return Ok(Some(packet));
+            Ok(Some(packet))
         } else {
-            return Ok(None);
+            Ok(None)
         }
     }
 
@@ -353,9 +356,7 @@ impl ClientSession {
             self.last_active = std::time::Instant::now();
         } else {
             let ping = Packet::PingRequest(Default::default());
-            if let Err(e) = self.send_packet(ping).await {
-                return Err(e);
-            }
+            self.send_packet(ping).await?;
             // packet sent, update last active time
             self.last_active = std::time::Instant::now();
         }
