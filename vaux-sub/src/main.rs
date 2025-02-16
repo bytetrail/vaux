@@ -1,7 +1,11 @@
 use clap::Parser;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
-use std::{io::Read, sync::Arc, time::Duration};
+use std::{
+    io::{Read, Write},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::mpsc::{Receiver, Sender};
 use vaux_client::MqttClient;
 use vaux_mqtt::{
@@ -86,6 +90,8 @@ async fn main() {
         .with_auto_packet_id(true)
         .with_receive_max(10)
         .with_session_expiry(1000)
+        .with_receive_timeout(Duration::from_millis(25))
+        .with_send_timeout(Duration::from_millis(25))
         .with_keep_alive(Duration::from_secs(30))
         .with_max_connect_wait(Duration::from_secs(5))
         .build()

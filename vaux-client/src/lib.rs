@@ -3,6 +3,7 @@ mod client;
 mod connection;
 #[cfg(feature = "developer")]
 mod developer;
+mod session;
 mod stream;
 
 pub use builder::ClientBuilder;

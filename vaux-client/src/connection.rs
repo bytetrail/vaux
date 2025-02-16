@@ -25,6 +25,7 @@ pub struct MqttConnection {
     trusted_ca: Option<Arc<RootCertStore>>,
     #[cfg(feature = "developer")]
     verifier: developer::Verifier,
+    stream: Option<AsyncMqttStream>,
 }
 
 impl Default for MqttConnection {
@@ -44,6 +45,7 @@ impl MqttConnection {
             trusted_ca: None,
             #[cfg(feature = "developer")]
             verifier: developer::Verifier,
+            stream: None,
         }
     }
 
@@ -85,15 +87,17 @@ impl MqttConnection {
         self
     }
 
-    pub(crate) async fn connect(self) -> crate::Result<AsyncMqttStream> {
-        self.connect_with_timeout(Duration::from_millis(DEFAULT_CONNECTION_TIMEOUT))
-            .await
+    pub fn take_stream(&mut self) -> Option<AsyncMqttStream> {
+        self.stream.take()
     }
 
-    pub(crate) async fn connect_with_timeout(
-        mut self,
-        timeout: Duration,
-    ) -> crate::Result<AsyncMqttStream> {
+    pub(crate) async fn connect(self) -> crate::Result<()> {
+        self.connect_with_timeout(Duration::from_millis(DEFAULT_CONNECTION_TIMEOUT))
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn connect_with_timeout(mut self, timeout: Duration) -> crate::Result<()> {
         // if not set via with_tls or with_port, set the port to the default
         if self.port.is_none() {
             self.port = Some(DEFAULT_PORT);
@@ -117,9 +121,11 @@ impl MqttConnection {
             Ok(result) => match result {
                 Ok(stream) => {
                     if self.tls {
-                        Ok(self.connect_tls(stream).await?)
+                        self.stream = Some(self.connect_tls(stream).await?);
+                        Ok(())
                     } else {
-                        Ok(AsyncMqttStream(MqttStream::TcpStream(stream)))
+                        self.stream = Some(AsyncMqttStream(MqttStream::TcpStream(stream)));
+                        Ok(())
                     }
                 }
                 Err(e) => Err(MqttError::new(

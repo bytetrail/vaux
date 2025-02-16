@@ -80,12 +80,13 @@ async fn main() {
     let mut client = vaux_client::ClientBuilder::new(connection)
         .with_packet_consumer(consumer.sender())
         .with_packet_producer(producer.take_receiver())
+        .with_receive_timeout(Duration::from_millis(100))
+        .with_send_timeout(Duration::from_millis(100))
         .with_auto_ack(true)
         .with_auto_packet_id(true)
         .with_receive_max(10)
         .with_session_expiry(1000)
-        .with_max_packet_size(1000)
-        .with_keep_alive(Duration::from_secs(10))
+        .with_keep_alive(Duration::from_secs(30))
         .with_max_connect_wait(Duration::from_secs(5))
         .build()
         .unwrap();
@@ -161,6 +162,7 @@ async fn publish(
         Err(e) => eprintln!("unable to stop client: {:?}", e),
     }
     if let Some(h) = handle {
+        println!("waiting for client thread to finish");
         match h.await {
             Ok(r) => match r {
                 Ok(_) => (),
