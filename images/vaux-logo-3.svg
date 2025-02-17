@@ -24,13 +24,13 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
-     inkscape:zoom="4.6217452"
-     inkscape:cx="415.42749"
-     inkscape:cy="41.975486"
+     inkscape:zoom="1.6340337"
+     inkscape:cx="241.73308"
+     inkscape:cy="56.302389"
      inkscape:window-width="2649"
      inkscape:window-height="1408"
      inkscape:window-x="702"
-     inkscape:window-y="310"
+     inkscape:window-y="85"
      inkscape:window-maximized="0"
      inkscape:current-layer="layer1" />
   <defs
@@ -56,7 +56,7 @@
        fx="104.19044"
        fy="126.83878"
        r="80.646484"
-       gradientTransform="matrix(0.58893378,2.1883575e-7,-2.7417726e-7,0.16318668,42.605236,38.955971)"
+       gradientTransform="matrix(0.81782053,-3.2308357e-8,-2.6881828e-7,0.16318668,18.757425,38.955997)"
        gradientUnits="userSpaceOnUse" />
   </defs>
   <g
@@ -79,7 +79,7 @@
        id="text2"><tspan
          sodipodi:role="line"
          id="tspan2"
-         style="font-style:normal;font-variant:normal;font-weight:600;font-stretch:normal;font-size:11.2889px;font-family:'Segoe UI';-inkscape-font-specification:'Segoe UI Semi-Bold';fill:#ffffff;fill-opacity:1;stroke-width:1"
+         style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:11.2889px;font-family:Arial;-inkscape-font-specification:Arial;fill:#ffffff;fill-opacity:1;stroke-width:1"
          x="92.15667"
          y="55.480156">vaux</tspan></text>
     <g

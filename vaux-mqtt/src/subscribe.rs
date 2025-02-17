@@ -168,7 +168,11 @@ pub struct Subscription {
 }
 
 impl Subscription {
-    pub fn new(id: u32, filter: Vec<SubscriptionFilter>) -> Result<Self, MqttError> {
+    pub fn new(filter: Vec<SubscriptionFilter>) -> Self {
+        Self { id: None, filter }
+    }
+
+    pub fn new_with_id(id: u32, filter: Vec<SubscriptionFilter>) -> Result<Self, MqttError> {
         let mut s = Self { id: None, filter };
         s.set_id(id)?;
         Ok(s)
