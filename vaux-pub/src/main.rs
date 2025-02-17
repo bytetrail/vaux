@@ -84,8 +84,6 @@ async fn main() {
             producer.sender(),
             producer.take_receiver(),
         ))
-        .with_receive_timeout(Duration::from_millis(100))
-        .with_send_timeout(Duration::from_millis(100))
         .with_auto_ack(true)
         .with_auto_packet_id(true)
         .with_receive_max(10)

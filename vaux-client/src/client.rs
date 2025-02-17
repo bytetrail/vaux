@@ -176,6 +176,30 @@ impl MqttClient {
         self.will_message = will_message;
     }
 
+    /// Helper method to publish a message to the given topic. This helper
+    /// method will publish the message with a QoS level of "At Most Once",
+    /// or 0.
+    pub async fn publish_str(
+        &mut self,
+        topic: &str,
+        payload: &str,
+    ) -> std::result::Result<(), SendError<Packet>> {
+        let mut publish = vaux_mqtt::publish::Publish::default();
+        publish.topic_name = Some(topic.to_string());
+        publish.set_payload(payload.as_bytes().to_vec());
+        publish
+            .properties_mut()
+            .set_property(vaux_mqtt::property::Property::PayloadFormat(
+                vaux_mqtt::property::PayloadFormat::Utf8,
+            ));
+        publish.set_qos(QoSLevel::AtMostOnce);
+        if let Some(packet_out) = self.packet_out.as_ref() {
+            packet_out.send(vaux_mqtt::Packet::Publish(publish)).await
+        } else {
+            Err(SendError(vaux_mqtt::Packet::Publish(publish)))
+        }
+    }
+
     /// Helper method to subscribe to the topics in the topic filter. This helper
     /// subscribes with a QoS level of "At Most Once", or 0. A SUBACK will
     /// typically be returned on the consumer on a successful subscribe.
@@ -217,13 +241,23 @@ impl MqttClient {
     /// use vaux_client::MqttClient;
     /// use vaux_client::MqttConnection;
     /// use std::time::Duration;
-    ///
+    /// use vaux_client::ClientBuilder;
     ///
     /// #[tokio::main]
     /// async fn main() {
     ///     let conn = MqttConnection::new().with_host("localhost").with_port(1883);
-    ///     let mut client = MqttClient::default();
-    ///     client.set_connection(conn);
+    ///     let mut producer = vaux_client::PacketChannel::new();
+    ///     let consumer = vaux_client::PacketChannel::new();
+    ///     let mut client = ClientBuilder::new(conn).
+    ///         with_client_id("test-client")
+    ///        .with_packet_producer(
+    ///           vaux_client::PacketChannel::new_from_channel(
+    ///              producer.sender(),
+    ///             producer.take_receiver(),
+    ///          )
+    ///)
+    ///        .with_packet_consumer(consumer.sender())
+    ///        .build().unwrap();
     ///
     ///     let handle: Option<tokio::task::JoinHandle<_>> =
     ///     match client.try_start(Duration::from_millis(5000), true).await {

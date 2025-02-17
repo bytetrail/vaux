@@ -89,8 +89,6 @@ async fn main() {
         .with_auto_packet_id(true)
         .with_receive_max(10)
         .with_session_expiry(1000)
-        .with_receive_timeout(Duration::from_millis(25))
-        .with_send_timeout(Duration::from_millis(25))
         .with_keep_alive(Duration::from_secs(30))
         .with_max_connect_wait(Duration::from_secs(5))
         .build()

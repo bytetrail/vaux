@@ -10,8 +10,6 @@ const DEFAULT_CLIENT_KEEP_ALIVE: Duration = Duration::from_secs(60);
 const MIN_KEEP_ALIVE: Duration = Duration::from_secs(30);
 const MAX_CONNECT_WAIT: Duration = Duration::from_secs(5);
 const DEFAULT_CLIENT_ID_PREFIX: &str = "vaux-client";
-const DEFAULT_RECEIVE_TIMEOUT: Duration = Duration::from_secs(5);
-const DEFAULT_SEND_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuilderError {
@@ -44,8 +42,6 @@ pub struct ClientBuilder {
     packet_consumer: Option<Sender<vaux_mqtt::Packet>>,
     filtered_consumer: Option<HashMap<PacketType, Sender<vaux_mqtt::Packet>>>,
     error_out: Option<Sender<MqttError>>,
-    send_timeout: Duration,
-    receive_timeout: Duration,
     will_message: Option<WillMessage>,
 }
 
@@ -65,8 +61,6 @@ impl Default for ClientBuilder {
             packet_consumer: None,
             filtered_consumer: None,
             error_out: None,
-            send_timeout: DEFAULT_SEND_TIMEOUT,
-            receive_timeout: DEFAULT_RECEIVE_TIMEOUT,
             will_message: None,
         }
     }
@@ -78,26 +72,6 @@ impl ClientBuilder {
             connection,
             ..Default::default()
         }
-    }
-
-    /// Sets the maximum duration that the MQTT client will wait for a packet send to
-    /// complete. If the send does not complete within this duration, the client will
-    /// return an error. This is useful for preventing the client from blocking
-    /// indefinitely on a send operation.
-    pub fn with_send_timeout(mut self, timeout: Duration) -> Self {
-        self.send_timeout = timeout;
-        self
-    }
-
-    /// Sets the maximum duration that the MQTT client will wait for a packet receive to
-    /// complete. If the receive does not complete within this duration, the client will
-    /// return an error. This is useful for preventing the client from blocking
-    /// indefinitely on a receive operation.
-    ///
-    /// This value must be within the range of 100ms to 10s.
-    pub fn with_receive_timeout(mut self, timeout: Duration) -> Self {
-        self.receive_timeout = timeout;
-        self
     }
 
     /// Enables or disables automatic acknowledgement of packets. If enabled, the client
