@@ -9,8 +9,17 @@ use vaux_mqtt::{
     decode, encode, property::Property, ConnAck, Connect, Packet, PropertyType, PubResp, QoSLevel,
     Reason,
 };
-
 const MAX_QUEUE_LEN: usize = 100;
+
+#[allow(dead_code)]
+pub struct SessionState {
+    client_id: Arc<Mutex<Option<String>>>,
+    pending_publish: Vec<Packet>,
+    pending_recv_ack: HashMap<u16, Packet>,
+
+    qos_1_remaining: usize,
+    pending_qos1: Arc<Mutex<Vec<Packet>>>,
+}
 
 pub(crate) struct ClientSession {
     client_id: Arc<Mutex<Option<String>>>,
@@ -410,7 +419,7 @@ impl TryFrom<&mut MqttClient> for ClientSession {
             connected: Arc::new(RwLock::new(false)),
             stream: client.connection.take().unwrap().take_stream().unwrap(),
             last_active: std::time::Instant::now(),
-            session_expiry: client.session_expiry(),
+            session_expiry: client.session_expiry,
             pending_publish: vec![],
             pending_recv_ack: HashMap::new(),
             receive_max: client.receive_max as usize,

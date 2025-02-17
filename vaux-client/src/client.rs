@@ -64,7 +64,7 @@ pub struct MqttClient {
     pub(crate) auto_packet_id: bool,
     filter_channel: FilteredChannel,
     connected: Arc<RwLock<bool>>,
-    session_expiry: u32,
+    pub(crate) session_expiry: u32,
     pub(crate) client_id: Arc<Mutex<Option<String>>>,
     pub(crate) packet_in: Option<PacketChannel>,
     pub(crate) packet_out: Option<Sender<vaux_mqtt::Packet>>,
