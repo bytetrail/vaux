@@ -401,7 +401,9 @@ impl MqttClient {
                                 }
                             }
                             Ok(None) => {
-                                // do nothing
+                                // socket closed
+                                *connected.write().await = false;
+                                return Err(MqttError::new("socket closed", ErrorKind::Transport));
                             }
                             Err(e) => {
                                 *connected.write().await = false;
