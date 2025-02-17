@@ -2,6 +2,7 @@ pub(crate) mod codec;
 pub(crate) mod config;
 pub(crate) mod session;
 
+use self::codec::MqttCodec;
 use crate::broker::session::Session;
 use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
@@ -20,11 +21,9 @@ use vaux_mqtt::{
     ConnAck, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, PropertyType, Reason,
 };
 
-use self::codec::MqttCodec;
-
 pub const DEFAULT_PORT: u16 = 1883;
 pub const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
-const DEFAULT_KEEP_ALIVE: u64 = 30; // 60 seconds
+const DEFAULT_KEEP_ALIVE: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct Broker {
@@ -111,8 +110,7 @@ impl Broker {
                     }
                 }
                 if packet.clean_start || active_session.is_none() {
-                    let session =
-                        Session::new(session_id.clone(), Duration::from_secs(DEFAULT_KEEP_ALIVE));
+                    let session = Session::new(session_id.clone(), DEFAULT_KEEP_ALIVE);
                     let session = Arc::new(RwLock::new(session));
                     session_pool
                         .write()
@@ -120,10 +118,10 @@ impl Broker {
                         .insert(session_id.clone(), session.clone());
                     active_session = Some(session);
                 }
-                if packet.keep_alive > DEFAULT_KEEP_ALIVE as u16 {
+                if packet.keep_alive > DEFAULT_KEEP_ALIVE.as_secs() as u16 {
                     ack.properties_mut()
                         .set_property(vaux_mqtt::property::Property::KeepAlive(
-                            DEFAULT_KEEP_ALIVE as u16,
+                            DEFAULT_KEEP_ALIVE.as_secs() as u16,
                         ));
                 } else {
                     let mut session = active_session.as_ref().unwrap().write().await;
