@@ -30,6 +30,8 @@ pub struct Args {
     message_file: Option<String>,
     #[arg(short = 'm', long, group = "payload")]
     message: Option<String>,
+    #[arg(short = 'i', long)]
+    iterations: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -112,6 +114,7 @@ async fn publish(
                 return;
             }
         };
+    let iterations = args.iterations.unwrap_or(1);
     let topic = args.topic.clone();
     let arg_message = if let Some(m) = args.message {
         m
@@ -123,47 +126,44 @@ async fn publish(
     } else {
         "hello world".to_string()
     };
+    let start = std::time::Instant::now();
+    for i in 0..iterations {
+        let mut publish = Publish::default();
+        publish
+            .properties_mut()
+            .set_property(Property::PayloadFormat(
+                vaux_mqtt::property::PayloadFormat::Utf8,
+            ));
+        publish
+            .properties_mut()
+            .set_property(Property::MessageExpiry(1000));
 
-    let mut publish = Publish::default();
-    publish
-        .properties_mut()
-        .set_property(Property::PayloadFormat(
-            vaux_mqtt::property::PayloadFormat::Utf8,
-        ));
-    publish
-        .properties_mut()
-        .set_property(Property::MessageExpiry(1000));
-
-    let message = arg_message.clone();
-    publish.topic_name = Some(topic.clone());
-    publish.set_payload(Vec::from(message.as_bytes()));
-    publish.set_qos(args.qos);
-    publish.packet_id = Some(1);
-    println!("sending message");
-    if packet_out
-        .send(vaux_mqtt::Packet::Publish(publish.clone()))
-        .await
-        .is_err()
-    {
-        eprintln!("unable to send packet to broker");
-    }
-    println!("sent message");
-    if args.qos == QoSLevel::AtMostOnce {
-        return;
-    } else {
-        println!("waiting for PUBACK");
-    }
-    let mut packet = packet_in.try_recv();
-    let mut ack_recv = false;
-    while !ack_recv {
-        if packet.is_err() {
-        } else if let Ok(Packet::PubAck(ack)) = packet {
-            println!("ACK {}", ack.packet_id);
-            ack_recv = true;
+        let message = arg_message.clone();
+        publish.topic_name = Some(topic.clone());
+        publish.set_payload(Vec::from(message.as_bytes()));
+        publish.set_qos(args.qos);
+        publish.packet_id = Some((i + 1) as u16);
+        if packet_out
+            .send(vaux_mqtt::Packet::Publish(publish.clone()))
+            .await
+            .is_err()
+        {
+            eprintln!("unable to send packet to broker");
         }
-        packet = packet_in.try_recv();
+        if args.qos == QoSLevel::AtMostOnce {
+            return;
+        }
+        let mut packet = packet_in.try_recv();
+        let mut ack_recv = false;
+        while !ack_recv {
+            if packet.is_err() {
+            } else if let Ok(Packet::PubAck(_)) = packet {
+                ack_recv = true;
+            }
+            packet = packet_in.try_recv();
+        }
     }
-
+    println!("elapsed time: {:?}", start.elapsed());
     match client.stop().await {
         Ok(_) => (),
         Err(e) => eprintln!("unable to stop client: {:?}", e),

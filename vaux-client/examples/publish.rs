@@ -13,7 +13,7 @@ async fn main() {
     let connection = connection.with_host(HOST).with_port(PORT);
 
     let mut producer = PacketChannel::new();
-    let mut consumer = PacketChannel::new();
+    let consumer = PacketChannel::new();
 
     let mut client = vaux_client::ClientBuilder::new(connection)
         .with_packet_consumer(consumer.sender())
