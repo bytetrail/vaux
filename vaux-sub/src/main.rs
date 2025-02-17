@@ -83,7 +83,7 @@ async fn main() {
         .with_packet_consumer(consumer.sender())
         .with_packet_producer(PacketChannel::new_from_channel(
             producer.sender(),
-            producer.take_receiver(),
+            producer.take_receiver().unwrap(),
         ))
         .with_auto_ack(true)
         .with_auto_packet_id(true)
@@ -94,7 +94,7 @@ async fn main() {
         .build()
         .unwrap();
 
-    let mut packet_in = consumer.take_receiver();
+    let mut packet_in = consumer.take_receiver().unwrap();
 
     subscribe(client, producer.sender(), &mut packet_in, args).await;
 }

@@ -52,8 +52,8 @@ impl PacketChannel {
         self.0.clone()
     }
 
-    pub fn take_receiver(&mut self) -> Receiver<vaux_mqtt::Packet> {
-        self.1.take().unwrap()
+    pub fn take_receiver(&mut self) -> Option<Receiver<vaux_mqtt::Packet>> {
+        self.1.take()
     }
 }
 
@@ -253,7 +253,7 @@ impl MqttClient {
     ///        .with_packet_producer(
     ///           vaux_client::PacketChannel::new_from_channel(
     ///              producer.sender(),
-    ///             producer.take_receiver(),
+    ///             producer.take_receiver().unwrap(),
     ///          )
     ///)
     ///        .with_packet_consumer(consumer.sender())
