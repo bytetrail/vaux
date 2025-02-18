@@ -1,11 +1,7 @@
 use clap::Parser;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
-use std::{
-    io::{Read, Write},
-    sync::Arc,
-    time::Duration,
-};
+use std::{io::Read, sync::Arc, time::Duration};
 use tokio::sync::mpsc::{Receiver, Sender};
 use vaux_client::MqttClient;
 use vaux_mqtt::{

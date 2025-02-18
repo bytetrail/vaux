@@ -4,7 +4,6 @@ use clap::{error::ErrorKind, Parser};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
 use tokio::task::JoinHandle;
-use vaux_client::PacketChannel;
 use vaux_mqtt::{property::Property, publish::Publish, Packet, QoSLevel};
 
 #[derive(Parser, Clone, Debug)]

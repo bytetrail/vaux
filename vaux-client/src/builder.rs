@@ -1,4 +1,4 @@
-use crate::{MqttConnection, MqttError, PacketChannel};
+use crate::{MqttConnection, MqttError};
 use std::{collections::HashMap, fmt::Display, time::Duration};
 use tokio::sync::mpsc::Sender;
 use vaux_mqtt::{Packet, PacketType, WillMessage};
