@@ -1,9 +1,13 @@
 use clap::Parser;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
-use std::{io::Read, sync::Arc, time::Duration};
+use std::{
+    io::{Read, Write},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::mpsc::{Receiver, Sender};
-use vaux_client::{MqttClient, PacketChannel};
+use vaux_client::MqttClient;
 use vaux_mqtt::{
     property::{PayloadFormat, Property},
     Packet, PropertyType, PubResp, QoSLevel, Subscribe, SubscriptionFilter,
@@ -76,15 +80,7 @@ async fn main() {
     }
     connection = connection.with_host(&args.addr).with_port(args.port);
 
-    let mut producer = vaux_client::PacketChannel::new();
-    let mut consumer = vaux_client::PacketChannel::new();
-
-    let client = vaux_client::ClientBuilder::new(connection)
-        .with_packet_consumer(consumer.sender())
-        .with_packet_producer(PacketChannel::new_from_channel(
-            producer.sender(),
-            producer.take_receiver().unwrap(),
-        ))
+    let mut client = vaux_client::ClientBuilder::new(connection)
         .with_auto_ack(true)
         .with_auto_packet_id(true)
         .with_receive_max(10)
@@ -94,9 +90,10 @@ async fn main() {
         .build()
         .unwrap();
 
-    let mut packet_in = consumer.take_receiver().unwrap();
+    let mut packet_in = client.take_packet_consumer().unwrap();
+    let producer = client.packet_producer();
 
-    subscribe(client, producer.sender(), &mut packet_in, args).await;
+    subscribe(client, producer, &mut packet_in, args).await;
 }
 
 async fn subscribe(

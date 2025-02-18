@@ -35,17 +35,17 @@ impl PacketChannel {
         Self(sender, Some(receiver))
     }
 
+    pub fn new_with_size(size: usize) -> Self {
+        let (sender, receiver): (Sender<vaux_mqtt::Packet>, Receiver<vaux_mqtt::Packet>) =
+            mpsc::channel(size);
+        Self(sender, Some(receiver))
+    }
+
     pub fn new_from_channel(
         sender: Sender<vaux_mqtt::Packet>,
         receiver: Receiver<vaux_mqtt::Packet>,
     ) -> Self {
         Self(sender.clone(), Some(receiver))
-    }
-
-    pub fn new_with_size(size: usize) -> Self {
-        let (sender, receiver): (Sender<vaux_mqtt::Packet>, Receiver<vaux_mqtt::Packet>) =
-            mpsc::channel(size);
-        Self(sender, Some(receiver))
     }
 
     pub fn sender(&self) -> Sender<vaux_mqtt::Packet> {
@@ -66,8 +66,8 @@ pub struct MqttClient {
     connected: Arc<RwLock<bool>>,
     pub(crate) session_expiry: u32,
     pub(crate) client_id: Arc<Mutex<Option<String>>>,
-    pub(crate) packet_in: Option<PacketChannel>,
-    pub(crate) packet_out: Option<Sender<vaux_mqtt::Packet>>,
+    pub(crate) packet_in: PacketChannel,
+    pub(crate) packet_out: PacketChannel,
     pub(crate) err_chan: Option<Sender<MqttError>>,
     pub(crate) max_packet_size: usize,
     pub(crate) keep_alive: Duration,
@@ -114,8 +114,8 @@ impl MqttClient {
             session_expiry: DEFAULT_SESSION_EXPIRY,
             client_id: Arc::new(Mutex::new(Some(client_id.to_string()))),
             filter_channel: HashMap::new(),
-            packet_in: None,
-            packet_out: None,
+            packet_in: PacketChannel::new(),
+            packet_out: PacketChannel::new(),
             err_chan: None,
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
@@ -124,12 +124,12 @@ impl MqttClient {
         }
     }
 
-    pub(crate) fn set_packet_in(&mut self, packet_in: PacketChannel) {
-        self.packet_in = Some(packet_in);
+    pub fn packet_producer(&mut self) -> Sender<Packet> {
+        self.packet_in.sender()
     }
 
-    pub(crate) fn set_packet_out(&mut self, packet_out: Sender<vaux_mqtt::Packet>) {
-        self.packet_out = Some(packet_out);
+    pub fn take_packet_consumer(&mut self) -> Option<Receiver<Packet>> {
+        self.packet_out.1.take()
     }
 
     pub(crate) fn set_max_packet_size(&mut self, max_packet_size: usize) {
@@ -193,11 +193,10 @@ impl MqttClient {
                 vaux_mqtt::property::PayloadFormat::Utf8,
             ));
         publish.set_qos(QoSLevel::AtMostOnce);
-        if let Some(packet_out) = self.packet_out.as_ref() {
-            packet_out.send(vaux_mqtt::Packet::Publish(publish)).await
-        } else {
-            Err(SendError(vaux_mqtt::Packet::Publish(publish)))
-        }
+        self.packet_out
+            .0
+            .send(vaux_mqtt::Packet::Publish(publish))
+            .await
     }
 
     /// Helper method to subscribe to the topics in the topic filter. This helper
@@ -220,14 +219,10 @@ impl MqttClient {
             // self.subscriptions.push(subscription.clone());
             subscribe.add_subscription(subscription);
         }
-        if let Some(packet_in_sender) = self.packet_in.as_ref() {
-            packet_in_sender
-                .0
-                .send(vaux_mqtt::Packet::Subscribe(subscribe))
-                .await
-        } else {
-            Err(SendError(vaux_mqtt::Packet::Subscribe(subscribe)))
-        }
+        self.packet_in
+            .0
+            .send(vaux_mqtt::Packet::Subscribe(subscribe))
+            .await
     }
 
     /// Attempts to start an MQTT session with the remote broker. The client will
@@ -250,13 +245,6 @@ impl MqttClient {
     ///     let consumer = vaux_client::PacketChannel::new();
     ///     let mut client = ClientBuilder::new(conn).
     ///         with_client_id("test-client")
-    ///        .with_packet_producer(
-    ///           vaux_client::PacketChannel::new_from_channel(
-    ///              producer.sender(),
-    ///             producer.take_receiver().unwrap(),
-    ///          )
-    ///)
-    ///        .with_packet_consumer(consumer.sender())
     ///        .build().unwrap();
     ///
     ///     let handle: Option<tokio::task::JoinHandle<_>> =
@@ -319,8 +307,12 @@ impl MqttClient {
         let max_connect_wait = self.max_connect_wait;
         let keep_alive = self.keep_alive;
         let will_message = self.will_message.clone();
-        let mut packet_in_receiver = self.packet_in.as_mut().unwrap().1.take().unwrap();
-        let packet_out = self.packet_out.clone().unwrap();
+        let mut packet_in_receiver = self.packet_in.1.take().ok_or(MqttError::new(
+            "packet_in channel closed",
+            ErrorKind::Transport,
+        ))?;
+
+        let packet_out = self.packet_out.0.clone();
         let credentials = self.connection.as_ref().unwrap().credentials().clone();
         let connected = self.connected.clone();
         let filter_channel = self.filter_channel.clone();
@@ -440,16 +432,9 @@ impl MqttClient {
 
     pub async fn stop(&mut self) -> Result<(), MqttError> {
         let disconnect = Packet::Disconnect(Default::default());
-        if let Some(packet_in) = self.packet_in.as_ref() {
-            if let Err(e) = packet_in.0.send(disconnect).await {
-                return Err(MqttError::new(
-                    &format!("unable to send disconnect: {}", e),
-                    ErrorKind::Transport,
-                ));
-            }
-        } else {
+        if let Err(e) = self.packet_in.0.send(disconnect).await {
             return Err(MqttError::new(
-                "unable to send disconnect, no packet out channel",
+                &format!("unable to send disconnect: {}", e),
                 ErrorKind::Transport,
             ));
         }

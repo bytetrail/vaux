@@ -395,18 +395,6 @@ impl TryFrom<&mut MqttClient> for ClientSession {
     type Error = MqttError;
 
     fn try_from(client: &mut MqttClient) -> Result<Self, Self::Error> {
-        if client.packet_in.is_none() {
-            MqttError::new(
-                "packet_in channel is required",
-                ErrorKind::Protocol(Reason::ProtocolErr),
-            );
-        }
-        if client.packet_out.is_none() {
-            MqttError::new(
-                "packet_out channel is required",
-                ErrorKind::Protocol(Reason::ProtocolErr),
-            );
-        }
         if client.connection.is_none() {
             MqttError::new(
                 "connection is required",

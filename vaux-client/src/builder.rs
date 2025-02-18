@@ -38,8 +38,6 @@ pub struct ClientBuilder {
     max_packet_size: usize,
     keep_alive: Duration,
     max_connect_wait: Duration,
-    packet_producer: Option<PacketChannel>,
-    packet_consumer: Option<Sender<vaux_mqtt::Packet>>,
     filtered_consumer: Option<HashMap<PacketType, Sender<vaux_mqtt::Packet>>>,
     error_out: Option<Sender<MqttError>>,
     will_message: Option<WillMessage>,
@@ -57,8 +55,6 @@ impl Default for ClientBuilder {
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
             max_connect_wait: MAX_CONNECT_WAIT,
-            packet_producer: None,
-            packet_consumer: None,
             filtered_consumer: None,
             error_out: None,
             will_message: None,
@@ -138,28 +134,6 @@ impl ClientBuilder {
         self
     }
 
-    /// Sets the packet producer and consumer channels for the client. The packet
-    /// producer channel is used to send packets to the remote broker from a client
-    /// of the MqttClient instance.
-    ///
-    /// It is an error to attempt to create an MQTT client without setting the packet
-    /// producer and consumer channels.
-    pub fn with_packet_producer(mut self, packet_producer: PacketChannel) -> Self {
-        self.packet_producer = Some(packet_producer);
-        self
-    }
-
-    /// Sets the packet consumer sender channel for the client. The packet consumer
-    /// channel is used to receive packets from the remote broker to the client of
-    /// the MqttClient instance.
-    ///
-    /// It is an error to attempt to create an MQTT client without setting the packet
-    /// producer and consumer channels.
-    pub fn with_packet_consumer(mut self, packet_consumer: Sender<Packet>) -> Self {
-        self.packet_consumer = Some(packet_consumer);
-        self
-    }
-
     /// Adds a filtered consumer to the client. The filtered consumer is used to
     /// receive packets of a specific type from the remote broker to the client of
     /// the MqttClient instance. The MQTT client will filter packets of the specified
@@ -199,12 +173,6 @@ impl ClientBuilder {
     }
 
     pub fn build(self) -> Result<crate::MqttClient, BuilderError> {
-        if self.packet_producer.is_none() {
-            return Err(BuilderError::ProducerRequired);
-        }
-        if self.packet_consumer.is_none() {
-            return Err(BuilderError::ConsumerRequired);
-        }
         if self.keep_alive < MIN_KEEP_ALIVE {
             return Err(BuilderError::MinKeepAlive);
         }
@@ -220,8 +188,6 @@ impl ClientBuilder {
         client.set_max_packet_size(self.max_packet_size);
         client.set_keep_alive(self.keep_alive);
         client.set_max_connect_wait(self.max_connect_wait);
-        client.set_packet_in(self.packet_producer.unwrap());
-        client.set_packet_out(self.packet_consumer.unwrap());
         if let Some(error_out) = self.error_out {
             client.set_error_out(error_out);
         }

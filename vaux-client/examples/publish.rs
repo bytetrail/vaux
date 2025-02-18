@@ -12,15 +12,7 @@ async fn main() {
     let connection = vaux_client::MqttConnection::new();
     let connection = connection.with_host(HOST).with_port(PORT);
 
-    let mut producer = PacketChannel::new();
-    let consumer = PacketChannel::new();
-
     let mut client = vaux_client::ClientBuilder::new(connection)
-        .with_packet_consumer(consumer.sender())
-        .with_packet_producer(PacketChannel::new_from_channel(
-            producer.sender(),
-            producer.take_receiver().unwrap(),
-        ))
         .with_auto_ack(true)
         .with_auto_packet_id(true)
         .with_receive_max(10)

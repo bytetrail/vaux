@@ -77,15 +77,8 @@ async fn main() {
         connection = connection.with_tls().with_trust_store(Arc::new(root_store))
     }
     let connection = connection.with_host(&args.addr).with_port(args.port);
-    let mut producer = vaux_client::PacketChannel::new();
-    let mut consumer = vaux_client::PacketChannel::new();
 
     let mut client = vaux_client::ClientBuilder::new(connection)
-        .with_packet_consumer(consumer.sender())
-        .with_packet_producer(PacketChannel::new_from_channel(
-            producer.sender(),
-            producer.take_receiver().unwrap(),
-        ))
         .with_auto_ack(true)
         .with_auto_packet_id(true)
         .with_receive_max(10)
@@ -95,9 +88,10 @@ async fn main() {
         .build()
         .unwrap();
 
-    let mut packet_in = consumer.take_receiver().unwrap();
+    let mut packet_in = client.take_packet_consumer().unwrap();
+    let producer = client.packet_producer();
 
-    publish(&mut client, producer.sender(), &mut packet_in, args.clone()).await;
+    publish(&mut client, producer, &mut packet_in, args.clone()).await;
 }
 
 async fn publish(
@@ -150,17 +144,16 @@ async fn publish(
         {
             eprintln!("unable to send packet to broker");
         }
-        if args.qos == QoSLevel::AtMostOnce {
-            return;
-        }
-        let mut packet = packet_in.try_recv();
-        let mut ack_recv = false;
-        while !ack_recv {
-            if packet.is_err() {
-            } else if let Ok(Packet::PubAck(_)) = packet {
-                ack_recv = true;
+        if args.qos != QoSLevel::AtMostOnce {
+            let mut packet = packet_in.try_recv();
+            let mut ack_recv = false;
+            while !ack_recv {
+                if packet.is_err() {
+                } else if let Ok(Packet::PubAck(_)) = packet {
+                    ack_recv = true;
+                }
+                packet = packet_in.try_recv();
             }
-            packet = packet_in.try_recv();
         }
     }
     println!("elapsed time: {:?}", start.elapsed());
