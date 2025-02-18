@@ -26,6 +26,7 @@ lazy_static! {
 /// * Client loses contact during defined timeout
 /// * Client loses connectivity to the server prior to disconnect
 /// * Server closes connection prior to disconnect
+///
 /// For more information please see
 /// <https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc479576982>
 pub struct WillMessage {

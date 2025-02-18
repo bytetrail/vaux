@@ -50,7 +50,7 @@ fn test_broker_assigned_id() {
     if let Some(Packet::ConnAck(ack)) = result {
         assert!(ack
             .properties()
-            .has_property(&vaux_mqtt::PropertyType::AssignedClientId));
+            .has_property(vaux_mqtt::PropertyType::AssignedClientId));
     }
 }
 
@@ -63,7 +63,7 @@ fn test_existing_session() {
     let ack = result.unwrap();
     assert!(!ack
         .properties()
-        .has_property(&vaux_mqtt::PropertyType::AssignedClientId));
+        .has_property(vaux_mqtt::PropertyType::AssignedClientId));
     assert_eq!(false, ack.session_present, "expected no existing session");
     client.disconnect();
     let ack = client.connect(Some(&client_id)).unwrap();

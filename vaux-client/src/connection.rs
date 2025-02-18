@@ -1,30 +1,31 @@
-use std::{
-    net::{TcpStream, ToSocketAddrs},
-    sync::Arc,
-    time::Duration,
-};
+use async_std::net::ToSocketAddrs;
+use rustls::pki_types::ServerName;
+use std::{sync::Arc, time::Duration};
+use tokio::net::TcpStream;
+use tokio_rustls::{rustls::RootCertStore, TlsConnector};
 
 #[cfg(feature = "developer")]
 use crate::developer;
-use crate::{ErrorKind, MqttError};
+use crate::{
+    stream::{AsyncMqttStream, MqttStream},
+    ErrorKind, MqttError,
+};
 
 const DEFAULT_HOST: &str = "localhost";
 pub const DEFAULT_PORT: u16 = 1883;
 pub const DEFAULT_SECURE_PORT: u16 = 8883;
 const DEFAULT_CONNECTION_TIMEOUT: u64 = 30_000;
 
-#[derive(Debug)]
 pub struct MqttConnection {
     host: String,
     port: Option<u16>,
     username: Option<String>,
     password: Option<String>,
     pub(crate) tls: bool,
-    pub(crate) tcp_socket: Option<TcpStream>,
-    trusted_ca: Option<Arc<rustls::RootCertStore>>,
-    pub(crate) tls_conn: Option<rustls::ClientConnection>,
+    trusted_ca: Option<Arc<RootCertStore>>,
     #[cfg(feature = "developer")]
     verifier: developer::Verifier,
+    stream: Option<AsyncMqttStream>,
 }
 
 impl Default for MqttConnection {
@@ -41,11 +42,10 @@ impl MqttConnection {
             host: DEFAULT_HOST.to_string(),
             port: None,
             tls: false,
-            tcp_socket: None,
             trusted_ca: None,
-            tls_conn: None,
             #[cfg(feature = "developer")]
             verifier: developer::Verifier,
+            stream: None,
         }
     }
 
@@ -87,17 +87,28 @@ impl MqttConnection {
         self
     }
 
-    pub fn connect(self) -> crate::Result<Self> {
-        self.connect_with_timeout(Duration::from_millis(DEFAULT_CONNECTION_TIMEOUT))
+    pub fn take_stream(&mut self) -> Option<AsyncMqttStream> {
+        self.stream.take()
     }
 
-    pub fn connect_with_timeout(mut self, timeout: Duration) -> crate::Result<Self> {
+    pub(crate) async fn connect(&mut self) -> crate::Result<()> {
+        self.connect_with_timeout(Duration::from_millis(DEFAULT_CONNECTION_TIMEOUT))
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn connect_with_timeout(&mut self, timeout: Duration) -> crate::Result<()> {
         // if not set via with_tls or with_port, set the port to the default
         if self.port.is_none() {
             self.port = Some(DEFAULT_PORT);
         }
         let addr = self.host.clone() + ":" + &self.port.unwrap().to_string();
-        let socket_addr = addr.to_socket_addrs();
+        let socket_addr = addr.to_socket_addrs().await.map_err(|e| {
+            MqttError::new(
+                &format!("unable to resolve host: {}", e),
+                ErrorKind::Connection,
+            )
+        });
         if let Err(e) = socket_addr {
             return Err(MqttError::new(
                 &format!("unable to resolve host: {}", e),
@@ -106,58 +117,61 @@ impl MqttConnection {
         }
         let socket_addr = socket_addr.unwrap().next().unwrap();
 
-        if self.tls {
-            if let Some(ca) = self.trusted_ca.clone() {
-                let mut config = rustls::ClientConfig::builder()
-                    .with_safe_defaults()
-                    .with_root_certificates(ca)
-                    .with_no_client_auth();
-                config.key_log = Arc::new(rustls::KeyLogFile::new());
-                #[cfg(feature = "developer")]
-                {
-                    self.verifier = developer::Verifier;
-                    config
-                        .dangerous()
-                        .set_certificate_verifier(Arc::new(self.verifier.clone()));
-                }
-                if let Ok(server_name) = self.host.as_str().try_into() {
-                    if let Ok(c) = rustls::ClientConnection::new(Arc::new(config), server_name) {
-                        self.tls_conn = Some(c);
+        match tokio::time::timeout(timeout, TcpStream::connect(&socket_addr)).await {
+            Ok(result) => match result {
+                Ok(stream) => {
+                    if self.tls {
+                        self.stream = Some(self.connect_tls(stream).await?);
+                        Ok(())
                     } else {
-                        return Err(MqttError::new(
-                            "unable to create TLS connection",
-                            ErrorKind::Connection,
-                        ));
+                        self.stream = Some(AsyncMqttStream(MqttStream::TcpStream(stream)));
+                        Ok(())
                     }
-                } else {
-                    return Err(MqttError::new(
-                        "unable to convert host to server name",
-                        ErrorKind::Connection,
-                    ));
                 }
-            } else {
-                return Err(MqttError::new(
-                    "no trusted CA(s) provided for TLS connection",
-                    ErrorKind::Connection,
-                ));
-            }
-        }
-
-        match TcpStream::connect_timeout(&socket_addr, timeout) {
-            Ok(stream) => {
-                self.tcp_socket = Some(stream);
-                Ok(self)
-            }
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::TimedOut => Err(MqttError {
-                    message: "timeout".to_string(),
-                    kind: ErrorKind::Timeout,
-                }),
-                _ => Err(MqttError::new(
+                Err(e) => Err(MqttError::new(
                     &format!("unable to connect: {}", e),
                     ErrorKind::Connection,
                 )),
             },
+            Err(_e) => Err(MqttError {
+                message: "timeout".to_string(),
+                kind: ErrorKind::Timeout,
+            }),
+        }
+    }
+
+    async fn connect_tls(&mut self, stream: TcpStream) -> crate::Result<AsyncMqttStream> {
+        let server_name = ServerName::try_from(self.host.clone()).map_err(|e| {
+            MqttError::new(
+                &format!("unable to convert host to server name: {}", e),
+                ErrorKind::Connection,
+            )
+        })?;
+        if let Some(ca) = self.trusted_ca.clone() {
+            let mut config = rustls::ClientConfig::builder()
+                .with_root_certificates(ca)
+                .with_no_client_auth();
+            config.key_log = Arc::new(rustls::KeyLogFile::new());
+            #[cfg(feature = "developer")]
+            {
+                self.verifier = developer::Verifier;
+                config
+                    .dangerous()
+                    .set_certificate_verifier(Arc::new(self.verifier.clone()));
+            }
+            let connector = TlsConnector::from(Arc::new(config));
+            let stream = connector.connect(server_name, stream).await.map_err(|e| {
+                MqttError::new(
+                    &format!("unable to establish TLS connection: {}", e),
+                    ErrorKind::Connection,
+                )
+            })?;
+            Ok(AsyncMqttStream(MqttStream::TlsStream(stream)))
+        } else {
+            Err(MqttError::new(
+                "no trusted CA(s) provided for TLS connection",
+                ErrorKind::Connection,
+            ))
         }
     }
 }

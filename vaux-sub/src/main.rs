@@ -1,10 +1,12 @@
-use std::{io::Read, sync::Arc};
-
 use clap::Parser;
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::CertificateDer;
+use std::{io::Read, sync::Arc, time::Duration};
+use tokio::sync::mpsc::{Receiver, Sender};
 use vaux_client::MqttClient;
 use vaux_mqtt::{
     property::{PayloadFormat, Property},
-    Packet, PropertyType, PubResp, QoSLevel, Subscribe, Subscription,
+    Packet, PropertyType, PubResp, QoSLevel, Subscribe, SubscriptionFilter,
 };
 
 #[derive(Parser, Debug)]
@@ -51,7 +53,8 @@ impl clap::builder::TypedValueParser for QoSLevelParser {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
     let mut root_store = rustls::RootCertStore::empty();
     if args.tls {
@@ -61,7 +64,7 @@ fn main() {
                 return;
             }
             let cert = load_cert(ca).unwrap();
-            root_store.add(&cert).unwrap();
+            root_store.add(cert).unwrap();
         } else {
             eprintln!("trusted CA file required for TLS");
             return;
@@ -71,23 +74,38 @@ fn main() {
     if args.tls {
         connection = connection.with_tls().with_trust_store(Arc::new(root_store))
     }
-    connection = connection
-        .with_host(&args.addr)
-        .with_port(args.port)
-        .connect()
+    connection = connection.with_host(&args.addr).with_port(args.port);
+
+    let mut client = vaux_client::ClientBuilder::new(connection)
+        .with_auto_ack(true)
+        .with_auto_packet_id(true)
+        .with_receive_max(10)
+        .with_session_expiry(1000)
+        .with_keep_alive(Duration::from_secs(30))
+        .with_max_connect_wait(Duration::from_secs(5))
+        .build()
         .unwrap();
-    let client = vaux_client::MqttClient::new("vaux-subscriber-001", false, 10, false);
-    subscribe(connection, client, args);
+
+    let mut packet_in = client.take_packet_consumer().unwrap();
+    let producer = client.packet_producer();
+
+    subscribe(client, producer, &mut packet_in, args).await;
 }
 
-fn subscribe(connection: vaux_client::MqttConnection, mut client: MqttClient, args: Args) {
-    client.set_keep_alive(10);
-    let handle = client.start(connection, args.clean_start);
-    let consumer = client.consumer();
-    let producer = client.producer();
+async fn subscribe(
+    mut client: MqttClient,
+    packet_sender: Sender<Packet>,
+    packet_receiver: &mut Receiver<Packet>,
+    args: Args,
+) {
+    println!("starting");
+    let handle = client
+        .try_start(Duration::from_secs(10), args.clean_start)
+        .await;
+    println!("started");
     let filter = vec![
         // inbound device ops messages for this shadow on this site
-        Subscription {
+        SubscriptionFilter {
             filter: "hello-vaux".to_string(),
             qos: args.qos,
             no_local: false,
@@ -96,48 +114,54 @@ fn subscribe(connection: vaux_client::MqttConnection, mut client: MqttClient, ar
         },
     ];
     let subscribe = Subscribe::new(1, filter);
-    match producer.send(Packet::Subscribe(subscribe)) {
+    match packet_sender.send(Packet::Subscribe(subscribe)).await {
         Ok(_) => {
+            println!("subscribed");
             loop {
-                let iter = consumer.try_iter();
-                for packet in iter {
-                    if let Packet::Publish(mut p) = packet {
-                        if p.properties().has_property(&PropertyType::PayloadFormat) {
-                            if let Property::PayloadFormat(indicator) = p
-                                .properties()
-                                .get_property(&PropertyType::PayloadFormat)
-                                .unwrap()
-                            {
-                                if *indicator == PayloadFormat::Utf8 {
-                                    print!("Payload: ");
-                                    println!(
-                                        "{}",
-                                        String::from_utf8(p.take_payload().unwrap()).unwrap()
-                                    );
+                tokio::task::yield_now().await;
+                let iter = packet_receiver.try_recv();
+                if let Ok(Packet::Publish(mut p)) = iter {
+                    if p.properties().has_property(PropertyType::PayloadFormat) {
+                        if let Property::PayloadFormat(indicator) = p
+                            .properties()
+                            .get_property(PropertyType::PayloadFormat)
+                            .unwrap()
+                        {
+                            match indicator {
+                                PayloadFormat::Utf8 => {
+                                    let message =
+                                        String::from_utf8(p.take_payload().unwrap()).unwrap();
+                                    println!("{}", message);
                                 }
-                            }
-                        }
-                        if args.auto_ack {
-                            // check for QOS 1 or 2
-                            match p.qos() {
-                                QoSLevel::AtLeastOnce => {
-                                    let mut ack = PubResp::new_puback();
-                                    ack.packet_id = p.packet_id.unwrap();
-                                    if let Err(e) = producer.send(Packet::PubAck(ack)) {
-                                        eprintln!("{:?}", e);
-                                    }
+                                PayloadFormat::Bin => {
+                                    println!("received a binary payload");
                                 }
-                                QoSLevel::ExactlyOnce => {
-                                    let mut ack = PubResp::new_pubrec();
-                                    ack.packet_id = p.packet_id.unwrap();
-                                    if let Err(e) = producer.send(Packet::PubRec(ack)) {
-                                        eprintln!("{:?}", e);
-                                    }
-                                }
-                                _ => {}
                             }
                         }
                     }
+                    if args.auto_ack {
+                        // check for QOS 1 or 2
+                        match p.qos() {
+                            QoSLevel::AtLeastOnce => {
+                                let mut ack = PubResp::new_puback();
+                                ack.packet_id = p.packet_id.unwrap();
+                                if let Err(e) = packet_sender.send(Packet::PubAck(ack)).await {
+                                    eprintln!("{:?}", e);
+                                }
+                            }
+                            QoSLevel::ExactlyOnce => {
+                                let mut ack = PubResp::new_pubrec();
+                                ack.packet_id = p.packet_id.unwrap();
+                                if let Err(e) = packet_sender.send(Packet::PubRec(ack)).await {
+                                    eprintln!("{:?}", e);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                if !client.connected().await {
+                    break;
                 }
             }
         }
@@ -145,18 +169,16 @@ fn subscribe(connection: vaux_client::MqttConnection, mut client: MqttClient, ar
             eprintln!("{:?}", e);
         }
     }
-    match handle.join() {
-        Ok(_) => {}
-        Err(e) => {
-            eprintln!("{:?}", e);
-        }
+    if let Ok(handle) = handle {
+        println!("waiting for handle");
+        let _ = handle.await.unwrap();
     }
 }
 
-fn load_cert(path: &str) -> Result<rustls::Certificate, std::io::Error> {
+fn load_cert(path: &str) -> Result<CertificateDer, std::io::Error> {
     let mut cert_buffer = Vec::new();
     let cert_file = std::fs::File::open(path)?;
     let mut reader = std::io::BufReader::new(cert_file);
     reader.read_to_end(&mut cert_buffer)?;
-    Ok(rustls::Certificate(cert_buffer))
+    Ok(CertificateDer::from_pem_slice(&cert_buffer).unwrap())
 }

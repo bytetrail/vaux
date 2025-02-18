@@ -143,7 +143,7 @@ impl Encode for Publish {
         let size = self.size();
         header.set_remaining(size);
         header.encode(dest)?;
-        if self.topic_name.is_none() && self.props.get_property(&PropertyType::TopicAlias).is_none()
+        if self.topic_name.is_none() && self.props.get_property(PropertyType::TopicAlias).is_none()
         {
             return Err(MqttCodecError::new(
                 "MQTTv5 3.3.2.1 must have topic name or topic alias",

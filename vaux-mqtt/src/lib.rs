@@ -22,7 +22,7 @@ pub use crate::connect::Connect;
 pub use crate::will::WillMessage;
 pub use crate::{
     disconnect::Disconnect, fixed::FixedHeader, pubresp::PubResp, subscribe::Subscribe,
-    subscribe::Subscription,
+    subscribe::SubscriptionFilter,
 };
 use bytes::BytesMut;
 #[macro_use]
@@ -41,3 +41,55 @@ pub trait Encode: Size {
 pub trait Decode {
     fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError>;
 }
+
+pub enum MqttVersion {
+    V3,
+    V5,
+}
+
+impl std::fmt::Display for MqttVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            MqttVersion::V3 => write!(f, "v3.1.1"),
+            MqttVersion::V5 => write!(f, "v5.0"),
+        }
+    }
+}
+
+pub struct MqttError {
+    pub version: Option<MqttVersion>,
+    pub section: Option<String>,
+    pub message: String,
+}
+
+impl MqttError {
+    pub fn new(message: &str) -> MqttError {
+        MqttError {
+            version: None,
+            section: None,
+            message: message.to_string(),
+        }
+    }
+
+    pub fn new_from_spec(version: MqttVersion, section: &str, message: &str) -> MqttError {
+        MqttError {
+            version: Some(version),
+            section: Some(section.to_string()),
+            message: message.to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for MqttError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        if let Some(version) = &self.version {
+            write!(f, "MQTT{} ", version)?;
+        }
+        if let Some(section) = &self.section {
+            write!(f, " {}: ", section)?;
+        }
+        write!(f, "{}", self.message)
+    }
+}
+
+//pub type Result<T> = std::result::Result<T, MqttError>;

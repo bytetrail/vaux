@@ -4,8 +4,9 @@ use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     codec::{get_utf8, put_utf8, variable_byte_int_size},
-    property::{PacketProperties, PropertyBundle},
-    Decode, Encode, FixedHeader, MqttCodecError, PropertyType, QoSLevel, Reason, Size,
+    property::{PacketProperties, Property, PropertyBundle},
+    Decode, Encode, FixedHeader, MqttCodecError, MqttError, MqttVersion, PropertyType, QoSLevel,
+    Reason, Size,
 };
 
 lazy_static! {
@@ -24,6 +25,8 @@ lazy_static! {
 }
 
 const VAR_HDR_LEN: u32 = 2;
+const MIN_SUBSCRIPTION_ID: u32 = 1;
+const MAX_SUBSCRIPTION_ID: u32 = 268_435_455;
 
 /// MQTT v5 3.8.3.1 Subscription Options
 /// bits 4 and 5 of the subscription options hold the retain handling flag.
@@ -117,7 +120,7 @@ impl Encode for SubAck {
 /// Subscription represents an MQTT v5 3.8.3 SUBSCRIBE Payload. The Mqtt v5
 /// 3.8.3.1 options are represented as individual fields in the struct.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Subscription {
+pub struct SubscriptionFilter {
     pub filter: String,
     pub qos: QoSLevel,
     pub no_local: bool,
@@ -125,7 +128,7 @@ pub struct Subscription {
     pub handling: RetainHandling,
 }
 
-impl Subscription {
+impl SubscriptionFilter {
     /// Create a new Subscription with the given filter and QoSLevel.
     /// The remaining fields are set to their default values.
     pub fn new(filter: String, qos: QoSLevel) -> Self {
@@ -158,11 +161,113 @@ impl Subscription {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Subscription {
+    id: Option<u32>,
+    pub filter: Vec<SubscriptionFilter>,
+}
+
+impl Subscription {
+    pub fn new(filter: Vec<SubscriptionFilter>) -> Self {
+        Self { id: None, filter }
+    }
+
+    pub fn new_with_id(id: u32, filter: Vec<SubscriptionFilter>) -> Result<Self, MqttError> {
+        let mut s = Self { id: None, filter };
+        s.set_id(id)?;
+        Ok(s)
+    }
+
+    pub fn id(&self) -> Option<u32> {
+        self.id
+    }
+
+    pub fn set_id(&mut self, id: u32) -> Result<(), MqttError> {
+        if id < MIN_SUBSCRIPTION_ID || id > MAX_SUBSCRIPTION_ID {
+            return Err(MqttError::new_from_spec(
+                MqttVersion::V5,
+                "3.8.3",
+                "subscription ID must be between 1 and 268,435,455",
+            ));
+        }
+        self.id = Some(id);
+        Ok(())
+    }
+
+    fn id_from_properties(props: &PropertyBundle) -> Option<u32> {
+        if let Some(Property::SubscriptionIdentifier(id)) =
+            props.get_property(PropertyType::SubscriptionIdentifier)
+        {
+            Some(*id)
+        } else {
+            None
+        }
+    }
+}
+
+impl From<&Subscribe> for Subscription {
+    fn from(sub: &Subscribe) -> Self {
+        let mut filter = Vec::new();
+        for s in &sub.payload {
+            filter.push(s.clone());
+        }
+
+        Self {
+            id: Self::id_from_properties(sub.properties()),
+            filter,
+        }
+    }
+}
+
+impl From<Subscribe> for Subscription {
+    fn from(sub: Subscribe) -> Self {
+        let mut filter = Vec::new();
+        let id = Self::id_from_properties(sub.properties());
+        for s in sub.payload {
+            filter.push(s);
+        }
+        Self { id, filter }
+    }
+}
+
+/// Create a Subscribe packet from a Subscription. The SUBSCRIBE packet
+/// is created with the Subscription Identifier property set to the id
+/// of the Subscription when that ID is Some.
+impl From<&Subscription> for Subscribe {
+    fn from(sub: &Subscription) -> Self {
+        let mut subscribe = Subscribe::default();
+        if let Some(id) = sub.id {
+            subscribe
+                .props
+                .set_property(Property::SubscriptionIdentifier(id));
+        }
+        for s in &sub.filter {
+            subscribe.add_subscription(s.clone());
+        }
+        subscribe
+    }
+}
+
+impl From<Subscription> for Subscribe {
+    fn from(sub: Subscription) -> Self {
+        let mut subscribe = Subscribe::default();
+        if let Some(id) = sub.id {
+            subscribe
+                .props
+                .set_property(Property::SubscriptionIdentifier(id));
+        }
+        for s in sub.filter {
+            subscribe.add_subscription(s);
+        }
+        subscribe
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subscribe {
     packet_id: u16,
     props: PropertyBundle,
-    payload: Vec<Subscription>,
+    payload: Vec<SubscriptionFilter>,
 }
 
 impl Default for Subscribe {
@@ -176,7 +281,7 @@ impl Default for Subscribe {
 }
 
 impl Subscribe {
-    pub fn new(packet_id: u16, payload: Vec<Subscription>) -> Self {
+    pub fn new(packet_id: u16, payload: Vec<SubscriptionFilter>) -> Self {
         Self {
             packet_id,
             props: PropertyBundle::new(SUBSCRIPTION_SUPPORTED.clone()),
@@ -194,7 +299,7 @@ impl Subscribe {
         self.packet_id = packet_id;
     }
 
-    pub fn add_subscription(&mut self, subscription: Subscription) {
+    pub fn add_subscription(&mut self, subscription: SubscriptionFilter) {
         self.payload.push(subscription);
     }
 
@@ -271,7 +376,7 @@ impl Decode for Subscribe {
         self.packet_id = src.get_u16();
         self.props.decode(src)?;
         while src.remaining() != 0 {
-            let mut s = Subscription::default();
+            let mut s = SubscriptionFilter::default();
             s.decode(src)?;
             self.add_subscription(s);
         }
@@ -288,13 +393,13 @@ mod test {
         Decode, Encode, QoSLevel, Size, Subscribe,
     };
 
-    use super::{RetainHandling, Subscription};
+    use super::{RetainHandling, SubscriptionFilter};
 
     #[test]
     fn test_encode_flags() {
         const EXPECTED_FLAG: u8 = 0b_0010_1110;
         const EXPECTED_LEN: usize = 7;
-        let mut sub = Subscription::default();
+        let mut sub = SubscriptionFilter::default();
         sub.filter = "test".to_string();
         sub.qos = QoSLevel::ExactlyOnce;
         sub.no_local = true;
@@ -329,7 +434,7 @@ mod test {
 
         let mut subscribe = Subscribe::default();
         subscribe.packet_id = 42;
-        let subscription = Subscription {
+        let subscription = SubscriptionFilter {
             filter: "test".to_string(),
             qos: QoSLevel::AtLeastOnce,
             retain_as: false,
@@ -346,7 +451,7 @@ mod test {
     fn test_bad_packet_id() {
         let mut subscribe = Subscribe::default();
         subscribe.packet_id = 0;
-        let subscription = Subscription {
+        let subscription = SubscriptionFilter {
             filter: "test".to_string(),
             qos: QoSLevel::AtLeastOnce,
             retain_as: false,
@@ -377,7 +482,7 @@ mod test {
         let props = subscribe.properties_mut();
         props.add_user_property(USER_PROP_KEY.to_string(), USER_PROP_VALUE.to_string());
         props.set_property(Property::SubscriptionIdentifier(4096));
-        let subscription = Subscription {
+        let subscription = SubscriptionFilter {
             filter: "test".to_string(),
             qos: QoSLevel::AtLeastOnce,
             retain_as: false,
