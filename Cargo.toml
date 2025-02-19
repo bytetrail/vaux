@@ -1,12 +1,12 @@
 [workspace]
-resolver="2"
+resolver = "2"
 members = [
+    "vaux-async",
     "vaux-mqtt",
     "vaux-client",
     "vaux-broker",
     "vaux-test",
     "vaux-pub",
     "vaux-sub",
-    "prop-macro"
+    "prop-macro",
 ]
-

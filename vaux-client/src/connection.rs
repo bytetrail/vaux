@@ -3,13 +3,11 @@ use rustls::pki_types::ServerName;
 use std::{sync::Arc, time::Duration};
 use tokio::net::TcpStream;
 use tokio_rustls::{rustls::RootCertStore, TlsConnector};
+use vaux_async::stream::{AsyncMqttStream, MqttStream};
 
 #[cfg(feature = "developer")]
 use crate::developer;
-use crate::{
-    stream::{AsyncMqttStream, MqttStream},
-    ErrorKind, MqttError,
-};
+use crate::{ErrorKind, MqttError};
 
 const DEFAULT_HOST: &str = "localhost";
 pub const DEFAULT_PORT: u16 = 1883;

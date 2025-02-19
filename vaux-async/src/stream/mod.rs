@@ -1,5 +1,8 @@
-use std::pin::Pin;
+pub mod packet;
 
+pub use packet::{Error, PacketStream};
+
+use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;

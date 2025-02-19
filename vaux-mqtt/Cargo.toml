@@ -1,6 +1,6 @@
 [package]
 name = "vaux-mqtt"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 
 [features]
@@ -9,8 +9,6 @@ pedantic = []
 
 
 [dependencies]
-tokio-util = { version = "0.7.0", features = ["codec"] }
 bytes = "1.5.0"
 uuid = { version = "1.2.1", features = ["v4", "fast-rng"] }
-prop-macro = { path = "../prop-macro" }
 lazy_static = "1.4"

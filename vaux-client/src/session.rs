@@ -1,13 +1,9 @@
-use crate::MqttClient;
-use crate::{stream::AsyncMqttStream, ErrorKind, MqttError};
-use bytes::BytesMut;
+use crate::{ErrorKind, MqttClient, MqttError};
 use std::{collections::HashMap, sync::Arc, time::Duration, vec};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, RwLock};
 use vaux_mqtt::WillMessage;
 use vaux_mqtt::{
-    decode, encode, property::Property, ConnAck, Connect, Packet, PropertyType, PubResp, QoSLevel,
-    Reason,
+    property::Property, ConnAck, Connect, Packet, PropertyType, PubResp, QoSLevel, Reason,
 };
 const MAX_QUEUE_LEN: usize = 100;
 
@@ -24,7 +20,7 @@ pub struct SessionState {
 pub(crate) struct ClientSession {
     client_id: Arc<Mutex<Option<String>>>,
     connected: Arc<RwLock<bool>>,
-    stream: AsyncMqttStream,
+    packet_stream: vaux_async::stream::PacketStream,
     last_active: std::time::Instant,
 
     session_expiry: u32,
@@ -33,10 +29,6 @@ pub(crate) struct ClientSession {
     receive_max: usize,
     qos_1_remaining: usize,
     pending_qos1: Arc<Mutex<Vec<Packet>>>,
-
-    read_buffer: Vec<u8>,
-    read_offset: usize,
-    max_packet_size: usize,
 
     auto_packet_id: bool,
     last_packet_id: u16,
@@ -74,14 +66,8 @@ impl ClientSession {
             connect.will_message = Some(will);
         }
         let connect_packet = Packet::Connect(Box::new(connect));
-        // let mut buffer = [0u8; DEFAULT_CHANNEL_SIZE];
-        let mut dest = BytesMut::default();
-        let result = encode(&connect_packet, &mut dest);
-        if let Err(e) = result {
-            panic!("Failed to encode packet: {:?}", e);
-        }
 
-        match self.stream.write_all(&dest).await {
+        match self.packet_stream.write(&connect_packet).await {
             Ok(_) => {
                 let start = std::time::Instant::now();
                 while start.elapsed() < max_connect_wait {
@@ -139,61 +125,12 @@ impl ClientSession {
     /// await point.
     ///
     pub(crate) async fn read_next(&mut self) -> crate::Result<Option<Packet>> {
-        let mut bytes_read = self.read_offset;
-        loop {
-            if bytes_read > 0 {
-                let bytes_mut = &mut BytesMut::from(&self.read_buffer[0..bytes_read]);
-                match decode(bytes_mut) {
-                    Ok(data_read) => {
-                        if let Some((packet, decode_len)) = data_read {
-                            if decode_len < bytes_read as u32 {
-                                self.read_buffer
-                                    .copy_within(decode_len as usize..bytes_read, 0);
-                                // adjust offset to end of decoded bytes
-                                self.read_offset = bytes_read - decode_len as usize;
-                            } else {
-                                self.read_offset = 0;
-                            }
-                            return Ok(Some(packet));
-                        } else {
-                            return Ok(None);
-                        }
-                    }
-                    Err(e) => match e.kind {
-                        vaux_mqtt::codec::ErrorKind::InsufficientData(_expected, _actual) => {
-                            // fall through the the socket read
-                        }
-                        _ => {
-                            return Err(MqttError::new(
-                                &e.to_string(),
-                                crate::ErrorKind::Protocol(Reason::ProtocolErr),
-                            ));
-                        }
-                    },
-                }
-            }
-            match self
-                .stream
-                .read(&mut self.read_buffer[self.read_offset..self.max_packet_size])
-                .await
-            {
-                Ok(len) => {
-                    if len == 0 && bytes_read == 0 {
-                        return Ok(None);
-                    }
-                    bytes_read += len;
-                    self.read_offset = bytes_read;
-                }
-                Err(e) => match e.kind() {
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
-                        return Err(MqttError::new(&e.to_string(), ErrorKind::Timeout));
-                    }
-                    e => {
-                        return Err(MqttError::new(&e.to_string(), ErrorKind::IO));
-                    }
-                },
-            }
-        }
+        self.packet_stream.read().await.map_err(|e| {
+            MqttError::new(
+                &format!("unable to read packet: {}", e),
+                ErrorKind::Transport,
+            )
+        })
     }
 
     pub(crate) async fn write_next(&mut self, packet: Packet) -> Result<(), MqttError> {
@@ -233,7 +170,7 @@ impl ClientSession {
             Packet::Disconnect(d) => {
                 self.send_packet(Packet::Disconnect(d)).await?;
                 // TODO handle shutdown error?
-                let _ = self.stream.shutdown().await;
+                let _ = self.packet_stream.shutdown().await;
                 self.pending_qos1
                     .lock()
                     .await
@@ -257,7 +194,7 @@ impl ClientSession {
             }
             Packet::Disconnect(d) => {
                 // TODO handle disconnect - verify shutdown behavior
-                let _ = self.stream.shutdown().await;
+                let _ = self.packet_stream.shutdown().await;
                 self.pending_qos1
                     .lock()
                     .await
@@ -276,7 +213,7 @@ impl ClientSession {
                             if let Some(packet_id) = publish.packet_id {
                                 puback.packet_id = packet_id;
                             } else {
-                                let _ = self.stream.shutdown().await;
+                                let _ = self.packet_stream.shutdown().await;
                                 return Err(MqttError::new(
                                     "protocol error, packet ID required with QoS > 0",
                                     ErrorKind::Protocol(Reason::MalformedPacket),
@@ -373,21 +310,10 @@ impl ClientSession {
     }
 
     async fn send_packet(&mut self, packet: Packet) -> Result<(), MqttError> {
-        let mut dest = BytesMut::default();
-        let result = encode(&packet, &mut dest);
-        if let Err(e) = result {
-            return Err(MqttError::new(
-                &format!("Failed to encode packet: {:?}", e),
-                ErrorKind::Protocol(Reason::MalformedPacket),
-            ));
-        }
-        if let Err(e) = self.stream.write_all(&dest).await {
-            return Err(MqttError::new(
-                &format!("Unable to write packet(s) to broker: {}", e),
-                ErrorKind::Transport,
-            ));
-        }
-        Ok(())
+        self.packet_stream
+            .write(&packet)
+            .await
+            .map_err(|_| MqttError::new("unable to write packet to stream", ErrorKind::Transport))
     }
 }
 
@@ -405,7 +331,11 @@ impl TryFrom<&mut MqttClient> for ClientSession {
         Ok(Self {
             client_id: Arc::clone(&client.client_id),
             connected: Arc::new(RwLock::new(false)),
-            stream: client.connection.take().unwrap().take_stream().unwrap(),
+            packet_stream: vaux_async::stream::PacketStream::new(
+                client.connection.take().unwrap().take_stream().unwrap(),
+                None,
+                Some(client.max_packet_size),
+            ),
             last_active: std::time::Instant::now(),
             session_expiry: client.session_expiry,
             pending_publish: vec![],
@@ -413,9 +343,6 @@ impl TryFrom<&mut MqttClient> for ClientSession {
             receive_max: client.receive_max as usize,
             qos_1_remaining: client.receive_max as usize,
             pending_qos1: Arc::new(Mutex::new(vec![])),
-            read_buffer: vec![0u8; client.max_packet_size],
-            read_offset: 0,
-            max_packet_size: client.max_packet_size,
             auto_packet_id: client.auto_packet_id,
             last_packet_id: 0,
             auto_ack: client.auto_ack,

@@ -1,11 +1,10 @@
 use crate::codec::{get_bin, get_utf8, put_bin, MqttCodecError};
-use crate::property::{PropertyBundle, PropertySize};
+use crate::property::PropertyBundle;
 use crate::{
     put_utf8, variable_byte_int_size, Decode, Encode, FixedHeader, PacketType, PropertyType,
     QoSLevel, Size, WillMessage,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use prop_macro::PropertySize;
 use std::collections::HashSet;
 
 const MQTT_PROTOCOL_NAME_LEN: u16 = 0x00_04;
@@ -23,7 +22,7 @@ pub(crate) const CONNECT_FLAG_SHIFT: u8 = 0x03;
 /// Default remaining size for connect packet
 const DEFAULT_CONNECT_REMAINING: u32 = 10;
 
-#[derive(PropertySize, Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Connect {
     props: PropertyBundle,
     pub clean_start: bool,
