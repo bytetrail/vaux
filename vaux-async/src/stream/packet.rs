@@ -1,9 +1,8 @@
-use bytes::BytesMut;
+use super::AsyncMqttStream;
+use bytes::{Bytes, BytesMut};
 use std::fmt::Display;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use vaux_mqtt::{decode, encode, Packet};
-
-use super::AsyncMqttStream;
 
 const READ_BUFFER_SIZE: usize = 4096;
 const MAX_BUFFER_SIZE: usize = 4096 * 1024;
@@ -30,6 +29,7 @@ impl Display for Error {
 pub struct PacketStream {
     read_buffer: Vec<u8>,
     read_offset: usize,
+    initial_buffer_size: usize,
     max_buffer_size: usize,
     stream: AsyncMqttStream,
 }
@@ -43,6 +43,7 @@ impl PacketStream {
         Self {
             read_buffer: vec![0; initial_buffer_size.unwrap_or(READ_BUFFER_SIZE)],
             read_offset: 0,
+            initial_buffer_size: initial_buffer_size.unwrap_or(READ_BUFFER_SIZE),
             max_buffer_size: max_buffer_size.unwrap_or(MAX_BUFFER_SIZE),
             stream,
         }
@@ -64,7 +65,31 @@ impl PacketStream {
     /// stream will be read again on the next call to this method and any bytes not
     /// decoded will be retained.
     ///
+    ///
     pub async fn read(&mut self) -> Result<Option<Packet>, Error> {
+        let result = self.read_internal(false).await;
+        match result {
+            Ok(Some((packet, _))) => Ok(Some(packet)),
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub async fn read_raw(&mut self) -> Result<Option<(Packet, Bytes)>, Error> {
+        let result = self.read_internal(true).await;
+        match result {
+            Ok(Some((packet, Some(bytes)))) => Ok(Some((packet, bytes))),
+            // this would be an error to get a packet without bytes when raw is requested
+            Ok(Some((_, None))) => Err(Error::ReadBuffer),
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn read_internal(
+        &mut self,
+        with_bytes: bool,
+    ) -> Result<Option<(Packet, Option<Bytes>)>, Error> {
         let mut bytes_read = self.read_offset;
         loop {
             if bytes_read > 0 {
@@ -72,15 +97,25 @@ impl PacketStream {
                 match decode(bytes_mut) {
                     Ok(data_read) => {
                         if let Some((packet, decode_len)) = data_read {
-                            if decode_len < bytes_read as u32 {
-                                self.read_buffer
-                                    .copy_within(decode_len as usize..bytes_read, 0);
-                                // adjust offset to end of decoded bytes
-                                self.read_offset = bytes_read - decode_len as usize;
+                            if with_bytes {
+                                // split the buffer into packet and remaining bytes
+                                let packet_bytes = bytes_mut.split_to(decode_len as usize);
+                                // resize the buffer if less than requested initial size
+                                if self.read_buffer.len() < self.initial_buffer_size {
+                                    self.read_buffer.resize(self.initial_buffer_size, 0);
+                                }
+                                return Ok(Some((packet, Some(packet_bytes.freeze()))));
                             } else {
-                                self.read_offset = 0;
+                                if decode_len < bytes_read as u32 {
+                                    self.read_buffer
+                                        .copy_within(decode_len as usize..bytes_read, 0);
+                                    // adjust offset to end of decoded bytes
+                                    self.read_offset = bytes_read - decode_len as usize;
+                                } else {
+                                    self.read_offset = 0;
+                                }
+                                return Ok(Some((packet, None)));
                             }
-                            return Ok(Some(packet));
                         } else {
                             return Ok(None);
                         }
