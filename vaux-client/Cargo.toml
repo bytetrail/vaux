@@ -1,6 +1,6 @@
 [package]
 name = "vaux-client"
-version = "0.6.2"
+version = "0.6.3"
 edition = "2021"
 
 [features]
@@ -14,8 +14,8 @@ tokio = { version = "1.41.0", features = [
     "rt-multi-thread",
     "macros",
 ] }
-vaux-mqtt = { version = "0.6.2", path = "../vaux-mqtt" }
-vaux-async = { version = "0.6.2", path = "../vaux-async" }
+vaux-mqtt = { version = "0.6.3", path = "../vaux-mqtt" }
+vaux-async = { version = "0.6.3", path = "../vaux-async" }
 
 bytes = "1.8"
 uuid = "1.11"

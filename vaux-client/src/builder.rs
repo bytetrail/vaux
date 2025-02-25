@@ -38,6 +38,7 @@ pub struct ClientBuilder {
     max_packet_size: usize,
     keep_alive: Duration,
     max_connect_wait: Duration,
+    channel_size: Option<u16>,
     filtered_consumer: Option<HashMap<PacketType, Sender<vaux_mqtt::Packet>>>,
     error_out: Option<Sender<MqttError>>,
     will_message: Option<WillMessage>,
@@ -55,6 +56,7 @@ impl Default for ClientBuilder {
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
             max_connect_wait: MAX_CONNECT_WAIT,
+            channel_size: None,
             filtered_consumer: None,
             error_out: None,
             will_message: None,
@@ -172,6 +174,11 @@ impl ClientBuilder {
         self
     }
 
+    pub fn with_channel_size(mut self, channel_size: u16) -> Self {
+        self.channel_size = Some(channel_size);
+        self
+    }
+
     pub fn build(self) -> Result<crate::MqttClient, BuilderError> {
         if self.keep_alive < MIN_KEEP_ALIVE {
             return Err(BuilderError::MinKeepAlive);
@@ -183,6 +190,7 @@ impl ClientBuilder {
             self.auto_ack,
             self.receive_max,
             self.auto_packet_id,
+            self.channel_size,
         );
         client.set_session_expiry(self.session_expiry);
         client.set_max_packet_size(self.max_packet_size);
