@@ -2,32 +2,155 @@ pub(crate) mod codec;
 pub(crate) mod config;
 pub(crate) mod session;
 
-use self::codec::MqttCodec;
 use crate::broker::session::Session;
-use futures::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
+use tokio::select;
 use tokio::sync::RwLock;
-use tokio::time::timeout;
-use tokio_util::codec::Framed;
 use uuid::Uuid;
-use vaux_mqtt::property::Property;
+use vaux_async::stream::{AsyncMqttStream, MqttStream, PacketStream};
 use vaux_mqtt::Packet::PingResponse;
 use vaux_mqtt::{
-    ConnAck, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, PropertyType, Reason,
+    connect, ConnAck, Connect, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, Reason,
 };
 
 pub const DEFAULT_PORT: u16 = 1883;
 pub const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
 const DEFAULT_KEEP_ALIVE: Duration = Duration::from_secs(30);
+const INIT_STREAM_BUFFER_SIZE: usize = 4096;
 
-#[derive(Debug, Clone)]
+pub enum BrokerError {
+    CodecError(MqttCodecError),
+    IoError(std::io::Error),
+    SessionError,
+    StreamError(vaux_async::stream::Error),
+}
+
+impl std::fmt::Display for BrokerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            BrokerError::CodecError(e) => write!(f, "codec error: {}", e),
+            BrokerError::IoError(e) => write!(f, "io error: {}", e),
+            BrokerError::SessionError => write!(f, "session error"),
+            BrokerError::StreamError(e) => write!(f, "stream error {}", e),
+        }
+    }
+}
+
+impl From<std::io::Error> for BrokerError {
+    fn from(e: std::io::Error) -> Self {
+        BrokerError::IoError(e)
+    }
+}
+
+impl From<MqttCodecError> for BrokerError {
+    fn from(e: MqttCodecError) -> Self {
+        BrokerError::CodecError(e)
+    }
+}
+
+impl From<vaux_async::stream::Error> for BrokerError {
+    fn from(e: vaux_async::stream::Error) -> Self {
+        BrokerError::StreamError(e)
+    }
+}
+
+#[derive(Debug, Default)]
+struct SessionPool {
+    active: HashMap<String, Arc<RwLock<Session>>>,
+    inactive: HashMap<String, Arc<RwLock<Session>>>,
+    active_sessions: AtomicU32,
+    inactive_sessions: AtomicU32,
+}
+
+impl SessionPool {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    /// Inserts a new session into the pool. If the session is connected, the
+    /// active session count is incremented and the session is added to the active
+    /// session pool. If the session is not connected, the inactive session count
+    /// is incremented and the session is added to the inactive session pool.
+    pub async fn add(&mut self, session: &Arc<RwLock<Session>>) {
+        let active;
+        {
+            let session = session.read().await;
+            active = session.connected();
+        }
+        if active {
+            self.active_sessions
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.active
+                .insert(session.read().await.id().to_string(), Arc::clone(session));
+        } else {
+            self.inactive_sessions
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.inactive
+                .insert(session.read().await.id().to_string(), Arc::clone(session));
+        }
+    }
+
+    /// Removes a session from the pool. The active and inactive counts are decremented
+    /// as required and the session is removed from the appropriate pool.
+    ///
+    pub fn remove(&mut self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
+        if let Some(session) = self.active.remove(session_id) {
+            self.active_sessions
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            Some(session)
+        } else if let Some(session) = self.inactive.remove(session_id) {
+            self.inactive_sessions
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            Some(session)
+        } else {
+            None
+        }
+    }
+
+    /// Removes an active session from the pool. The session is removed from the active
+    /// pool and the active session count is decremented. The session is returned if found.
+    /// If the session is not found, the function returns None.
+    ///
+    pub fn remove_active(&mut self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
+        if let Some(session) = self.active.remove(session_id) {
+            self.active_sessions
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            Some(session)
+        } else {
+            None
+        }
+    }
+
+    /// Retreives and activates a session if the inactive session pool contains the session.
+    /// The session is removed from the inactive pool and added to the active pool. The active
+    /// session count is incremented and the inactive session count is decremented.  If the
+    /// session is not found in the inactive pool, the function returns None.
+    ///
+    pub async fn activate(&mut self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
+        if let Some(session) = self.inactive.remove(session_id) {
+            self.active_sessions
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.active
+                .insert(session.read().await.id().to_string(), Arc::clone(&session));
+            self.inactive_sessions
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            Some(session)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Broker {
     listen_addr: SocketAddr,
+    session_pool: Arc<RwLock<SessionPool>>,
 }
 
 impl Default for Broker {
@@ -39,6 +162,7 @@ impl Default for Broker {
                 Ipv4Addr::from_str(DEFAULT_LISTEN_ADDR).unwrap(),
                 DEFAULT_PORT,
             )),
+            session_pool: Arc::new(RwLock::new(SessionPool::default())),
         }
     }
 }
@@ -48,156 +172,165 @@ impl Broker {
     /// not be used until the command line interface is developed. Remove the
     /// dead_code override when complete
     pub fn new(listen_addr: SocketAddr) -> Self {
-        Broker { listen_addr }
+        Broker {
+            listen_addr,
+            ..Default::default()
+        }
     }
 
-    pub async fn run(
-        &mut self,
-        session_pool: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&mut self) -> Result<(), BrokerError> {
         match TcpListener::bind(self.listen_addr).await {
             Ok(listener) => {
                 println!("broker accepting request on {:?}", self.listen_addr);
                 loop {
-                    let session_pool = session_pool.clone();
-                    let (mut socket, _) = listener.accept().await?;
-                    tokio::spawn(async move {
-                        match Broker::handle_client(&mut socket, session_pool).await {
-                            Ok(_) => {}
-                            Err(e) => {
-                                // TODO unhandled error in client handler should result in disconnect
-                                eprintln!("error in child process: {}", e);
-                            }
+                    println!("broker waiting for connection");
+                    match listener.accept().await {
+                        Ok((socket, _)) => {
+                            println!("broker accepted connection from {:?}", socket.peer_addr());
+                            // create an mqtt stream from the tcp stream
+                            let mut stream = PacketStream::new(
+                                AsyncMqttStream(MqttStream::TcpStream(socket)),
+                                Some(INIT_STREAM_BUFFER_SIZE),
+                                None,
+                            );
+                            let session_pool = self.session_pool.clone();
+                            tokio::spawn(async move {
+                                Broker::handle_client(&mut stream, session_pool).await
+                            });
                         }
-                    });
+                        Err(e) => {
+                            println!("broker error accepting connection: {}", e);
+                            return Err(e.into());
+                        }
+                    }
                 }
             }
             Err(e) => {
-                eprintln!("unable to start broker; error = {:?}", e);
-                Err(Box::new(e))
+                return Err(e.into());
             }
         }
     }
 
     async fn handle_client(
-        stream: &mut TcpStream,
-        session_pool: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let session_id: String;
-        let mut framed = Framed::new(stream, MqttCodec {});
-        let session = match framed.next().await {
-            Some(Ok(Packet::Connect(packet))) => {
-                let mut active_session: Option<Arc<RwLock<Session>>> = None;
-                let mut ack = ConnAck::default();
-                // handle the client id
-                if packet.client_id.is_empty() {
-                    session_id = Uuid::new_v4().to_string();
-                    ack.properties_mut().set_property(
-                        vaux_mqtt::property::Property::AssignedClientId(session_id.clone()),
-                    );
-                } else {
-                    session_id = packet.client_id.clone();
+        stream: &mut PacketStream,
+        session_pool: Arc<RwLock<SessionPool>>,
+    ) -> Result<(), BrokerError> {
+        let mut connected = false;
+        let mut keep_alive = DEFAULT_KEEP_ALIVE;
+        let mut client_session: Option<Arc<RwLock<Session>>> = None;
+        loop {
+            // TODO separate out the session handling from pre-connect handling
+            select! {
+                _ = Broker::keep_alive_timer(keep_alive) => {
+                    // handle the keep alive
                 }
-                if let Some(session) = session_pool.read().await.get(&session_id) {
-                    let mut session_lock = session.blocking_write();
-                    if session_lock.connected() {
-                        // handle take over
-                        session_lock.set_orphaned();
-                    } else if !session_lock.orphaned() {
-                        session_lock.set_connected(true);
-                        active_session = Some(session.clone());
-                        ack.session_present = true;
+                packet_result = stream.read() => {
+                    match packet_result {
+                        Ok(Some(packet)) => {
+                            if !connected {
+                                if let Some(session) = Broker::handle_pre_connect(packet, stream, Arc::clone(&session_pool)).await? {
+                                    client_session = Some(Arc::clone(&session));
+                                    let session = session.read().await;
+                                    keep_alive = session.keep_alive();
+                                } else {
+                                    continue;
+                                }
+                                connected = true;
+                            }
+                        }
+                        Ok(None) => {
+                            // handle the disconnect
+                        }
+                        Err(e) => {
+                            return Err(e.into());
+                        }
                     }
                 }
-                if packet.clean_start || active_session.is_none() {
-                    let session = Session::new(session_id.clone(), DEFAULT_KEEP_ALIVE);
-                    let session = Arc::new(RwLock::new(session));
-                    session_pool
-                        .write()
-                        .await
-                        .insert(session_id.clone(), session.clone());
-                    active_session = Some(session);
-                }
-                if packet.keep_alive > DEFAULT_KEEP_ALIVE.as_secs() as u16 {
-                    ack.properties_mut()
-                        .set_property(vaux_mqtt::property::Property::KeepAlive(
-                            DEFAULT_KEEP_ALIVE.as_secs() as u16,
-                        ));
-                } else {
-                    let mut session = active_session.as_ref().unwrap().write().await;
-                    if let Some(Property::SessionExpiryInterval(expiry)) = packet
-                        .properties()
-                        .get_property(PropertyType::SessionExpiryInterval)
-                    {
-                        session.session_expiry = Duration::from_secs(*expiry as u64);
-                    }
-                    session.set_keep_alive(packet.keep_alive as u64);
-                }
-                framed.send(Packet::ConnAck(ack)).await?;
-                active_session
             }
-            Some(Ok(Packet::PingRequest(_packet))) => {
+        }
+    }
+
+    async fn handle_pre_connect(
+        packet: Packet,
+        stream: &mut PacketStream,
+        session_pool: Arc<RwLock<SessionPool>>,
+    ) -> Result<Option<Arc<RwLock<Session>>>, BrokerError> {
+        match packet {
+            Packet::Connect(packet) => Broker::handle_connect(*packet, stream, session_pool).await,
+            Packet::PingRequest(packet) => {
                 // allow clients without connected session to ping
-                let resp = PingResponse(FixedHeader::new(PacketType::PingResp));
-                framed.send(resp).await?;
-                None
+                let packet = PingResponse(FixedHeader::new(PacketType::PingResp));
+                stream.write(&packet).await?;
+                Ok(None)
             }
             _ => {
                 let header = Disconnect::new(Reason::ProtocolErr);
-                let disconnect = Packet::Disconnect(header);
-                framed.send(disconnect).await?;
-                return Err(Box::new(MqttCodecError::new("connect packet not received")));
+                let packet = Packet::Disconnect(header);
+                stream.write(&packet).await?;
+                Ok(None)
             }
-        };
-        if let Some(session) = session {
-            loop {
-                let duration = Duration::from_secs(session.read().await.keep_alive());
-                match timeout(duration, framed.next()).await {
-                    Ok(request) => {
-                        if session.read().await.orphaned() {
-                            // respond with session taken over error
-                            // TODO
-                        }
-                        if let Some(request) = request {
-                            session.write().await.set_last_active();
-                            match request {
-                                Ok(request) => match request {
-                                    Packet::PingRequest(_) => {
-                                        let header = FixedHeader::new(PacketType::PingResp);
-                                        framed.send(Packet::PingResponse(header)).await?;
-                                    }
-                                    Packet::Disconnect(_) => {
-                                        // exit loop closing connection
-                                        session.write().await.set_connected(false);
-                                        break;
-                                    }
-                                    req => {
-                                        return Err(Box::new(MqttCodecError::new(
-                                            format!("unexpected packet type: {:?}", req).as_str(),
-                                        )));
-                                    }
-                                },
-                                Err(e) => {
-                                    session.write().await.set_connected(false);
-                                    // disconnect with protocol error
-                                    let disconnect = Disconnect::new(Reason::ProtocolErr);
-                                    framed.send(Packet::Disconnect(disconnect)).await?;
-                                    return Err(Box::new(e));
-                                }
-                            } // match request
-                        } // if let Some(request ...
-                    }
-                    Err(_elapsed) => {
-                        // connection keep alive expired
-                        session.write().await.set_connected(false);
-                        let disconnect = Disconnect::new(Reason::KeepAliveTimeout);
-                        framed.send(Packet::Disconnect(disconnect)).await?;
-                        break;
-                    }
-                }
-            } // loop
         }
-        Ok(())
+    }
+
+    async fn handle_connect(
+        packet: Connect,
+        stream: &mut PacketStream,
+        session_pool: Arc<RwLock<SessionPool>>,
+    ) -> Result<Option<Arc<RwLock<Session>>>, BrokerError> {
+        let session_id: String;
+        let mut ack = ConnAck::default();
+        // handle the client id
+        if packet.client_id.is_empty() {
+            session_id = Uuid::new_v4().to_string();
+            ack.properties_mut()
+                .set_property(vaux_mqtt::property::Property::AssignedClientId(
+                    session_id.clone(),
+                ));
+        } else {
+            session_id = packet.client_id.clone();
+        }
+
+        // write lock on session pool
+        let mut session_pool = session_pool.write().await;
+        let session: Arc<RwLock<Session>> =
+            if let Some(session) = session_pool.activate(&session_id).await {
+                session
+            } else {
+                // if the session is active, take over the session by disconnected the existing session
+                // and cloning properties for a new session if clean-start is false
+                if let Some(session) = session_pool.remove_active(&session_id) {
+                    {
+                        let mut session = session.write().await;
+                        Broker::handle_takeover(stream).await;
+                        if !packet.clean_start {
+                            session.clear();
+                        }
+                    }
+                    session
+                } else {
+                    // create a new session from the connect request
+                    let new_session = Arc::new(RwLock::new(Session::new_from_connect(packet)));
+                    session_pool.add(&new_session).await;
+                    new_session
+                }
+            };
+        stream.write(&Packet::ConnAck(ack)).await?;
+        Ok(Some(session))
+    }
+
+    async fn keep_alive_timer(keep_alive: Duration) {
+        tokio::time::sleep(keep_alive).await;
+    }
+
+    pub async fn handle_takeover(packet_stream: &mut PacketStream) {
+        // send a disconnect packet to the client with reason TakenOver
+        packet_stream
+            .write(&vaux_mqtt::Packet::Disconnect(vaux_mqtt::Disconnect::new(
+                vaux_mqtt::Reason::SessionTakeOver,
+            )))
+            .await
+            .unwrap();
+        packet_stream.shutdown().await.unwrap();
     }
 }
 

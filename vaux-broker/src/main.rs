@@ -1,14 +1,13 @@
+#[cfg(feature = "console")]
+mod tui;
+
 mod broker;
 
-use crate::broker::session::Session;
 use crate::broker::{DEFAULT_LISTEN_ADDR, DEFAULT_PORT};
 use broker::Broker;
 use clap::Parser;
-use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about=None)]
@@ -51,7 +50,9 @@ async fn main() {
 
     let mut broker = Broker::new(listen_addr);
     // TODO initialize from storage for long lived sessions
-    let session_pool: Arc<RwLock<HashMap<String, Arc<RwLock<Session>>>>> =
-        Arc::new(RwLock::new(HashMap::new()));
-    let _ = broker.run(session_pool).await;
+    let result = broker.run().await;
+    println!("Broker started on: {}", listen_addr);
+    if let Err(e) = result {
+        eprintln!("Error starting broker: {}", e);
+    }
 }

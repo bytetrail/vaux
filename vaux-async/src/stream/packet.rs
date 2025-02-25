@@ -26,6 +26,7 @@ impl Display for Error {
     }
 }
 
+#[derive(Debug)]
 pub struct PacketStream {
     read_buffer: Vec<u8>,
     read_offset: usize,

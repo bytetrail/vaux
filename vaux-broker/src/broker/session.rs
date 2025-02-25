@@ -1,8 +1,15 @@
 use std::time::{Duration, Instant};
-
 use vaux_mqtt::{subscribe::Subscription, Connect, WillMessage};
 
-#[derive(Debug, Clone)]
+const BROKER_KEEP_ALIVE_FACTOR: f32 = 1.5;
+
+pub enum SessionControl {
+    Disconnect,
+    TakenOver,
+    KeepAlive,
+}
+
+#[derive(Debug)]
 pub struct Session {
     id: String,
     last_active: Instant,
@@ -16,7 +23,7 @@ pub struct Session {
 
 impl Session {
     /// Creates a new session with the last active time set to Instant::now()
-    pub fn new(id: String, keep_alive: Duration) -> Self {
+    pub fn new(id: String, stream: vaux_async::stream::PacketStream, keep_alive: Duration) -> Self {
         Session {
             id: id,
             last_active: Instant::now(),
@@ -30,7 +37,8 @@ impl Session {
     }
 
     pub fn new_from_connect(connect: Connect) -> Self {
-        let keep_alive = Duration::from_secs(connect.keep_alive as u64);
+        let keep_alive =
+            Duration::from_secs((connect.keep_alive as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64);
         let will_message = connect.will_message.clone();
         let session_expiry = if let Some(session_expirey) = connect
             .properties()
@@ -58,11 +66,20 @@ impl Session {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.subscriptions.clear();
+        // TODO - remove the subscriptions from the broker subscription pool
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
     pub fn connected(&self) -> bool {
         self.connected
     }
 
-    pub fn set_connected(&mut self, connected: bool) {
+    pub(crate) fn set_connected(&mut self, connected: bool) {
         self.connected = connected;
     }
 
@@ -75,17 +92,17 @@ impl Session {
     }
 
     /// Sets the last session activity to the time that the method is invoked.
-    pub fn set_last_active(&mut self) {
+    pub(crate) fn set_last_active(&mut self) {
         self.last_active = Instant::now();
     }
 
     /// Gets the maximum keep alive in seconds.
-    pub fn keep_alive(&self) -> u64 {
-        self.keep_alive.as_secs()
+    pub fn keep_alive(&self) -> Duration {
+        self.keep_alive
     }
     /// Sets the maximum session keep alive to the time passed in seconds.
-    pub fn set_keep_alive(&mut self, secs: u64) {
-        self.keep_alive = Duration::from_secs(secs);
+    pub(crate) fn set_keep_alive(&mut self, keep_alive: Duration) {
+        self.keep_alive = keep_alive;
     }
 
     pub fn will_message(&self) -> Option<&WillMessage> {
