@@ -57,6 +57,12 @@ impl PacketChannel {
     }
 }
 
+impl Default for PacketChannel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct MqttClient {
     pub(crate) connection: Option<MqttConnection>,
     pub(crate) auto_ack: bool,

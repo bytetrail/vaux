@@ -183,7 +183,7 @@ impl Subscription {
     }
 
     pub fn set_id(&mut self, id: u32) -> Result<(), MqttError> {
-        if id < MIN_SUBSCRIPTION_ID || id > MAX_SUBSCRIPTION_ID {
+        if !(MIN_SUBSCRIPTION_ID..=MAX_SUBSCRIPTION_ID).contains(&id) {
             return Err(MqttError::new_from_spec(
                 MqttVersion::V5,
                 "3.8.3",

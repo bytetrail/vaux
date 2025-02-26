@@ -7,11 +7,13 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::client::TlsStream;
 
+#[derive(Debug)]
 pub enum MqttStream {
     TcpStream(TcpStream),
     TlsStream(TlsStream<TcpStream>),
 }
 
+#[derive(Debug)]
 pub struct AsyncMqttStream(pub MqttStream);
 
 impl AsyncRead for AsyncMqttStream {

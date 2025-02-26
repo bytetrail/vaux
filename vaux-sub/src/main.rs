@@ -75,7 +75,6 @@ async fn main() {
         connection = connection.with_tls().with_trust_store(Arc::new(root_store))
     }
     connection = connection.with_host(&args.addr).with_port(args.port);
-
     let mut client = vaux_client::ClientBuilder::new(connection)
         .with_auto_ack(true)
         .with_auto_packet_id(true)
