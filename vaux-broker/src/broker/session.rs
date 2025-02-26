@@ -151,7 +151,7 @@ impl Session {
     /// Creates a new session with the last active time set to Instant::now()
     pub fn new(id: String, keep_alive: Duration) -> Self {
         Session {
-            id: id,
+            id,
             last_active: Instant::now(),
             connected: false,
             orphaned: false,

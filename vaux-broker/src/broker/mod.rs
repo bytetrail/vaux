@@ -14,7 +14,7 @@ use tokio::net::TcpListener;
 use tokio::select;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use vaux_async::stream::{packet, AsyncMqttStream, MqttStream, PacketStream};
+use vaux_async::stream::{AsyncMqttStream, MqttStream, PacketStream};
 use vaux_mqtt::Packet::PingResponse;
 use vaux_mqtt::{
     ConnAck, Connect, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, Reason,
@@ -26,36 +26,36 @@ const DEFAULT_KEEP_ALIVE: Duration = Duration::from_secs(30);
 const INIT_STREAM_BUFFER_SIZE: usize = 4096;
 
 pub enum BrokerError {
-    CodecError(MqttCodecError),
-    IoError(std::io::Error),
-    StreamError(vaux_async::stream::Error),
+    Codec(MqttCodecError),
+    Io(std::io::Error),
+    Stream(vaux_async::stream::Error),
 }
 
 impl std::fmt::Display for BrokerError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            BrokerError::CodecError(e) => write!(f, "codec error: {}", e),
-            BrokerError::IoError(e) => write!(f, "io error: {}", e),
-            BrokerError::StreamError(e) => write!(f, "stream error {}", e),
+            BrokerError::Codec(e) => write!(f, "codec error: {}", e),
+            BrokerError::Io(e) => write!(f, "io error: {}", e),
+            BrokerError::Stream(e) => write!(f, "stream error {}", e),
         }
     }
 }
 
 impl From<std::io::Error> for BrokerError {
     fn from(e: std::io::Error) -> Self {
-        BrokerError::IoError(e)
+        BrokerError::Io(e)
     }
 }
 
 impl From<MqttCodecError> for BrokerError {
     fn from(e: MqttCodecError) -> Self {
-        BrokerError::CodecError(e)
+        BrokerError::Codec(e)
     }
 }
 
 impl From<vaux_async::stream::Error> for BrokerError {
     fn from(e: vaux_async::stream::Error) -> Self {
-        BrokerError::StreamError(e)
+        BrokerError::Stream(e)
     }
 }
 
@@ -117,9 +117,7 @@ impl Broker {
                     }
                 }
             }
-            Err(e) => {
-                return Err(e.into());
-            }
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -136,11 +134,11 @@ impl Broker {
                 _ = Broker::keep_alive_timer(keep_alive) => {
                    // disconnect the client and deactivate the session
                      if let Some(session) = &client_session {
-                          let mut session = session.read().await;
+                          let session = session.read().await;
                             if session.connected() {
                                 // TODO send a disconnect packet to the client
                                 // TODO send a will message
-                                session_pool.write().await.deactivate(&session.id()).await;
+                                session_pool.write().await.deactivate(session.id()).await;
                             }
                      } else {
                         // no active session to deactivate, shutdown the stream
@@ -220,7 +218,7 @@ impl Broker {
             if let Some(session) = session_pool.activate(&session_id).await {
                 session
             } else {
-                // if the session is active, take over the session by disconnected the existing session
+                // if the session is active, take over the session by disconnecting the existing session
                 // and cloning properties for a new session if clean-start is false
                 if let Some(session) = session_pool.remove_active(&session_id) {
                     {
@@ -246,7 +244,7 @@ impl Broker {
         tokio::time::sleep(keep_alive).await;
     }
 
-    pub async fn handle_takeover(packet_stream: &mut PacketStream) {
+    async fn handle_takeover(packet_stream: &mut PacketStream) {
         // send a disconnect packet to the client with reason TakenOver
         packet_stream
             .write(&vaux_mqtt::Packet::Disconnect(vaux_mqtt::Disconnect::new(
