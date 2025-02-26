@@ -19,7 +19,7 @@ const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
 const DEFAULT_CLIENT_KEEP_ALIVE: Duration = Duration::from_secs(60);
 const MIN_KEEP_ALIVE: Duration = Duration::from_secs(30);
 const MAX_CONNECT_WAIT: Duration = Duration::from_secs(5);
-const DEFAULT_CHANNEL_SIZE: usize = 128;
+const DEFAULT_CHANNEL_SIZE: u16 = 128;
 
 pub type FilteredChannel = HashMap<PacketType, Sender<vaux_mqtt::Packet>>;
 
@@ -31,7 +31,7 @@ pub struct PacketChannel(
 impl PacketChannel {
     pub fn new() -> Self {
         let (sender, receiver): (Sender<vaux_mqtt::Packet>, Receiver<vaux_mqtt::Packet>) =
-            mpsc::channel(DEFAULT_CHANNEL_SIZE);
+            mpsc::channel(DEFAULT_CHANNEL_SIZE as usize);
         Self(sender, Some(receiver))
     }
 
@@ -88,6 +88,7 @@ impl Default for MqttClient {
             true,
             DEFAULT_RECV_MAX,
             true,
+            None,
         )
     }
 }
@@ -99,8 +100,15 @@ impl MqttClient {
         auto_ack: bool,
         receive_max: u16,
         auto_packet_id: bool,
+        channel_size: Option<u16>,
     ) -> Self {
-        let mut client = Self::new(client_id, auto_ack, receive_max, auto_packet_id);
+        let mut client = Self::new(
+            client_id,
+            auto_ack,
+            receive_max,
+            auto_packet_id,
+            channel_size,
+        );
         client.connection = Some(connection);
         client
     }
@@ -110,6 +118,7 @@ impl MqttClient {
         auto_ack: bool,
         receive_max: u16,
         auto_packet_id: bool,
+        channel_size: Option<u16>,
     ) -> Self {
         Self {
             connection: None,
@@ -120,8 +129,12 @@ impl MqttClient {
             session_expiry: DEFAULT_SESSION_EXPIRY,
             client_id: Arc::new(Mutex::new(Some(client_id.to_string()))),
             filter_channel: HashMap::new(),
-            packet_in: PacketChannel::new(),
-            packet_out: PacketChannel::new(),
+            packet_in: PacketChannel::new_with_size(
+                channel_size.unwrap_or(DEFAULT_CHANNEL_SIZE) as usize
+            ),
+            packet_out: PacketChannel::new_with_size(
+                channel_size.unwrap_or(DEFAULT_CHANNEL_SIZE) as usize
+            ),
             err_chan: None,
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,

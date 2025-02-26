@@ -138,7 +138,7 @@ impl ClientSession {
             Packet::Publish(mut p) => {
                 if p.qos() == QoSLevel::AtLeastOnce {
                     if self.auto_packet_id && p.packet_id.is_none() {
-                        self.last_packet_id += 1;
+                        self.last_packet_id = self.last_packet_id.wrapping_add(1);
                         p.packet_id = Some(self.last_packet_id);
                         self.pending_recv_ack
                             .insert(self.last_packet_id, Packet::Publish(p.clone()));
