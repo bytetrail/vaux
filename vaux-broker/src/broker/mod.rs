@@ -3,10 +3,11 @@ pub(crate) mod config;
 pub(crate) mod session;
 
 use crate::broker::session::Session;
-use std::collections::HashMap;
+use session::SessionPool;
+
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
-use std::sync::atomic::AtomicU32;
+
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::TcpListener;
@@ -16,7 +17,7 @@ use uuid::Uuid;
 use vaux_async::stream::{AsyncMqttStream, MqttStream, PacketStream};
 use vaux_mqtt::Packet::PingResponse;
 use vaux_mqtt::{
-    connect, ConnAck, Connect, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, Reason,
+    ConnAck, Connect, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, Reason,
 };
 
 pub const DEFAULT_PORT: u16 = 1883;
@@ -27,7 +28,6 @@ const INIT_STREAM_BUFFER_SIZE: usize = 4096;
 pub enum BrokerError {
     CodecError(MqttCodecError),
     IoError(std::io::Error),
-    SessionError,
     StreamError(vaux_async::stream::Error),
 }
 
@@ -36,7 +36,6 @@ impl std::fmt::Display for BrokerError {
         match self {
             BrokerError::CodecError(e) => write!(f, "codec error: {}", e),
             BrokerError::IoError(e) => write!(f, "io error: {}", e),
-            BrokerError::SessionError => write!(f, "session error"),
             BrokerError::StreamError(e) => write!(f, "stream error {}", e),
         }
     }
@@ -57,93 +56,6 @@ impl From<MqttCodecError> for BrokerError {
 impl From<vaux_async::stream::Error> for BrokerError {
     fn from(e: vaux_async::stream::Error) -> Self {
         BrokerError::StreamError(e)
-    }
-}
-
-#[derive(Debug, Default)]
-struct SessionPool {
-    active: HashMap<String, Arc<RwLock<Session>>>,
-    inactive: HashMap<String, Arc<RwLock<Session>>>,
-    active_sessions: AtomicU32,
-    inactive_sessions: AtomicU32,
-}
-
-impl SessionPool {
-    pub fn new() -> Self {
-        Default::default()
-    }
-
-    /// Inserts a new session into the pool. If the session is connected, the
-    /// active session count is incremented and the session is added to the active
-    /// session pool. If the session is not connected, the inactive session count
-    /// is incremented and the session is added to the inactive session pool.
-    pub async fn add(&mut self, session: &Arc<RwLock<Session>>) {
-        let active;
-        {
-            let session = session.read().await;
-            active = session.connected();
-        }
-        if active {
-            self.active_sessions
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            self.active
-                .insert(session.read().await.id().to_string(), Arc::clone(session));
-        } else {
-            self.inactive_sessions
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            self.inactive
-                .insert(session.read().await.id().to_string(), Arc::clone(session));
-        }
-    }
-
-    /// Removes a session from the pool. The active and inactive counts are decremented
-    /// as required and the session is removed from the appropriate pool.
-    ///
-    pub fn remove(&mut self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
-        if let Some(session) = self.active.remove(session_id) {
-            self.active_sessions
-                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-            Some(session)
-        } else if let Some(session) = self.inactive.remove(session_id) {
-            self.inactive_sessions
-                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-            Some(session)
-        } else {
-            None
-        }
-    }
-
-    /// Removes an active session from the pool. The session is removed from the active
-    /// pool and the active session count is decremented. The session is returned if found.
-    /// If the session is not found, the function returns None.
-    ///
-    pub fn remove_active(&mut self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
-        if let Some(session) = self.active.remove(session_id) {
-            self.active_sessions
-                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-            Some(session)
-        } else {
-            None
-        }
-    }
-
-    /// Retreives and activates a session if the inactive session pool contains the session.
-    /// The session is removed from the inactive pool and added to the active pool. The active
-    /// session count is incremented and the inactive session count is decremented.  If the
-    /// session is not found in the inactive pool, the function returns None.
-    ///
-    pub async fn activate(&mut self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
-        if let Some(session) = self.inactive.remove(session_id) {
-            self.active_sessions
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            self.active
-                .insert(session.read().await.id().to_string(), Arc::clone(&session));
-            self.inactive_sessions
-                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-            Some(session)
-        } else {
-            None
-        }
     }
 }
 
@@ -257,7 +169,7 @@ impl Broker {
     ) -> Result<Option<Arc<RwLock<Session>>>, BrokerError> {
         match packet {
             Packet::Connect(packet) => Broker::handle_connect(*packet, stream, session_pool).await,
-            Packet::PingRequest(packet) => {
+            Packet::PingRequest(_packet) => {
                 // allow clients without connected session to ping
                 let packet = PingResponse(FixedHeader::new(PacketType::PingResp));
                 stream.write(&packet).await?;

@@ -1,7 +1,6 @@
+mod broker;
 #[cfg(feature = "console")]
 mod tui;
-
-mod broker;
 
 use crate::broker::{DEFAULT_LISTEN_ADDR, DEFAULT_PORT};
 use broker::Broker;
