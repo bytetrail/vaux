@@ -14,7 +14,7 @@ use tokio::net::TcpListener;
 use tokio::select;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use vaux_async::stream::{AsyncMqttStream, MqttStream, PacketStream};
+use vaux_async::stream::{packet, AsyncMqttStream, MqttStream, PacketStream};
 use vaux_mqtt::Packet::PingResponse;
 use vaux_mqtt::{
     ConnAck, Connect, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, Reason,
@@ -134,7 +134,19 @@ impl Broker {
             // TODO separate out the session handling from pre-connect handling
             select! {
                 _ = Broker::keep_alive_timer(keep_alive) => {
-                    // handle the keep alive
+                   // disconnect the client and deactivate the session
+                     if let Some(session) = &client_session {
+                          let mut session = session.read().await;
+                            if session.connected() {
+                                // TODO send a disconnect packet to the client
+                                // TODO send a will message
+                                session_pool.write().await.deactivate(&session.id()).await;
+                            }
+                     } else {
+                        // no active session to deactivate, shutdown the stream
+                        stream.shutdown().await?;
+                        return Ok(());
+                     }
                 }
                 packet_result = stream.read() => {
                     match packet_result {

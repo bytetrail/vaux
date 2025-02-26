@@ -109,6 +109,30 @@ impl SessionPool {
             None
         }
     }
+
+    /// Deactivates a session if the active session pool contains the session.
+    /// The session is removed from the active pool and added to the inactive pool.
+    /// The active session count is decremented and the inactive session count is
+    /// incremented.  If the session is not found in the active pool, the function
+    /// returns None.
+    ///
+    /// The session `connected` flag is set to `false` if the session is found.
+    pub async fn deactivate(&mut self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
+        if let Some(session_guard) = self.active.remove(session_id) {
+            let mut session = session_guard.write().await;
+            session.set_connected(false);
+            self.inactive_sessions
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.inactive
+                .insert(session.id().to_string(), Arc::clone(&session_guard));
+            self.active_sessions
+                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            drop(session);
+            Some(session_guard)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -275,6 +299,18 @@ pub mod test {
     }
 
     #[tokio::test]
+    async fn test_add_inactive() {
+        let mut pool = SessionPool::new();
+        let session = Arc::new(RwLock::new(Session::new(
+            "test".to_string(),
+            Duration::from_secs(10),
+        )));
+        pool.add(&session).await;
+        assert_eq!(pool.active_sessions(), 0);
+        assert_eq!(pool.inactive_sessions(), 1);
+    }
+
+    #[tokio::test]
     async fn test_session_activate() {
         let mut pool = SessionPool::new();
         let session = Arc::new(RwLock::new(Session::new(
@@ -292,5 +328,21 @@ pub mod test {
         let session = session.read().await;
         assert_eq!(session.connected(), true);
         assert!(session.last_active.elapsed() < Duration::from_millis(500));
+    }
+
+    #[tokio::test]
+    async fn test_session_deactivate() {
+        let mut pool = SessionPool::new();
+        let mut session = Session::new("test".to_string(), Duration::from_secs(10));
+        session.set_connected(true);
+        let session = Arc::new(RwLock::new(session));
+        pool.add(&session).await;
+        pool.deactivate("test").await;
+        assert_eq!(pool.active_sessions(), 0);
+        assert_eq!(pool.inactive_sessions(), 1);
+        // get the session and validate connected flag
+        let session: &Arc<RwLock<Session>> = pool.inactive.get("test").unwrap();
+        let session = session.read().await;
+        assert_eq!(session.connected(), false);
     }
 }
