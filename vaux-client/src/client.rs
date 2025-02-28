@@ -357,7 +357,13 @@ impl MqttClient {
         };
         Ok(tokio::spawn(async move {
             match session
-                .connect(max_connect_wait, credentials, clean_start, will_message)
+                .connect(
+                    max_connect_wait,
+                    keep_alive,
+                    credentials,
+                    clean_start,
+                    will_message,
+                )
                 .await
             {
                 Ok(_) => *connected.write().await = true,

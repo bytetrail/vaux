@@ -1,56 +1,65 @@
 use std::{
     collections::HashMap,
-    sync::{atomic::AtomicU32, Arc},
+    sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::RwLock;
-use vaux_mqtt::{subscribe::Subscription, Connect, WillMessage};
-
-const BROKER_KEEP_ALIVE_FACTOR: f32 = 1.5;
+use tokio::sync::{
+    mpsc::{self, Receiver, Sender},
+    RwLock,
+};
+use vaux_mqtt::{subscribe::Subscription, Reason, WillMessage};
 
 #[derive(Debug, Default)]
 pub struct SessionPool {
+    session_expiry: Duration,
     active: HashMap<String, Arc<RwLock<Session>>>,
     inactive: HashMap<String, Arc<RwLock<Session>>>,
-    active_sessions: AtomicU32,
-    inactive_sessions: AtomicU32,
+    active_sessions: u32,
+    inactive_sessions: u32,
 }
 
 impl SessionPool {
-    pub fn new() -> Self {
-        Default::default()
+    pub fn new_with_expiry(expiry: Duration) -> Self {
+        SessionPool {
+            session_expiry: expiry,
+            ..Default::default()
+        }
+    }
+
+    pub fn session_expiry(&self) -> Duration {
+        self.session_expiry
+    }
+
+    pub fn set_session_expiry(&mut self, expiry: Duration) {
+        self.session_expiry = expiry;
     }
 
     pub fn active_sessions(&self) -> u32 {
         self.active_sessions
-            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     pub fn inactive_sessions(&self) -> u32 {
         self.inactive_sessions
-            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Inserts a new session into the pool. If the session is connected, the
     /// active session count is incremented and the session is added to the active
     /// session pool. If the session is not connected, the inactive session count
     /// is incremented and the session is added to the inactive session pool.
-    pub async fn add(&mut self, session: &Arc<RwLock<Session>>) {
+    pub async fn add(&mut self, session: Arc<RwLock<Session>>) {
         let active;
+        let session_id;
         {
             let session = session.read().await;
             active = session.connected();
+            session_id = session.id().to_string();
         }
         if active {
-            self.active_sessions
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            self.active
-                .insert(session.read().await.id().to_string(), Arc::clone(session));
+            self.active_sessions += 1;
+            self.active.insert(session_id, session);
         } else {
-            self.inactive_sessions
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            self.inactive
-                .insert(session.read().await.id().to_string(), Arc::clone(session));
+            self.inactive_sessions += 1;
+            self.inactive.insert(session_id, session);
         }
     }
 
@@ -59,12 +68,10 @@ impl SessionPool {
     ///
     pub fn remove(&mut self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
         if let Some(session) = self.active.remove(session_id) {
-            self.active_sessions
-                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            self.active_sessions -= 1;
             Some(session)
         } else if let Some(session) = self.inactive.remove(session_id) {
-            self.inactive_sessions
-                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            self.inactive_sessions -= 1;
             Some(session)
         } else {
             None
@@ -77,8 +84,7 @@ impl SessionPool {
     ///
     pub fn remove_active(&mut self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
         if let Some(session) = self.active.remove(session_id) {
-            self.active_sessions
-                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            self.active_sessions -= 1;
             Some(session)
         } else {
             None
@@ -97,14 +103,12 @@ impl SessionPool {
             let mut session = session_guard.write().await;
             session.set_connected(true);
             session.set_last_active();
-            self.active_sessions
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.active_sessions += 1;
             self.active
                 .insert(session.id().to_string(), Arc::clone(&session_guard));
-            self.inactive_sessions
-                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+            self.inactive_sessions -= 1;
             drop(session);
-            Some(session_guard)
+            Some(Arc::clone(&session_guard))
         } else {
             None
         }
@@ -119,20 +123,24 @@ impl SessionPool {
     /// The session `connected` flag is set to `false` if the session is found.
     pub async fn deactivate(&mut self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
         if let Some(session_guard) = self.active.remove(session_id) {
-            let mut session = session_guard.write().await;
-            session.set_connected(false);
-            self.inactive_sessions
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            self.inactive
-                .insert(session.id().to_string(), Arc::clone(&session_guard));
-            self.active_sessions
-                .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
-            drop(session);
+            let session_id;
+            {
+                let mut session = session_guard.write().await;
+                session.set_connected(false);
+                session_id = session.id().to_string();
+            }
+            self.inactive_sessions += 1;
+            self.inactive.insert(session_id, Arc::clone(&session_guard));
+            self.active_sessions -= 1;
             Some(session_guard)
         } else {
             None
         }
     }
+}
+
+pub(crate) enum SessionControl {
+    Disconnect(Reason),
 }
 
 #[derive(Debug)]
@@ -142,54 +150,44 @@ pub struct Session {
     connected: bool,
     orphaned: bool,
     keep_alive: Duration,
-    pub session_expiry: Duration,
+    pub session_expiry: Option<Duration>,
     will_message: Option<WillMessage>,
     subscriptions: Vec<Subscription>,
+    control: (Sender<SessionControl>, Option<Receiver<SessionControl>>),
 }
 
 impl Session {
     /// Creates a new session with the last active time set to Instant::now()
-    pub fn new(id: String, keep_alive: Duration) -> Self {
+    pub fn new(id: String, will_message: Option<WillMessage>, keep_alive: Duration) -> Self {
+        let (sender, receiver) = mpsc::channel(10);
         Session {
             id,
             last_active: Instant::now(),
             connected: false,
             orphaned: false,
             keep_alive,
-            session_expiry: Duration::new(0, 0),
-            will_message: None,
+            session_expiry: None,
+            will_message,
             subscriptions: Vec::new(),
+            control: (sender, Some(receiver)),
         }
     }
 
-    pub fn new_from_connect(connect: Connect) -> Self {
-        let keep_alive =
-            Duration::from_secs((connect.keep_alive as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64);
-        let will_message = connect.will_message.clone();
-        let session_expiry = if let Some(session_expirey) = connect
-            .properties()
-            .get_property(vaux_mqtt::PropertyType::SessionExpiryInterval)
-        {
-            match session_expirey {
-                vaux_mqtt::property::Property::SessionExpiryInterval(se) => {
-                    Duration::from_secs(*se as u64)
-                }
-                _ => Duration::new(0, 0),
-            }
-        } else {
-            Duration::new(0, 0)
-        };
+    pub fn sender(&self) -> Sender<SessionControl> {
+        self.control.0.clone()
+    }
 
-        Session {
-            id: connect.client_id.to_string(),
-            last_active: Instant::now(),
-            connected: true,
-            orphaned: false,
-            keep_alive,
-            session_expiry,
-            will_message,
-            subscriptions: Vec::new(),
-        }
+    pub async fn disconnect(&self, reason: Reason) {
+        // TODO - handle errors and return
+        self.control
+            .0
+            .send(SessionControl::Disconnect(reason))
+            .await
+            .expect("Failed to send disconnect message");
+    }
+
+    pub fn take_receiver(&mut self) -> Option<Receiver<SessionControl>> {
+        self.control.1.take()
     }
 
     pub fn clear(&mut self) {
@@ -234,90 +232,75 @@ impl Session {
     pub fn will_message(&self) -> Option<&WillMessage> {
         self.will_message.as_ref()
     }
+
+    pub fn expired(&self) -> bool {
+        if let Some(session_expiry) = self.session_expiry {
+            self.last_active.elapsed() > session_expiry
+        } else {
+            true
+        }
+    }
+
+    pub fn session_expiry(&self) -> Option<Duration> {
+        self.session_expiry
+    }
+
+    pub fn set_session_expiry(&mut self, session_expiry: Duration) {
+        self.session_expiry = Some(session_expiry);
+    }
 }
 
 #[cfg(test)]
 pub mod test {
-    use vaux_mqtt::property::Property;
 
     use super::*;
     use std::time::Duration;
 
     #[test]
     fn test_session_new() {
-        let session = Session::new("test".to_string(), Duration::from_secs(10));
+        let session = Session::new("test".to_string(), None, Duration::from_secs(10));
         assert_eq!(session.id(), "test");
         assert_eq!(session.connected(), false);
         assert_eq!(session.orphaned(), false);
         assert_eq!(session.keep_alive(), Duration::from_secs(10));
         assert_eq!(session.subscriptions.len(), 0);
         assert_eq!(session.will_message(), None);
-        assert_eq!(session.session_expiry, Duration::new(0, 0));
-    }
-
-    #[test]
-    fn test_session_new_from_connect() {
-        const TEST_KEEP_ALIVE: u16 = 55;
-        const TEST_EXPIRY: u32 = 33;
-
-        let mut connect = Connect::default();
-        connect.client_id = "test".to_string();
-        connect.keep_alive = TEST_KEEP_ALIVE;
-        connect.will_message = Some(WillMessage::new(vaux_mqtt::QoSLevel::AtLeastOnce, true));
-        connect
-            .properties_mut()
-            .set_property(Property::SessionExpiryInterval(TEST_EXPIRY));
-
-        let session = Session::new_from_connect(connect);
-        assert_eq!(session.id(), "test");
-        assert_eq!(session.connected(), true);
-        assert_eq!(session.orphaned(), false);
-        assert_eq!(
-            session.keep_alive(),
-            Duration::from_secs((TEST_KEEP_ALIVE as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64)
-        );
-        assert_eq!(session.subscriptions.len(), 0);
-        assert_eq!(
-            session.will_message(),
-            Some(&WillMessage::new(vaux_mqtt::QoSLevel::AtLeastOnce, true))
-        );
-        assert_eq!(
-            session.session_expiry,
-            Duration::from_secs(TEST_EXPIRY as u64)
-        );
+        assert_eq!(session.session_expiry, None);
     }
 
     #[tokio::test]
     async fn test_add_active() {
-        let mut pool = SessionPool::new();
-        let mut session = Session::new("test".to_string(), Duration::from_secs(10));
+        let mut pool = SessionPool::new_with_expiry(Duration::from_secs(30));
+        let mut session = Session::new("test".to_string(), None, Duration::from_secs(10));
         session.set_connected(true);
         let session = Arc::new(RwLock::new(session));
-        pool.add(&session).await;
+        pool.add(session).await;
         assert_eq!(pool.active_sessions(), 1);
         assert_eq!(pool.inactive_sessions(), 0);
     }
 
     #[tokio::test]
     async fn test_add_inactive() {
-        let mut pool = SessionPool::new();
+        let mut pool = SessionPool::new_with_expiry(Duration::from_secs(30));
         let session = Arc::new(RwLock::new(Session::new(
             "test".to_string(),
+            None,
             Duration::from_secs(10),
         )));
-        pool.add(&session).await;
+        pool.add(session).await;
         assert_eq!(pool.active_sessions(), 0);
         assert_eq!(pool.inactive_sessions(), 1);
     }
 
     #[tokio::test]
     async fn test_session_activate() {
-        let mut pool = SessionPool::new();
+        let mut pool = SessionPool::new_with_expiry(Duration::from_secs(30));
         let session = Arc::new(RwLock::new(Session::new(
             "test_1".to_string(),
+            None,
             Duration::from_secs(10),
         )));
-        pool.add(&session).await;
+        pool.add(session).await;
         assert_eq!(pool.active_sessions(), 0);
         assert_eq!(pool.inactive_sessions(), 1);
         pool.activate("test_1").await;
@@ -332,11 +315,11 @@ pub mod test {
 
     #[tokio::test]
     async fn test_session_deactivate() {
-        let mut pool = SessionPool::new();
-        let mut session = Session::new("test".to_string(), Duration::from_secs(10));
+        let mut pool = SessionPool::new_with_expiry(Duration::from_secs(30));
+        let mut session = Session::new("test".to_string(), None, Duration::from_secs(10));
         session.set_connected(true);
         let session = Arc::new(RwLock::new(session));
-        pool.add(&session).await;
+        pool.add(session).await;
         pool.deactivate("test").await;
         assert_eq!(pool.active_sessions(), 0);
         assert_eq!(pool.inactive_sessions(), 1);

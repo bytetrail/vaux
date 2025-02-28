@@ -43,11 +43,13 @@ impl ClientSession {
     pub(crate) async fn connect(
         &mut self,
         max_connect_wait: Duration,
+        keep_alive: Duration,
         credentials: Option<(String, String)>,
         clean_start: bool,
         will: Option<WillMessage>,
     ) -> crate::Result<ConnAck> {
         let mut connect = Connect::default();
+        connect.keep_alive = keep_alive.as_secs() as u16;
         connect.clean_start = clean_start;
         {
             let set_id = self.client_id.lock().await;

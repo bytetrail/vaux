@@ -1,5 +1,5 @@
 use crate::codec::{get_bin, get_utf8, put_bin, MqttCodecError};
-use crate::property::PropertyBundle;
+use crate::property::{Property, PropertyBundle};
 use crate::{
     put_utf8, variable_byte_int_size, Decode, Encode, FixedHeader, PacketType, PropertyType,
     QoSLevel, Size, WillMessage,
@@ -34,6 +34,28 @@ pub struct Connect {
 }
 
 impl Connect {
+    pub fn session_expiry(&self) -> Option<u32> {
+        self.props
+            .get_property(PropertyType::SessionExpiryInterval)
+            .and_then(|p| {
+                if let Property::SessionExpiryInterval(interval) = p {
+                    Some(*interval)
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn set_session_expiry(&mut self, interval: u32) {
+        if interval == 0 {
+            self.props
+                .clear_property(PropertyType::SessionExpiryInterval);
+            return;
+        }
+        self.props
+            .set_property(Property::SessionExpiryInterval(interval));
+    }
+
     pub fn properties(&self) -> &PropertyBundle {
         &self.props
     }

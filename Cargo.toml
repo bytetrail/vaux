@@ -8,5 +8,5 @@ members = [
     "vaux-test",
     "vaux-pub",
     "vaux-sub",
-    "prop-macro",
+    "prop-macro", "vaux",
 ]

@@ -1,12 +1,12 @@
-mod broker;
 #[cfg(feature = "console")]
 mod tui;
 
-use crate::broker::{DEFAULT_LISTEN_ADDR, DEFAULT_PORT};
-use broker::Broker;
 use clap::Parser;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
+use std::time::Duration;
+use vaux_broker::Broker;
+use vaux_broker::{DEFAULT_LISTEN_ADDR, DEFAULT_PORT};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about=None)]
@@ -21,6 +21,8 @@ struct Args {
     max_sessions: Option<u32>,
     #[clap(short = 'a', long)]
     max_active_sessions: Option<u32>,
+    #[clap(short = 'x', long)]
+    session_expiration: Option<u32>,
 }
 
 #[tokio::main]
@@ -48,6 +50,11 @@ async fn main() {
     let listen_addr = SocketAddr::from((listen_addr, listen_port));
 
     let mut broker = Broker::new(listen_addr);
+    if let Some(expiration) = args.session_expiration {
+        broker
+            .set_session_expiration(Duration::from_secs(expiration as u64))
+            .await;
+    }
     // TODO initialize from storage for long lived sessions
     let result = broker.run().await;
     println!("Broker started on: {}", listen_addr);
