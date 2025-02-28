@@ -9,6 +9,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::Sender;
+use tokio::task::yield_now;
 use tokio::task::JoinHandle;
 
 use std::sync::Arc;
@@ -129,28 +130,24 @@ impl Broker {
         match TcpListener::bind(self.listen_addr).await {
             Ok(listener) => {
                 let mut command = self.command_channel.1.take().unwrap();
-                let handle: JoinHandle<Result<(), BrokerError>> = tokio::spawn(async move {
+                let _handle: JoinHandle<Result<(), BrokerError>> = tokio::spawn(async move {
                     loop {
                         select! {
                             cmd = command.recv() => {
                                 match cmd {
                                     Some(BrokerCommand::Stop) => {
-                                        println!("broker stopping");
                                         return Ok(());
                                     }
                                     Some(BrokerCommand::PauseAccept) => {
-                                        println!("broker pausing accept");
                                         // TODO pause accept
                                     }
                                     Some(BrokerCommand::ResumeAccept) => {
-                                        println!("broker resuming accept");
                                         // TODO resume accept
                                     }
                                     Some(BrokerCommand::SetSessionExpiry(expiration)) => {
                                         session_pool.write().await.set_session_expiry(expiration);
                                     }
                                     None => {
-                                        println!("broker command channel closed");
                                         return Ok(());
                                     }
                                 }
@@ -180,10 +177,7 @@ impl Broker {
                 });
                 Ok(())
             }
-            Err(e) => {
-                println!("broker error binding to address: {}", e);
-                Err(e.into())
-            }
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -194,9 +188,33 @@ impl Broker {
         let mut connected = false;
         let mut keep_alive = DEFAULT_KEEP_ALIVE;
         let mut client_session: Option<Arc<RwLock<Session>>> = None;
+        let mut session_control: Option<Receiver<SessionControl>> = None;
         loop {
             // TODO separate out the session handling from pre-connect handling
             select! {
+                ctrl = Broker::handle_control(&mut session_control) => {
+                    if let Some(control) = ctrl {
+                        match control {
+                            SessionControl::Disconnect(reason) => {
+                                if let Some(session) = &client_session {
+                                    let session_id = {
+                                        let session = session.read().await;
+                                        (*session).id().to_string()
+                                    };
+                                    let _session_pool  = Arc::clone(&session_pool);
+                                    {
+                                        _session_pool.write().await.deactivate(&session_id).await;
+                                    }
+                                    stream.write(&Packet::Disconnect(Disconnect::new(reason))).await?;
+                                } else {
+                                    // no active session to deactivate, shutdown the stream
+                                    stream.shutdown().await?;
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+                }
                 _ = Broker::keep_alive_timer(keep_alive) => {
                    // disconnect the client and deactivate the session
                      if let Some(session) = &client_session {
@@ -221,9 +239,11 @@ impl Broker {
                             if !connected {
                                 if let Some(session) = Broker::handle_pre_connect(packet, stream, Arc::clone(&session_pool)).await? {
                                     {
-                                        let session = session.read().await;
+                                        let mut session = session.write().await;
                                         keep_alive = session.keep_alive();
+                                        session_control = session.take_control_receiver();
                                         println!("session keep alive: {:?}", keep_alive);
+
                                     }
                                     client_session = Some(Arc::clone(&session));
                                 } else {
@@ -241,6 +261,19 @@ impl Broker {
                     }
                 }
             }
+        }
+    }
+
+    async fn handle_control(
+        control_channel: &mut Option<Receiver<SessionControl>>,
+    ) -> Option<SessionControl> {
+        loop {
+            if let Some(ref mut rx) = control_channel {
+                if let Some(control) = rx.recv().await {
+                    return Some(control);
+                }
+            }
+            yield_now().await;
         }
     }
 
@@ -271,7 +304,6 @@ impl Broker {
         stream: &mut PacketStream,
         session_pool: Arc<RwLock<SessionPool>>,
     ) -> Result<Option<Arc<RwLock<Session>>>, BrokerError> {
-        println!("connect: {:?}", connect);
         let session_id: String;
         let mut ack = ConnAck::default();
         // handle keep alive request
@@ -286,25 +318,16 @@ impl Broker {
         };
         // handle the session expiry request
         let session_expiry = if let Some(requested_expiry) = connect.session_expiry() {
-            println!("requested session expiry: {}", requested_expiry);
             if requested_expiry > 0 {
-                println!("requested session expiry > 0: {}", requested_expiry);
                 // set the ack expiry if the requested expiry is less greater than max allowed
-                let mut max_expiry = 0;
+                let max_expiry: u32;
                 {
-                    println!("read session pool for max expiry");
                     max_expiry = session_pool.read().await.session_expiry().as_secs() as u32;
-                    println!("max session expiry: {}", max_expiry);
                 }
                 if requested_expiry > max_expiry {
-                    println!("requested session expiry > max: {}", requested_expiry);
                     ack.set_session_expiry(max_expiry);
                     Some(Duration::from_secs(max_expiry as u64))
                 } else {
-                    println!(
-                        "granted requested session expiry <= max: {}",
-                        requested_expiry
-                    );
                     Some(Duration::from_secs(requested_expiry as u64))
                 }
             } else {
@@ -326,37 +349,40 @@ impl Broker {
         let mut session_pool = session_pool.write().await;
         let session: Arc<RwLock<Session>> =
             if let Some(session) = session_pool.activate(&session_id).await {
-                println!("session: {:?} activated", session_id);
-                if connect.clean_start {
-                    // if the session is active and clean-start is true, clear the session
+                {
                     let mut session = session.write().await;
-                    session.clear();
-                } else {
-                    ack.session_present = true;
+                    if connect.clean_start {
+                        // if the session is active and clean-start is true, clear the session
+                        session.clear();
+                    } else {
+                        ack.session_present = true;
+                    }
+                    // take over the session control channel
+                    session.reset_control();
                 }
                 session
             } else {
-                println!("session: {:?} not found in deactivated", session_id);
                 // if the session is active, take over the session by disconnecting the existing session
                 // and cloning properties for a new session if clean-start is false
                 if let Some(session) = session_pool.remove_active(&session_id) {
-                    println!("session: {} taken over", session_id);
                     {
+                        // TODO handle errors
+                        let _ = Broker::handle_takeover(Arc::clone(&session)).await;
                         let mut session = session.write().await;
-                        Broker::handle_takeover(stream).await;
                         if connect.clean_start {
                             session.clear();
                         } else {
                             ack.session_present = true;
                         }
+                        // take over the session control channel
+                        session.reset_control();
                     }
                     session
                 } else {
-                    println!("created session: {:?}", session_id);
                     // create a new session from the connect request
-                    let new_session =
+                    let mut new_session =
                         Session::new(session_id.clone(), connect.will_message.clone(), keep_alive);
-                    println!("new session: {:?}", new_session);
+                    new_session.set_connected(true);
 
                     let new_session = Arc::new(RwLock::new(new_session));
                     session_pool.add(Arc::clone(&new_session)).await;
@@ -382,6 +408,7 @@ impl Broker {
     }
 
     async fn handle_takeover(session: Arc<RwLock<Session>>) -> Result<(), BrokerError> {
+        println!("*** session: {:?} taken over", session.read().await.id());
         // send a disconnect packet to the client with reason TakenOver
         session
             .read()
@@ -389,7 +416,7 @@ impl Broker {
             .disconnect(Reason::SessionTakeOver)
             .await;
         // TODO wait for disconnect to complete from session state
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
         Ok(())
     }
 }

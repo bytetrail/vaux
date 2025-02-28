@@ -173,8 +173,17 @@ impl Session {
         }
     }
 
+    pub fn reset_control(&mut self) {
+        let (sender, receiver) = mpsc::channel(10);
+        self.control = (sender, Some(receiver));
+    }
+
     pub fn sender(&self) -> Sender<SessionControl> {
         self.control.0.clone()
+    }
+
+    pub fn take_control_receiver(&mut self) -> Option<Receiver<SessionControl>> {
+        self.control.1.take()
     }
 
     pub async fn disconnect(&self, reason: Reason) {
@@ -184,10 +193,6 @@ impl Session {
             .send(SessionControl::Disconnect(reason))
             .await
             .expect("Failed to send disconnect message");
-    }
-
-    pub fn take_receiver(&mut self) -> Option<Receiver<SessionControl>> {
-        self.control.1.take()
     }
 
     pub fn clear(&mut self) {
