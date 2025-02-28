@@ -78,6 +78,16 @@ impl SessionPool {
         }
     }
 
+    /// Retreives an active session from the pool if the session is found in the active
+    /// session pool. The session is returned if found, otherwise None is returned.
+    /// The session is not removed from the pool.
+    ///
+    pub fn get_active(&self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
+        self.active
+            .get(session_id)
+            .map(|session| Arc::clone(session))
+    }
+
     /// Removes an active session from the pool. The session is removed from the active
     /// pool and the active session count is decremented. The session is returned if found.
     /// If the session is not found, the function returns None.

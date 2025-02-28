@@ -201,9 +201,19 @@ impl Broker {
                                         let session = session.read().await;
                                         (*session).id().to_string()
                                     };
-                                    let _session_pool  = Arc::clone(&session_pool);
-                                    {
-                                        _session_pool.write().await.deactivate(&session_id).await;
+                                    match reason {
+                                        Reason::SessionTakeOver => {
+                                            // the session will already be deactivated and taken over
+                                            // by another client, just send the disconnect packet
+                                        }
+                                        _ => {
+                                            // currently all other cases will deactivate the session
+                                            let _session_pool  = Arc::clone(&session_pool);
+                                            {
+                                                // in some cases the session pool will not have the session
+                                                _session_pool.write().await.deactivate(&session_id).await;
+                                            }
+                                        }
                                     }
                                     stream.write(&Packet::Disconnect(Disconnect::new(reason))).await?;
                                 } else {
@@ -242,7 +252,6 @@ impl Broker {
                                         let mut session = session.write().await;
                                         keep_alive = session.keep_alive();
                                         session_control = session.take_control_receiver();
-                                        println!("session keep alive: {:?}", keep_alive);
 
                                     }
                                     client_session = Some(Arc::clone(&session));
@@ -364,7 +373,7 @@ impl Broker {
             } else {
                 // if the session is active, take over the session by disconnecting the existing session
                 // and cloning properties for a new session if clean-start is false
-                if let Some(session) = session_pool.remove_active(&session_id) {
+                if let Some(session) = session_pool.get_active(&session_id) {
                     {
                         // TODO handle errors
                         let _ = Broker::handle_takeover(Arc::clone(&session)).await;
@@ -376,6 +385,7 @@ impl Broker {
                         }
                         // take over the session control channel
                         session.reset_control();
+                        session.set_last_active();
                     }
                     session
                 } else {
@@ -383,7 +393,6 @@ impl Broker {
                     let mut new_session =
                         Session::new(session_id.clone(), connect.will_message.clone(), keep_alive);
                     new_session.set_connected(true);
-
                     let new_session = Arc::new(RwLock::new(new_session));
                     session_pool.add(Arc::clone(&new_session)).await;
                     new_session
@@ -398,7 +407,6 @@ impl Broker {
             }
         }
         stream.write(&Packet::ConnAck(ack)).await?;
-        println!("session: {:?} connected", session_id);
         Ok(Some(Arc::clone(&session)))
         //Ok(None)
     }
@@ -408,7 +416,6 @@ impl Broker {
     }
 
     async fn handle_takeover(session: Arc<RwLock<Session>>) -> Result<(), BrokerError> {
-        println!("*** session: {:?} taken over", session.read().await.id());
         // send a disconnect packet to the client with reason TakenOver
         session
             .read()
