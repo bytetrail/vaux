@@ -26,34 +26,44 @@ pub async fn basic_connect() {
 
 #[tokio::test]
 pub async fn connect_with_takeover() {
+    const TAKEOVER_CLIENT_ID: &str = "takeover_client_id";
+    const SESSION_EXPIRY: u32 = 1000;
+    const CONNECT_TIMEOUT: u64 = 5000;
+    const TEST_PORT: u16 = 8384;
     let listen_addr = "127.0.0.1:8384";
     let mut broker = vaux_broker::Broker::new(listen_addr.parse().unwrap());
     let result = broker.run().await;
     assert!(result.is_ok());
 
     let mut client_one = vaux_client::ClientBuilder::new(
-        MqttConnection::new().with_host("127.0.0.1").with_port(8384),
+        MqttConnection::new()
+            .with_host("127.0.0.1")
+            .with_port(TEST_PORT),
     )
-    .with_client_id("takeover_client_id")
+    .with_client_id(TAKEOVER_CLIENT_ID)
     .with_auto_ack(true)
-    .with_session_expiry(5555)
+    .with_session_expiry(SESSION_EXPIRY)
     .build()
     .expect("failed to create client");
 
     let client_one_handle = client_one
-        .try_start(Duration::from_millis(5000), true)
+        .try_start(Duration::from_millis(CONNECT_TIMEOUT), true)
         .await
         .expect("failed to start client");
 
     let client_two = vaux_client::ClientBuilder::new(
-        MqttConnection::new().with_host("127.0.0.1").with_port(8384),
+        MqttConnection::new()
+            .with_host("127.0.0.1")
+            .with_port(TEST_PORT),
     )
-    .with_client_id("takeover_client_id")
+    .with_client_id(TAKEOVER_CLIENT_ID)
     .with_auto_ack(true)
-    .with_session_expiry(6666)
+    .with_session_expiry(SESSION_EXPIRY)
     .build();
     if let Ok(mut client) = client_two {
-        let result = client.try_start(Duration::from_millis(5000), true).await;
+        let result = client
+            .try_start(Duration::from_millis(CONNECT_TIMEOUT), true)
+            .await;
         assert!(result.is_ok());
     } else {
         panic!("Failed to create client");
