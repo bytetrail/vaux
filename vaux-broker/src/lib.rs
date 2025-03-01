@@ -259,12 +259,13 @@ impl Broker {
                                     continue;
                                 }
                                 connected = true;
-                            } else {
-                                Broker::handle_packet(packet, stream, Arc::clone(&session_pool)).await?;
+                            } else if let Some(session) = &client_session {
+                                Broker::handle_packet(packet, stream, Arc::clone(&session), Arc::clone(&session_pool)).await?;
                             }
+                            // TODO evaluate cases where connected and session may be None
                         }
                         Ok(None) => {
-                            // handle the disconnect
+                            // handle the stream disconnect
                         }
                         Err(e) => {
                             return Err(e.into());
@@ -278,6 +279,7 @@ impl Broker {
     async fn handle_packet(
         packet: Packet,
         stream: &mut PacketStream,
+        session: Arc<RwLock<Session>>,
         _session_pool: Arc<RwLock<SessionPool>>,
     ) -> Result<(), BrokerError> {
         match packet {
@@ -286,10 +288,28 @@ impl Broker {
                 stream.write(&packet).await?;
                 Ok(())
             }
-            _ => {
-                // TODO handle other packets
+            Packet::Disconnect(packet) => {
+                if let Reason::Success = packet.reason {
+                    // discard the will message
+                    {
+                        let mut session = session.write().await;
+                        session.clear_will();
+                    }
+                } else {
+                    // TODO send the will message
+                }
+                // deactivate the session
+                {
+                    let session_id = {
+                        let session = session.read().await;
+                        (*session).id().to_string()
+                    };
+                    let _session_pool = Arc::clone(&_session_pool);
+                    _session_pool.write().await.deactivate(&session_id).await;
+                }
                 Ok(())
             }
+            _ => Ok(()),
         }
     }
 
@@ -376,48 +396,54 @@ impl Broker {
             session_id = connect.client_id.clone();
         }
         let mut session_pool = session_pool.write().await;
-        let session: Arc<RwLock<Session>> =
+        let session: Arc<RwLock<Session>> = if connect.clean_start {
+            // clean start will remove any existing session if it exists and create a new session
+            // if the session is active, the session will be taken over by the new client
+            if let Some(existing_session) = session_pool.remove(session_id.as_str()) {
+                let connected = { existing_session.read().await.connected() };
+                if connected {
+                    // send a disconnect packet to the client with reason TakenOver
+                    let _ = Broker::handle_takeover(Arc::clone(&existing_session)).await;
+                }
+            }
+            let mut new_session =
+                Session::new(session_id.clone(), connect.will_message.clone(), keep_alive);
+            new_session.set_connected(true);
+            let new_session = Arc::new(RwLock::new(new_session));
+            session_pool.add(Arc::clone(&new_session)).await;
+            new_session
+        } else {
+            // activate existing session if in the inactive pool
             if let Some(session) = session_pool.activate(&session_id).await {
                 {
                     let mut session = session.write().await;
-                    if connect.clean_start {
-                        // if the session is active and clean-start is true, clear the session
-                        session.clear();
-                    } else {
-                        ack.session_present = true;
-                    }
+                    ack.session_present = true;
                     // take over the session control channel
                     session.reset_control();
                 }
                 session
-            } else {
-                // if the session is active, take over the session by disconnecting the existing session
-                // and cloning properties for a new session if clean-start is false
-                if let Some(session) = session_pool.get_active(&session_id) {
-                    {
-                        // TODO handle errors
-                        let _ = Broker::handle_takeover(Arc::clone(&session)).await;
-                        let mut session = session.write().await;
-                        if connect.clean_start {
-                            session.clear();
-                        } else {
-                            ack.session_present = true;
-                        }
-                        // take over the session control channel
-                        session.reset_control();
-                        session.set_last_active();
-                    }
-                    session
-                } else {
-                    // create a new session from the connect request
-                    let mut new_session =
-                        Session::new(session_id.clone(), connect.will_message.clone(), keep_alive);
-                    new_session.set_connected(true);
-                    let new_session = Arc::new(RwLock::new(new_session));
-                    session_pool.add(Arc::clone(&new_session)).await;
-                    new_session
+            } else if let Some(session) = session_pool.get_active(&session_id) {
+                // take over an existing session if it is active and clean start is false
+                {
+                    // TODO handle errors
+                    let _ = Broker::handle_takeover(Arc::clone(&session)).await;
+                    let mut session = session.write().await;
+                    ack.session_present = true;
+                    // take over the session control channel
+                    session.reset_control();
+                    session.set_last_active();
                 }
-            };
+                session
+            } else {
+                // create a new session from the connect request
+                let mut new_session =
+                    Session::new(session_id.clone(), connect.will_message.clone(), keep_alive);
+                new_session.set_connected(true);
+                let new_session = Arc::new(RwLock::new(new_session));
+                session_pool.add(Arc::clone(&new_session)).await;
+                new_session
+            }
+        };
         drop(session_pool);
         // set the session expiration
         {

@@ -205,9 +205,11 @@ impl Session {
             .expect("Failed to send disconnect message");
     }
 
-    pub fn clear(&mut self) {
-        self.subscriptions.clear();
-        // TODO - remove the subscriptions from the broker subscription pool
+    /// Clears the will message from the session. This is typically done on a successful
+    /// disconnect `0x00` `Success`. See MQTT 5.0 specification,
+    /// (3.14.4 DICONNECT Actions)[https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901216]
+    pub fn clear_will(&mut self) {
+        self.will_message = None;
     }
 
     pub fn id(&self) -> &str {
