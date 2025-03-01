@@ -5,11 +5,8 @@ edition = "2021"
 authors = ["ByteTrail, LLC"]
 description = "MQTT Broker"
 
-[features]
-console = ["dep:ratatui"]
 
 [dependencies]
-clap = { version = "4.4", features = ["derive"] }
 uuid = { version = "1.0.0", features = ["v4"] }
 tokio = { version = "1.17.0", features = ["full"] }
 tokio-util = { version = "0.7.0", features = ["codec"] }
@@ -17,4 +14,9 @@ futures = "0.3.21"
 bytes = "1.1.0"
 vaux-mqtt = { path = "../vaux-mqtt" }
 vaux-async = { path = "../vaux-async" }
-ratatui = { version = "0.29.0", optional = true }
+
+
+[dev-dependencies]
+vaux-client = { path = "../vaux-client" }
+vaux-mqtt = { path = "../vaux-mqtt" }
+vaux-async = { path = "../vaux-async" }

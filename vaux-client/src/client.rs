@@ -79,6 +79,7 @@ pub struct MqttClient {
     pub(crate) keep_alive: Duration,
     max_connect_wait: Duration,
     pub(crate) will_message: Option<vaux_mqtt::WillMessage>,
+    pub(crate) pingresp: bool,
 }
 
 impl Default for MqttClient {
@@ -140,7 +141,16 @@ impl MqttClient {
             keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
             max_connect_wait: MAX_CONNECT_WAIT,
             will_message: None,
+            pingresp: false,
         }
+    }
+
+    pub fn pingresp(&self) -> bool {
+        self.pingresp
+    }
+
+    pub(crate) fn set_pingresp(&mut self, pingresp: bool) {
+        self.pingresp = pingresp;
     }
 
     pub fn packet_producer(&mut self) -> Sender<Packet> {
@@ -193,6 +203,13 @@ impl MqttClient {
 
     pub(crate) fn set_will_message(&mut self, will_message: Option<vaux_mqtt::WillMessage>) {
         self.will_message = will_message;
+    }
+
+    /// Helper method to ping the broker.
+    ///
+    pub async fn ping(&mut self) -> std::result::Result<(), SendError<Packet>> {
+        let ping = vaux_mqtt::Packet::PingRequest(Default::default());
+        self.packet_in.0.send(ping).await
     }
 
     /// Helper method to publish a message to the given topic. This helper
@@ -357,7 +374,13 @@ impl MqttClient {
         };
         Ok(tokio::spawn(async move {
             match session
-                .connect(max_connect_wait, credentials, clean_start, will_message)
+                .connect(
+                    max_connect_wait,
+                    keep_alive,
+                    credentials,
+                    clean_start,
+                    will_message,
+                )
                 .await
             {
                 Ok(_) => *connected.write().await = true,

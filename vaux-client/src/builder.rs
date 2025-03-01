@@ -42,6 +42,7 @@ pub struct ClientBuilder {
     filtered_consumer: Option<HashMap<PacketType, Sender<vaux_mqtt::Packet>>>,
     error_out: Option<Sender<MqttError>>,
     will_message: Option<WillMessage>,
+    pingresp: bool,
 }
 
 impl Default for ClientBuilder {
@@ -60,6 +61,7 @@ impl Default for ClientBuilder {
             filtered_consumer: None,
             error_out: None,
             will_message: None,
+            pingresp: false,
         }
     }
 }
@@ -179,6 +181,14 @@ impl ClientBuilder {
         self
     }
 
+    /// Sets the pingresp filter for the MQTT client. By default the client will not pass
+    /// PINGRESP packets to the packet consumer. If with_pingresp is set to true, the
+    /// client will pass PINGRESP packets to the packet consumer.
+    pub fn with_pingresp(mut self, pingresp: bool) -> Self {
+        self.pingresp = pingresp;
+        self
+    }
+
     pub fn build(self) -> Result<crate::MqttClient, BuilderError> {
         if self.keep_alive < MIN_KEEP_ALIVE {
             return Err(BuilderError::MinKeepAlive);
@@ -200,6 +210,7 @@ impl ClientBuilder {
             client.set_error_out(error_out);
         }
         client.set_will_message(self.will_message);
+        client.set_pingresp(self.pingresp);
         Ok(client)
     }
 }

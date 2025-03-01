@@ -1,5 +1,5 @@
 use crate::codec::Reason;
-use crate::property::PropertyBundle;
+use crate::property::{Property, PropertyBundle};
 use crate::{Decode, Encode, PropertyType, Size};
 use crate::{FixedHeader, MqttCodecError, PacketType};
 use bytes::{Buf, BufMut, BytesMut};
@@ -38,6 +38,49 @@ impl ConnAck {
 
     pub fn reason(&self) -> Reason {
         self.reason
+    }
+
+    pub fn session_expiry(&self) -> Option<u32> {
+        self.properties
+            .get_property(PropertyType::SessionExpiryInterval)
+            .and_then(|p| {
+                if let Property::SessionExpiryInterval(interval) = p {
+                    Some(*interval)
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn set_session_expiry(&mut self, interval: u32) {
+        if interval == 0 {
+            self.properties
+                .clear_property(PropertyType::SessionExpiryInterval);
+            return;
+        }
+        self.properties
+            .set_property(Property::SessionExpiryInterval(interval));
+    }
+
+    pub fn server_keep_alive(&self) -> Option<u16> {
+        self.properties
+            .get_property(PropertyType::KeepAlive)
+            .and_then(|p| {
+                if let Property::KeepAlive(keep_alive) = p {
+                    Some(*keep_alive)
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn set_server_keep_alive(&mut self, keep_alive: u16) {
+        if keep_alive == 0 {
+            self.properties.clear_property(PropertyType::KeepAlive);
+            return;
+        }
+        self.properties
+            .set_property(Property::KeepAlive(keep_alive));
     }
 
     pub fn properties(&self) -> &PropertyBundle {
