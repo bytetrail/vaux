@@ -185,7 +185,7 @@ impl ClientBuilder {
     /// PINGRESP packets to the packet consumer. If with_pingresp is set to true, the
     /// client will pass PINGRESP packets to the packet consumer.
     pub fn with_pingresp(mut self, pingresp: bool) -> Self {
-        self.pingresp = true;
+        self.pingresp = pingresp;
         self
     }
 
