@@ -1,2 +1,2 @@
-const MAX_TOPIC_LEN: usize = 1024;
-const MAX_TOPIC_MEM: usize = 1024 * 100;
+const DEFAULT_MAX_TOPIC_NAME_LEN: usize = 4096;
+const DEFAULT_MAX_TOPIC_MEM: usize = 1024 * 1000;

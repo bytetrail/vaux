@@ -259,6 +259,8 @@ impl Broker {
                                     continue;
                                 }
                                 connected = true;
+                            } else {
+                                Broker::handle_packet(packet, stream, Arc::clone(&session_pool)).await?;
                             }
                         }
                         Ok(None) => {
@@ -269,6 +271,24 @@ impl Broker {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    async fn handle_packet(
+        packet: Packet,
+        stream: &mut PacketStream,
+        _session_pool: Arc<RwLock<SessionPool>>,
+    ) -> Result<(), BrokerError> {
+        match packet {
+            Packet::PingRequest(_) => {
+                let packet = PingResponse(FixedHeader::new(PacketType::PingResp));
+                stream.write(&packet).await?;
+                Ok(())
+            }
+            _ => {
+                // TODO handle other packets
+                Ok(())
             }
         }
     }

@@ -51,7 +51,7 @@ pub async fn connect_with_takeover() {
         .await
         .expect("failed to start client");
 
-    let client_two = vaux_client::ClientBuilder::new(
+    let mut client_two = vaux_client::ClientBuilder::new(
         MqttConnection::new()
             .with_host("127.0.0.1")
             .with_port(TEST_PORT),
@@ -59,14 +59,26 @@ pub async fn connect_with_takeover() {
     .with_client_id(TAKEOVER_CLIENT_ID)
     .with_auto_ack(true)
     .with_session_expiry(SESSION_EXPIRY)
-    .build();
-    if let Ok(mut client) = client_two {
-        let result = client
-            .try_start(Duration::from_millis(CONNECT_TIMEOUT), true)
-            .await;
-        assert!(result.is_ok());
-    } else {
-        panic!("Failed to create client");
+    .build()
+    .expect("failed to create client");
+
+    let _client_two_handle = client_two
+        .try_start(Duration::from_millis(CONNECT_TIMEOUT), true)
+        .await
+        .expect("failed to start client");
+    // get the client two packet out receiver
+    let mut consumer = client_two
+        .take_packet_consumer()
+        .expect("failed to get packet out receiver");
+    // PING using client two and verify PINGRESP
+    client_two.ping().await.expect("failed to ping");
+    let packet = consumer.recv().await.expect("failed to receive packet");
+    match packet {
+        vaux_mqtt::Packet::PingResponse(_) => {
+            // PINGRESP received
+            println!("Received PINGRESP");
+        }
+        _ => panic!("Expected PINGRESP"),
     }
     broker.stop().await;
     let result = client_one_handle.await;

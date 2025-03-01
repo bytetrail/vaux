@@ -33,6 +33,7 @@ pub(crate) struct ClientSession {
     auto_packet_id: bool,
     last_packet_id: u16,
     auto_ack: bool,
+    pingresp: bool,
 }
 
 impl ClientSession {
@@ -192,7 +193,7 @@ impl ClientSession {
         match &packet {
             Packet::PingResponse(_pingresp) => {
                 // do not send to consumer
-                packet_to_consumer = false;
+                packet_to_consumer = !self.pingresp;
             }
             Packet::Disconnect(d) => {
                 // TODO handle disconnect - verify shutdown behavior
@@ -348,6 +349,7 @@ impl TryFrom<&mut MqttClient> for ClientSession {
             auto_packet_id: client.auto_packet_id,
             last_packet_id: 0,
             auto_ack: client.auto_ack,
+            pingresp: client.pingresp,
         })
     }
 }
