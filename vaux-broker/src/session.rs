@@ -188,7 +188,7 @@ impl Session {
         self.control = (sender, Some(receiver));
     }
 
-    pub fn sender(&self) -> Sender<SessionControl> {
+    pub fn control_sender(&self) -> Sender<SessionControl> {
         self.control.0.clone()
     }
 
