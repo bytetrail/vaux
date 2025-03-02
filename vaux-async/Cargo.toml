@@ -1,10 +1,10 @@
 [package]
 name = "vaux-async"
-version = "0.6.4"
+version = "0.6.5"
 edition = "2021"
 
 [dependencies]
 tokio = { version = "1.41.0", features = ["io-util", "net", "time", "macros"] }
-vaux-mqtt = { version = "0.6.4", path = "../vaux-mqtt" }
+vaux-mqtt = { version = "0.6.5", path = "../vaux-mqtt" }
 bytes = "1.8"
 tokio-rustls = { version = "0.26" }
