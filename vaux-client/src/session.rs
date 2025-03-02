@@ -22,6 +22,7 @@ pub(crate) struct ClientSession {
     connected: Arc<RwLock<bool>>,
     packet_stream: vaux_async::stream::PacketStream,
     last_active: std::time::Instant,
+    keep_alive: Duration,
 
     session_expiry: u32,
     pending_publish: Vec<Packet>,
@@ -41,16 +42,19 @@ impl ClientSession {
         *self.connected.read().await
     }
 
+    pub(crate) fn keep_alive(&self) -> Duration {
+        self.keep_alive
+    }
+
     pub(crate) async fn connect(
         &mut self,
         max_connect_wait: Duration,
-        keep_alive: Duration,
         credentials: Option<(String, String)>,
         clean_start: bool,
         will: Option<WillMessage>,
     ) -> crate::Result<ConnAck> {
         let mut connect = Connect::default();
-        connect.keep_alive = keep_alive.as_secs() as u16;
+        connect.keep_alive = self.keep_alive.as_secs() as u16;
         connect.clean_start = clean_start;
         {
             let set_id = self.client_id.lock().await;
@@ -265,14 +269,12 @@ impl ClientSession {
             let mut connected = self.connected.write().await;
             *connected = true;
         }
+        // if the client ID was not set, set it from the assigned client ID
         if !client_id_set {
-            match connack
-                .properties()
-                .get_property(PropertyType::AssignedClientId)
-            {
-                Some(Property::AssignedClientId(id)) => {
-                    let mut client_id = self.client_id.lock().await;
-                    *client_id = Some(id.to_owned());
+            match connack.assigned_client_id() {
+                Some(client_id) => {
+                    let mut set_id = self.client_id.lock().await;
+                    *set_id = Some(client_id.clone());
                 }
                 _ => {
                     // handle error here for required property
@@ -283,11 +285,16 @@ impl ClientSession {
                 }
             }
         }
+        // set session keep alive from the server
+        if let Some(keep_alive) = connack.server_keep_alive() {
+            self.keep_alive = Duration::from_secs(u64::from(keep_alive));
+        }
+
         // TODO set server properties based on ConnAck
         Ok(connack)
     }
 
-    pub(crate) async fn keep_alive(&mut self) -> Result<(), MqttError> {
+    pub(crate) async fn handle_keep_alive(&mut self) -> Result<(), MqttError> {
         if !self.pending_publish.is_empty() && self.qos_1_remaining > 0 {
             // send any pending QOS-1 publish packets that we are able to send
             while !self.pending_publish.is_empty() && self.qos_1_remaining > 0 {
@@ -350,6 +357,7 @@ impl TryFrom<&mut MqttClient> for ClientSession {
             last_packet_id: 0,
             auto_ack: client.auto_ack,
             pingresp: client.pingresp,
+            keep_alive: client.keep_alive,
         })
     }
 }

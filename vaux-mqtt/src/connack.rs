@@ -62,6 +62,28 @@ impl ConnAck {
             .set_property(Property::SessionExpiryInterval(interval));
     }
 
+    pub fn assigned_client_id(&self) -> Option<String> {
+        self.properties
+            .get_property(PropertyType::AssignedClientId)
+            .and_then(|p| {
+                if let Property::AssignedClientId(client_id) = p {
+                    Some(client_id.clone())
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn set_assigned_client_id(&mut self, client_id: Option<String>) {
+        if let Some(client_id) = client_id {
+            self.properties
+                .set_property(Property::AssignedClientId(client_id));
+        } else {
+            self.properties
+                .clear_property(PropertyType::AssignedClientId);
+        }
+    }
+
     pub fn server_keep_alive(&self) -> Option<u16> {
         self.properties
             .get_property(PropertyType::KeepAlive)

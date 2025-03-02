@@ -341,7 +341,6 @@ impl MqttClient {
             return Err(MqttError::new("connection not set", ErrorKind::Connection));
         }
         let max_connect_wait = self.max_connect_wait;
-        let keep_alive = self.keep_alive;
         let will_message = self.will_message.clone();
         let mut packet_in_receiver = self.packet_in.1.take().ok_or(MqttError::new(
             "packet_in channel closed",
@@ -374,13 +373,7 @@ impl MqttClient {
         };
         Ok(tokio::spawn(async move {
             match session
-                .connect(
-                    max_connect_wait,
-                    keep_alive,
-                    credentials,
-                    clean_start,
-                    will_message,
-                )
+                .connect(max_connect_wait, credentials, clean_start, will_message)
                 .await
             {
                 Ok(_) => *connected.write().await = true,
@@ -389,10 +382,12 @@ impl MqttClient {
                     return Err(e);
                 }
             }
+            // get the session keep alive duration set after the connect
+            let keep_alive = session.keep_alive();
             loop {
                 select! {
                     _ = MqttClient::keep_alive_timer(keep_alive) => {
-                        match session.keep_alive().await {
+                        match session.handle_keep_alive().await {
                             Ok(_) => {
                                 // do nothing
                             }
