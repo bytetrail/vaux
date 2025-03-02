@@ -16,13 +16,22 @@ struct Args {
     listen_addr: Option<String>,
     #[clap(short, long)]
     port: Option<u16>,
-    #[clap(short = 's', long)]
-    /// Maximum number of sessions active/in-use
+    #[clap(
+        short = 's',
+        long,
+        help = "maximum number of sessions including inactive"
+    )]
     max_sessions: Option<u32>,
-    #[clap(short = 'a', long)]
+    #[clap(short = 'a', long, help = "maximum number of active sessions")]
     max_active_sessions: Option<u32>,
-    #[clap(short = 'x', long)]
+    #[clap(short = 'x', long, help = "session expiration in seconds")]
     session_expiration: Option<u32>,
+    #[clap(short = 't', long, help = "default session timeout in seconds")]
+    session_timeout: Option<u32>,
+    #[clap(short = 'T', long, help = "maximum allowed session timeout in seconds")]
+    max_session_timeout: Option<u32>,
+    #[clap(short = 'U', long, help = "run terminal user interface")]
+    tui: bool,
 }
 
 #[tokio::main]
