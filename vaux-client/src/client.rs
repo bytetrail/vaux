@@ -76,7 +76,7 @@ pub struct MqttClient {
     pub(crate) packet_out: PacketChannel,
     pub(crate) err_chan: Option<Sender<MqttError>>,
     pub(crate) max_packet_size: usize,
-    pub(crate) keep_alive: Duration,
+    pub(crate) keep_alive: Arc<RwLock<Duration>>,
     max_connect_wait: Duration,
     pub(crate) will_message: Option<vaux_mqtt::WillMessage>,
     pub(crate) pingresp: bool,
@@ -138,7 +138,7 @@ impl MqttClient {
             ),
             err_chan: None,
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
-            keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
+            keep_alive: Arc::new(RwLock::new(DEFAULT_CLIENT_KEEP_ALIVE)),
             max_connect_wait: MAX_CONNECT_WAIT,
             will_message: None,
             pingresp: false,
@@ -181,12 +181,17 @@ impl MqttClient {
         self.err_chan = Some(error_out);
     }
 
-    pub(crate) fn set_keep_alive(&mut self, keep_alive: Duration) {
+    pub(crate) async fn set_keep_alive(&mut self, keep_alive: Duration) {
+        let mut _keep_alive = self.keep_alive.write().await;
         if keep_alive < MIN_KEEP_ALIVE {
-            self.keep_alive = MIN_KEEP_ALIVE;
+            *_keep_alive = MIN_KEEP_ALIVE;
         } else {
-            self.keep_alive = keep_alive;
+            *_keep_alive = keep_alive;
         }
+    }
+
+    pub async fn keep_alive(&self) -> Duration {
+        *self.keep_alive.read().await
     }
 
     /// Gets the maximum connection wait time. This is the maximum time that
@@ -346,7 +351,6 @@ impl MqttClient {
             "packet_in channel closed",
             ErrorKind::Transport,
         ))?;
-
         let packet_out = self.packet_out.0.clone();
         let credentials = self.connection.as_ref().unwrap().credentials().clone();
         let connected = self.connected.clone();
@@ -362,7 +366,7 @@ impl MqttClient {
                 }
             };
         }
-        let mut session = match ClientSession::try_from(self) {
+        let mut session = match ClientSession::new_from_client(self).await {
             Ok(s) => s,
             Err(e) => {
                 return Err(MqttError::new(
@@ -371,6 +375,7 @@ impl MqttClient {
                 ));
             }
         };
+        let _keep_alive = self.keep_alive.clone();
         Ok(tokio::spawn(async move {
             match session
                 .connect(max_connect_wait, credentials, clean_start, will_message)
@@ -384,6 +389,10 @@ impl MqttClient {
             }
             // get the session keep alive duration set after the connect
             let keep_alive = session.keep_alive();
+            // set the client keep alive duration
+            {
+                *_keep_alive.write().await = keep_alive;
+            }
             loop {
                 select! {
                     _ = MqttClient::keep_alive_timer(keep_alive) => {

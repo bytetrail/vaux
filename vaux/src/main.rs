@@ -5,8 +5,8 @@ use clap::Parser;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use std::time::Duration;
-use vaux_broker::Broker;
-use vaux_broker::{DEFAULT_LISTEN_ADDR, DEFAULT_PORT};
+use vaux_broker::config::{DEFAULT_LISTEN_ADDR, DEFAULT_PORT};
+use vaux_broker::{Broker, Config};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about=None)]
@@ -57,13 +57,11 @@ async fn main() {
     };
     let listen_port = args.port.unwrap_or(DEFAULT_PORT);
     let listen_addr = SocketAddr::from((listen_addr, listen_port));
-
-    let mut broker = Broker::new(listen_addr);
+    let mut config = Config::new(listen_addr);
     if let Some(expiration) = args.session_expiration {
-        broker
-            .set_session_expiration(Duration::from_secs(expiration as u64))
-            .await;
+        config.session_expiry = Duration::from_secs(expiration as u64);
     }
+    let mut broker = Broker::new_with_config(config);
     // TODO initialize from storage for long lived sessions
     let result = broker.run().await;
     println!("Broker started on: {}", listen_addr);

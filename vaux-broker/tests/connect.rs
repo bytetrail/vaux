@@ -4,7 +4,12 @@ use vaux_client::{ErrorKind, MqttConnection};
 #[tokio::test]
 pub async fn basic_connect() {
     let listen_addr = "127.0.0.1:8383";
-    let mut broker = vaux_broker::Broker::new(listen_addr.parse().unwrap());
+    let mut broker = vaux_broker::Broker::new_with_config(vaux_broker::Config {
+        listen_addr: listen_addr.parse().unwrap(),
+        default_keep_alive: Duration::from_secs(30),
+        max_keep_alive: Duration::from_secs(30),
+        session_expiry: Duration::from_secs(60 * 10),
+    });
     let result = broker.run().await;
     assert!(result.is_ok());
 
@@ -31,7 +36,12 @@ pub async fn connect_with_takeover() {
     const CONNECT_TIMEOUT: u64 = 5000;
     const TEST_PORT: u16 = 8384;
     let listen_addr = "127.0.0.1:8384";
-    let mut broker = vaux_broker::Broker::new(listen_addr.parse().unwrap());
+    let mut broker = vaux_broker::Broker::new_with_config(vaux_broker::Config {
+        listen_addr: listen_addr.parse().unwrap(),
+        default_keep_alive: Duration::from_secs(30),
+        max_keep_alive: Duration::from_secs(30),
+        session_expiry: Duration::from_secs(60 * 10),
+    });
     let result = broker.run().await;
     assert!(result.is_ok());
 

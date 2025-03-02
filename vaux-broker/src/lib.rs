@@ -1,22 +1,23 @@
 pub(crate) mod codec;
-pub(crate) mod config;
+pub mod config;
 pub(crate) mod session;
 
+pub use config::Config;
+use config::{
+    BROKER_KEEP_ALIVE_FACTOR, DEFAULT_KEEP_ALIVE, DEFAULT_KEEP_ALIVE_SECS, MAX_KEEP_ALIVE,
+    MAX_KEEP_ALIVE_AS_SECS,
+};
 use session::Session;
 use session::SessionControl;
 use session::SessionPool;
-use std::net::{Ipv4Addr, SocketAddr};
-use std::str::FromStr;
-use tokio::sync::mpsc::Receiver;
-use tokio::sync::mpsc::Sender;
-use tokio::task::yield_now;
-use tokio::task::JoinHandle;
-
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::TcpListener;
-use tokio::select;
-use tokio::sync::RwLock;
+use tokio::{
+    net::TcpListener,
+    select,
+    sync::{mpsc::Receiver, mpsc::Sender, RwLock},
+    task::{yield_now, JoinHandle},
+};
 use uuid::Uuid;
 use vaux_async::stream::{AsyncMqttStream, MqttStream, PacketStream};
 use vaux_mqtt::Packet::PingResponse;
@@ -24,19 +25,9 @@ use vaux_mqtt::{
     ConnAck, Connect, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, Reason,
 };
 
-pub const DEFAULT_PORT: u16 = 1883;
-pub const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1";
-const DEFAULT_KEEP_ALIVE_SECS: u16 = 30;
-const MAX_KEEP_ALIVE_AS_SECS: u16 = 120;
-const BROKER_KEEP_ALIVE_FACTOR: f32 = 1.5;
-const DEFAULT_KEEP_ALIVE: Duration =
-    Duration::from_secs((DEFAULT_KEEP_ALIVE_SECS as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64);
-const MAX_KEEP_ALIVE: Duration =
-    Duration::from_secs((MAX_KEEP_ALIVE_AS_SECS as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64);
-// 10 minute session expiration
-const DEFAULT_SESSION_EXPIRY: Duration = Duration::from_secs(60 * 10);
 const INIT_STREAM_BUFFER_SIZE: usize = 4096;
 
+#[derive(Debug)]
 pub enum BrokerError {
     Codec(MqttCodecError),
     Io(std::io::Error),
@@ -80,23 +71,18 @@ pub enum BrokerCommand {
 
 #[derive(Debug)]
 pub struct Broker {
-    listen_addr: SocketAddr,
+    config: config::Config,
     session_pool: Arc<RwLock<SessionPool>>,
     command_channel: (Sender<BrokerCommand>, Option<Receiver<BrokerCommand>>),
 }
 
 impl Default for Broker {
-    /// Creates a new MQTT broker listening to local loopback on the default MQTT
-    /// port (1883) for unsecure traffic    
     fn default() -> Self {
         let (sender, receiver) = tokio::sync::mpsc::channel(10);
         Broker {
-            listen_addr: SocketAddr::from((
-                Ipv4Addr::from_str(DEFAULT_LISTEN_ADDR).unwrap(),
-                DEFAULT_PORT,
-            )),
+            config: config::Config::default(),
             session_pool: Arc::new(RwLock::new(SessionPool::new_with_expiry(
-                DEFAULT_SESSION_EXPIRY,
+                config::DEFAULT_SESSION_EXPIRY,
             ))),
             command_channel: (sender, Some(receiver)),
         }
@@ -104,13 +90,12 @@ impl Default for Broker {
 }
 
 impl Broker {
-    /// Creates a new broker with the configuration specified. This method will
-    /// not be used until the command line interface is developed. Remove the
-    /// dead_code override when complete
-    pub fn new(listen_addr: SocketAddr) -> Self {
+    pub fn new_with_config(config: config::Config) -> Self {
+        let (sender, receiver) = tokio::sync::mpsc::channel(10);
         Broker {
-            listen_addr,
-            ..Default::default()
+            config: config.clone(),
+            session_pool: Arc::new(RwLock::new(SessionPool::new_with_config(&config))),
+            command_channel: (sender, Some(receiver)),
         }
     }
 
@@ -125,9 +110,9 @@ impl Broker {
 
     pub async fn run(&mut self) -> Result<(), BrokerError> {
         // TODO recreate the command channel here
-        println!("broker accepting request on {:?}", self.listen_addr);
+        println!("broker accepting request on {:?}", self.config.listen_addr);
         let session_pool = Arc::clone(&self.session_pool);
-        match TcpListener::bind(self.listen_addr).await {
+        match TcpListener::bind(self.config.listen_addr).await {
             Ok(listener) => {
                 let mut command = self.command_channel.1.take().unwrap();
                 let _handle: JoinHandle<Result<(), BrokerError>> = tokio::spawn(async move {
@@ -186,9 +171,9 @@ impl Broker {
         session_pool: Arc<RwLock<SessionPool>>,
     ) -> Result<(), BrokerError> {
         let mut connected = false;
-        let mut keep_alive = DEFAULT_KEEP_ALIVE;
         let mut client_session: Option<Arc<RwLock<Session>>> = None;
         let mut session_control: Option<Receiver<SessionControl>> = None;
+        let mut keep_alive = DEFAULT_KEEP_ALIVE;
         loop {
             // TODO separate out the session handling from pre-connect handling
             select! {
@@ -247,7 +232,7 @@ impl Broker {
                     match packet_result {
                         Ok(Some(packet)) => {
                             if !connected {
-                                if let Some(session) = Broker::handle_pre_connect(packet, stream, Arc::clone(&session_pool)).await? {
+                                if let Some(session) = Broker::handle_pre_connect(packet, stream,  Arc::clone(&session_pool)).await? {
                                     {
                                         let mut session = session.write().await;
                                         keep_alive = session.keep_alive();
@@ -355,13 +340,20 @@ impl Broker {
     ) -> Result<Option<Arc<RwLock<Session>>>, BrokerError> {
         let session_id: String;
         let mut ack = ConnAck::default();
+        let (default_keep_alive_secs, max_keep_alive_secs) = {
+            let session_pool = session_pool.read().await;
+            (
+                session_pool.default_keep_alive_secs(),
+                session_pool.max_keep_alive_secs(),
+            )
+        };
         // handle keep alive request
-        let keep_alive = if connect.keep_alive < DEFAULT_KEEP_ALIVE_SECS {
-            ack.set_server_keep_alive(DEFAULT_KEEP_ALIVE.as_secs() as u16);
-            DEFAULT_KEEP_ALIVE
-        } else if connect.keep_alive > MAX_KEEP_ALIVE_AS_SECS {
-            ack.set_server_keep_alive(MAX_KEEP_ALIVE_AS_SECS);
-            MAX_KEEP_ALIVE
+        let keep_alive = if connect.keep_alive < default_keep_alive_secs {
+            ack.set_server_keep_alive(default_keep_alive_secs);
+            Duration::from_secs((default_keep_alive_secs as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64)
+        } else if connect.keep_alive > max_keep_alive_secs {
+            ack.set_server_keep_alive(max_keep_alive_secs);
+            Duration::from_secs((max_keep_alive_secs as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64)
         } else {
             Duration::from_secs((connect.keep_alive as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64)
         };
@@ -476,6 +468,13 @@ impl Broker {
 
 #[cfg(test)]
 mod test {
+    use std::{
+        net::{Ipv4Addr, SocketAddr},
+        str::FromStr,
+    };
+
+    use crate::config::{DEFAULT_LISTEN_ADDR, DEFAULT_PORT, DEFAULT_SESSION_EXPIRY};
+
     use super::*;
 
     #[test]
@@ -488,15 +487,15 @@ mod test {
         const EXPECTED_IP_ADDR: &str = "127.0.0.1";
         const EXPECTED_PORT: u16 = 1883;
         let broker = Broker::default();
-        assert!(broker.listen_addr.is_ipv4(), "expected IPV4 address");
+        assert!(broker.config.listen_addr.is_ipv4(), "expected IPV4 address");
         assert_eq!(
             EXPECTED_IP_ADDR,
-            broker.listen_addr.ip().to_string(),
+            broker.config.listen_addr.ip().to_string(),
             "expected local loopback address: 127.0.0.1"
         );
         assert_eq!(
             EXPECTED_PORT,
-            broker.listen_addr.port(),
+            broker.config.listen_addr.port(),
             "expected default listen port to be 1883"
         );
     }
@@ -512,15 +511,20 @@ mod test {
         ))
         .unwrap();
 
-        let broker = Broker::new(listen_addr);
+        let broker = Broker::new_with_config(config::Config {
+            listen_addr,
+            default_keep_alive: DEFAULT_KEEP_ALIVE,
+            max_keep_alive: MAX_KEEP_ALIVE,
+            session_expiry: DEFAULT_SESSION_EXPIRY,
+        });
         assert_eq!(
             EXPECTED_IP_ADDR,
-            broker.listen_addr.ip().to_string(),
+            broker.config.listen_addr.ip().to_string(),
             "expected local loopback address: 127.0.0.1"
         );
         assert_eq!(
             EXPECTED_PORT,
-            broker.listen_addr.port(),
+            broker.config.listen_addr.port(),
             "expected default listen port to be 1883"
         );
     }

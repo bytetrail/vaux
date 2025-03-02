@@ -12,6 +12,8 @@ use vaux_mqtt::{subscribe::Subscription, Reason, WillMessage};
 #[derive(Debug, Default)]
 pub struct SessionPool {
     session_expiry: Duration,
+    default_keep_alive: Duration,
+    max_keep_alive: Duration,
     active: HashMap<String, Arc<RwLock<Session>>>,
     inactive: HashMap<String, Arc<RwLock<Session>>>,
     active_sessions: u32,
@@ -24,6 +26,39 @@ impl SessionPool {
             session_expiry: expiry,
             ..Default::default()
         }
+    }
+
+    pub fn new_with_config(config: &crate::config::Config) -> Self {
+        SessionPool {
+            session_expiry: config.session_expiry,
+            default_keep_alive: config.default_keep_alive,
+            max_keep_alive: config.max_keep_alive,
+            ..Default::default()
+        }
+    }
+
+    pub fn default_keep_alive(&self) -> Duration {
+        self.default_keep_alive
+    }
+
+    pub fn default_keep_alive_secs(&self) -> u16 {
+        self.default_keep_alive.as_secs() as u16
+    }
+
+    pub fn set_default_keep_alive(&mut self, keep_alive: Duration) {
+        self.default_keep_alive = keep_alive;
+    }
+
+    pub fn max_keep_alive(&self) -> Duration {
+        self.max_keep_alive
+    }
+
+    pub fn max_keep_alive_secs(&self) -> u16 {
+        self.max_keep_alive.as_secs() as u16
+    }
+
+    pub fn set_max_keep_alive(&mut self, keep_alive: Duration) {
+        self.max_keep_alive = keep_alive;
     }
 
     pub fn session_expiry(&self) -> Duration {

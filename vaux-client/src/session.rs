@@ -2,9 +2,7 @@ use crate::{ErrorKind, MqttClient, MqttError};
 use std::{collections::HashMap, sync::Arc, time::Duration, vec};
 use tokio::sync::{Mutex, RwLock};
 use vaux_mqtt::WillMessage;
-use vaux_mqtt::{
-    property::Property, ConnAck, Connect, Packet, PropertyType, PubResp, QoSLevel, Reason,
-};
+use vaux_mqtt::{property::Property, ConnAck, Connect, Packet, PubResp, QoSLevel, Reason};
 const MAX_QUEUE_LEN: usize = 100;
 
 #[allow(dead_code)]
@@ -38,6 +36,37 @@ pub(crate) struct ClientSession {
 }
 
 impl ClientSession {
+    pub(crate) async fn new_from_client(client: &mut MqttClient) -> Result<Self, MqttError> {
+        if client.connection.is_none() {
+            MqttError::new(
+                "connection is required",
+                ErrorKind::Protocol(Reason::ProtocolErr),
+            );
+        }
+
+        Ok(Self {
+            client_id: Arc::clone(&client.client_id),
+            connected: Arc::new(RwLock::new(false)),
+            packet_stream: vaux_async::stream::PacketStream::new(
+                client.connection.take().unwrap().take_stream().unwrap(),
+                None,
+                Some(client.max_packet_size),
+            ),
+            last_active: std::time::Instant::now(),
+            session_expiry: client.session_expiry,
+            pending_publish: vec![],
+            pending_recv_ack: HashMap::new(),
+            receive_max: client.receive_max as usize,
+            qos_1_remaining: client.receive_max as usize,
+            pending_qos1: Arc::new(Mutex::new(vec![])),
+            auto_packet_id: client.auto_packet_id,
+            last_packet_id: 0,
+            auto_ack: client.auto_ack,
+            pingresp: client.pingresp,
+            keep_alive: *client.keep_alive.read().await,
+        })
+    }
+
     pub(crate) async fn connected(&self) -> bool {
         *self.connected.read().await
     }
@@ -324,40 +353,5 @@ impl ClientSession {
             .write(&packet)
             .await
             .map_err(|_| MqttError::new("unable to write packet to stream", ErrorKind::Transport))
-    }
-}
-
-impl TryFrom<&mut MqttClient> for ClientSession {
-    type Error = MqttError;
-
-    fn try_from(client: &mut MqttClient) -> Result<Self, Self::Error> {
-        if client.connection.is_none() {
-            MqttError::new(
-                "connection is required",
-                ErrorKind::Protocol(Reason::ProtocolErr),
-            );
-        }
-
-        Ok(Self {
-            client_id: Arc::clone(&client.client_id),
-            connected: Arc::new(RwLock::new(false)),
-            packet_stream: vaux_async::stream::PacketStream::new(
-                client.connection.take().unwrap().take_stream().unwrap(),
-                None,
-                Some(client.max_packet_size),
-            ),
-            last_active: std::time::Instant::now(),
-            session_expiry: client.session_expiry,
-            pending_publish: vec![],
-            pending_recv_ack: HashMap::new(),
-            receive_max: client.receive_max as usize,
-            qos_1_remaining: client.receive_max as usize,
-            pending_qos1: Arc::new(Mutex::new(vec![])),
-            auto_packet_id: client.auto_packet_id,
-            last_packet_id: 0,
-            auto_ack: client.auto_ack,
-            pingresp: client.pingresp,
-            keep_alive: client.keep_alive,
-        })
     }
 }
