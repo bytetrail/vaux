@@ -237,7 +237,6 @@ impl Broker {
                                         let mut session = session.write().await;
                                         keep_alive = session.keep_alive();
                                         session_control = session.take_control_receiver();
-
                                     }
                                     client_session = Some(Arc::clone(&session));
                                 } else {

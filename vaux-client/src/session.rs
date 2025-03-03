@@ -22,7 +22,7 @@ pub(crate) struct ClientSession {
     last_active: std::time::Instant,
     keep_alive: Duration,
 
-    session_expiry: u32,
+    session_expiry: Duration,
     pending_publish: Vec<Packet>,
     pending_recv_ack: HashMap<u16, Packet>,
     receive_max: usize,
@@ -53,7 +53,7 @@ impl ClientSession {
                 Some(client.max_packet_size),
             ),
             last_active: std::time::Instant::now(),
-            session_expiry: client.session_expiry,
+            session_expiry: *client.session_expiry.read().await,
             pending_publish: vec![],
             pending_recv_ack: HashMap::new(),
             receive_max: client.receive_max as usize,
@@ -75,6 +75,10 @@ impl ClientSession {
         self.keep_alive
     }
 
+    pub(crate) fn session_expiry(&self) -> Duration {
+        self.session_expiry
+    }
+
     pub(crate) async fn connect(
         &mut self,
         max_connect_wait: Duration,
@@ -93,7 +97,9 @@ impl ClientSession {
         }
         connect
             .properties_mut()
-            .set_property(Property::SessionExpiryInterval(self.session_expiry));
+            .set_property(Property::SessionExpiryInterval(
+                self.session_expiry.as_secs() as u32,
+            ));
         if let Some((username, password)) = credentials {
             connect.username = Some(username);
             connect.password = Some(password.into_bytes());
@@ -317,6 +323,10 @@ impl ClientSession {
         // set session keep alive from the server
         if let Some(keep_alive) = connack.server_keep_alive() {
             self.keep_alive = Duration::from_secs(u64::from(keep_alive));
+        }
+        // set the server assigned session expiry if present
+        if let Some(session_expiry) = connack.session_expiry() {
+            self.session_expiry = Duration::from_secs(u64::from(session_expiry));
         }
 
         // TODO set server properties based on ConnAck

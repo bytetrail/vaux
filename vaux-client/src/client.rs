@@ -13,7 +13,7 @@ use tokio::{
 use vaux_mqtt::{Packet, PacketType, QoSLevel, Subscribe, SubscriptionFilter};
 
 const DEFAULT_RECV_MAX: u16 = 100;
-const DEFAULT_SESSION_EXPIRY: u32 = 1000;
+const DEFAULT_SESSION_EXPIRY: Duration = Duration::from_secs(1000);
 // 64K is the default max packet size
 const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
 const DEFAULT_CLIENT_KEEP_ALIVE: Duration = Duration::from_secs(60);
@@ -70,7 +70,7 @@ pub struct MqttClient {
     pub(crate) auto_packet_id: bool,
     filter_channel: FilteredChannel,
     connected: Arc<RwLock<bool>>,
-    pub(crate) session_expiry: u32,
+    pub(crate) session_expiry: Arc<RwLock<Duration>>,
     pub(crate) client_id: Arc<Mutex<Option<String>>>,
     pub(crate) packet_in: PacketChannel,
     pub(crate) packet_out: PacketChannel,
@@ -127,7 +127,7 @@ impl MqttClient {
             auto_packet_id,
             receive_max,
             connected: Arc::new(RwLock::new(false)),
-            session_expiry: DEFAULT_SESSION_EXPIRY,
+            session_expiry: Arc::new(RwLock::new(DEFAULT_SESSION_EXPIRY)),
             client_id: Arc::new(Mutex::new(Some(client_id.to_string()))),
             filter_channel: HashMap::new(),
             packet_in: PacketChannel::new_with_size(
@@ -169,12 +169,13 @@ impl MqttClient {
         *self.connected.read().await
     }
 
-    pub fn session_expiry(&self) -> u32 {
-        self.session_expiry
+    pub async fn session_expiry(&self) -> Duration {
+        *self.session_expiry.read().await
     }
 
-    pub(crate) fn set_session_expiry(&mut self, session_expiry: u32) {
-        self.session_expiry = session_expiry;
+    pub(crate) async fn set_session_expiry(&mut self, session_expiry: u32) {
+        let mut _session_expiry = self.session_expiry.write().await;
+        *_session_expiry = Duration::from_secs(session_expiry as u64);
     }
 
     pub(crate) fn set_error_out(&mut self, error_out: Sender<MqttError>) {
@@ -376,6 +377,7 @@ impl MqttClient {
             }
         };
         let _keep_alive = self.keep_alive.clone();
+        let _session_expiry = self.session_expiry.clone();
         Ok(tokio::spawn(async move {
             match session
                 .connect(max_connect_wait, credentials, clean_start, will_message)
@@ -392,6 +394,11 @@ impl MqttClient {
             // set the client keep alive duration
             {
                 *_keep_alive.write().await = keep_alive;
+            }
+            // get the session expiry duration set after the connect
+            let session_expiry = session.session_expiry();
+            {
+                *_session_expiry.write().await = session_expiry;
             }
             loop {
                 select! {
