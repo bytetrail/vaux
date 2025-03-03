@@ -21,6 +21,8 @@ pub struct Config {
     pub default_keep_alive: Duration,
     pub max_keep_alive: Duration,
     pub session_expiry: Duration,
+    pub max_topic_name_len: usize,
+    pub max_topic_mem: usize,
 }
 
 impl Default for Config {
@@ -30,6 +32,8 @@ impl Default for Config {
             default_keep_alive: DEFAULT_KEEP_ALIVE,
             max_keep_alive: MAX_KEEP_ALIVE,
             session_expiry: DEFAULT_SESSION_EXPIRY,
+            max_topic_name_len: DEFAULT_MAX_TOPIC_NAME_LEN,
+            max_topic_mem: DEFAULT_MAX_TOPIC_MEM,
         }
     }
 }

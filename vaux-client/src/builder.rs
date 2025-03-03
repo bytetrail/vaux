@@ -189,7 +189,7 @@ impl ClientBuilder {
         self
     }
 
-    pub fn build(self) -> Result<crate::MqttClient, BuilderError> {
+    pub async fn build(self) -> Result<crate::MqttClient, BuilderError> {
         if self.keep_alive < MIN_KEEP_ALIVE {
             return Err(BuilderError::MinKeepAlive);
         }
@@ -202,9 +202,9 @@ impl ClientBuilder {
             self.auto_packet_id,
             self.channel_size,
         );
-        client.set_session_expiry(self.session_expiry);
+        client.set_session_expiry(self.session_expiry).await;
         client.set_max_packet_size(self.max_packet_size);
-        client.set_keep_alive(self.keep_alive);
+        client.set_keep_alive(self.keep_alive).await;
         client.set_max_connect_wait(self.max_connect_wait);
         if let Some(error_out) = self.error_out {
             client.set_error_out(error_out);

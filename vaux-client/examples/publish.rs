@@ -20,6 +20,7 @@ async fn main() {
         .with_keep_alive(Duration::from_secs(30))
         .with_max_connect_wait(Duration::from_secs(5))
         .build()
+        .await
         .unwrap();
 
     let handle: Option<JoinHandle<_>> =

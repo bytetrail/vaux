@@ -9,6 +9,7 @@ pub async fn basic_connect() {
         default_keep_alive: Duration::from_secs(30),
         max_keep_alive: Duration::from_secs(30),
         session_expiry: Duration::from_secs(60 * 10),
+        ..Default::default()
     });
     let result = broker.run().await;
     assert!(result.is_ok());
@@ -19,7 +20,8 @@ pub async fn basic_connect() {
     .with_client_id("client_id")
     .with_auto_ack(true)
     .with_keep_alive(Duration::from_secs(30))
-    .build();
+    .build()
+    .await;
     if let Ok(mut client) = client {
         let result = client.try_start(Duration::from_millis(1500), true).await;
         assert!(result.is_ok());
@@ -41,6 +43,7 @@ pub async fn connect_with_takeover() {
         default_keep_alive: Duration::from_secs(30),
         max_keep_alive: Duration::from_secs(30),
         session_expiry: Duration::from_secs(60 * 10),
+        ..Default::default()
     });
     let result = broker.run().await;
     assert!(result.is_ok());
@@ -54,6 +57,7 @@ pub async fn connect_with_takeover() {
     .with_auto_ack(true)
     .with_session_expiry(SESSION_EXPIRY)
     .build()
+    .await
     .expect("failed to create client");
 
     let client_one_handle = client_one
@@ -70,6 +74,7 @@ pub async fn connect_with_takeover() {
     .with_auto_ack(true)
     .with_session_expiry(SESSION_EXPIRY)
     .build()
+    .await
     .expect("failed to create client");
 
     let _client_two_handle = client_two

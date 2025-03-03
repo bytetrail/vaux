@@ -287,7 +287,7 @@ impl MqttClient {
     ///     let consumer = vaux_client::PacketChannel::new();
     ///     let mut client = ClientBuilder::new(conn).
     ///         with_client_id("test-client")
-    ///        .build().unwrap();
+    ///        .build().await.unwrap();
     ///
     ///     let handle: Option<tokio::task::JoinHandle<_>> =
     ///     match client.try_start(Duration::from_millis(5000), true).await {

@@ -14,6 +14,7 @@ async fn server_assigned_keep_alive() {
         default_keep_alive: Duration::from_secs(30),
         max_keep_alive: Duration::from_secs(30),
         session_expiry: Duration::from_secs(60 * 10),
+        ..Default::default()
     });
     broker.run().await.expect("failed to start broker");
     let mut client = vaux_client::ClientBuilder::new(
@@ -25,6 +26,7 @@ async fn server_assigned_keep_alive() {
     .with_auto_ack(true)
     .with_keep_alive(Duration::from_secs(120))
     .build()
+    .await
     .expect("failed to create client");
     let client_handle = client
         .try_start(Duration::from_millis(CONNECT_TIMEOUT), true)
@@ -50,6 +52,7 @@ async fn server_assigned_expiry() {
         default_keep_alive: Duration::from_secs(30),
         max_keep_alive: Duration::from_secs(30),
         session_expiry: SERVER_SESSION_EXPIRY,
+        ..Default::default()
     });
     broker.run().await.expect("failed to start broker");
     let mut client = vaux_client::ClientBuilder::new(
@@ -62,6 +65,7 @@ async fn server_assigned_expiry() {
     .with_keep_alive(Duration::from_secs(120))
     .with_session_expiry(REQUESTED_SESSION_EXPIRY.as_secs() as u32)
     .build()
+    .await
     .expect("failed to create client");
     let client_handle = client
         .try_start(Duration::from_millis(CONNECT_TIMEOUT), true)

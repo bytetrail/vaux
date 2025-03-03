@@ -515,6 +515,7 @@ mod test {
             default_keep_alive: DEFAULT_KEEP_ALIVE,
             max_keep_alive: MAX_KEEP_ALIVE,
             session_expiry: DEFAULT_SESSION_EXPIRY,
+            ..Default::default()
         });
         assert_eq!(
             EXPECTED_IP_ADDR,
