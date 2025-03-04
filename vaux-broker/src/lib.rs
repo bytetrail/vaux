@@ -3,10 +3,7 @@ pub mod config;
 pub(crate) mod session;
 
 pub use config::Config;
-use config::{
-    BROKER_KEEP_ALIVE_FACTOR, DEFAULT_KEEP_ALIVE, DEFAULT_KEEP_ALIVE_SECS, MAX_KEEP_ALIVE,
-    MAX_KEEP_ALIVE_AS_SECS,
-};
+use config::{BROKER_KEEP_ALIVE_FACTOR, DEFAULT_KEEP_ALIVE};
 use session::Session;
 use session::SessionControl;
 use session::SessionPool;
@@ -472,7 +469,9 @@ mod test {
         str::FromStr,
     };
 
-    use crate::config::{DEFAULT_LISTEN_ADDR, DEFAULT_PORT, DEFAULT_SESSION_EXPIRY};
+    use crate::config::{
+        DEFAULT_LISTEN_ADDR, DEFAULT_PORT, DEFAULT_SESSION_EXPIRY, MAX_KEEP_ALIVE,
+    };
 
     use super::*;
 
@@ -529,3 +528,5 @@ mod test {
         );
     }
 }
+
+

@@ -37,28 +37,12 @@ impl SessionPool {
         }
     }
 
-    pub fn default_keep_alive(&self) -> Duration {
-        self.default_keep_alive
-    }
-
     pub fn default_keep_alive_secs(&self) -> u16 {
         self.default_keep_alive.as_secs() as u16
     }
 
-    pub fn set_default_keep_alive(&mut self, keep_alive: Duration) {
-        self.default_keep_alive = keep_alive;
-    }
-
-    pub fn max_keep_alive(&self) -> Duration {
-        self.max_keep_alive
-    }
-
     pub fn max_keep_alive_secs(&self) -> u16 {
         self.max_keep_alive.as_secs() as u16
-    }
-
-    pub fn set_max_keep_alive(&mut self, keep_alive: Duration) {
-        self.max_keep_alive = keep_alive;
     }
 
     pub fn session_expiry(&self) -> Duration {

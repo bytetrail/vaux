@@ -1,6 +1,5 @@
 use std::time::Duration;
 use tokio::task::JoinHandle;
-use vaux_client::PacketChannel;
 
 const TOPIC: &str = "hello-vaux";
 const MESSAGE: &str = "hello world";
