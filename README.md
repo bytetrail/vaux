@@ -19,14 +19,17 @@ on both resource constrained and server class platforms will drive optimization
 efforts.
 
 # Workspace
-Vaux workspace consists of 4 projects:
+Vaux workspace consists of :
 
 | Project     | Description                                               |
 |-------------|-----------------------------------------------------------|
-| vaux-broker | A broker library and broker application                   |
+| vaux        | A broker application with CLI and TUI                     |
+| vaux-broker | A broker library                                          |
 | vaux-mqtt   | The MQTT codec library.                                   |
 | vaux-client | MQTT client library using vaux-mqtt for embedded devices. |
 | vaux-test   | A client test driver for end-to-end integration tests.    |
+| vaux-pub    | A simple MQTT publisher for testing.                      |
+| vaux-sub    | A simple MQTT subscriber for testing.                     |
 
 ## vaux-mqtt
 This library supports basic MQTT v5.0 control packet encoding and decoding. 
@@ -54,39 +57,42 @@ thread for protocol management with channels supporting inbound and outbound tra
 management.
 
 
-## vaux-broker
+## vaux
 An in-progress effort on a complete implementation of an MQTT v5 broker. See roadmap below.
 
 ### Usage
 ```
 
-USAGE:
-vaux-broker [OPTIONS]
+Usage: vaux.exe [OPTIONS]
 
-OPTIONS:
--a, --max-active-sessions <MAX_ACTIVE_SESSIONS>    
--h,  --help                                        Print help information
--l,  --listen-addr <LISTEN_ADDR>                   Listen address (default is "127.0.0.1")
--p, --port <PORT>                                  
--s, --max-sessions <MAX_SESSIONS>                  Maximum number of sessions active/in-use
--V, --version                                      Print version information
+Options:
+  -l, --listen-addr <LISTEN_ADDR>                  Listen address (default is "127.0.0.1")s
+  -p, --port <PORT>
+  -s, --max-sessions <MAX_SESSIONS>                maximum number of sessions including inactive
+  -a, --max-active-sessions <MAX_ACTIVE_SESSIONS>  maximum number of active sessions
+  -x, --session-expiration <SESSION_EXPIRATION>    session expiration in seconds
+  -t, --session-timeout <SESSION_TIMEOUT>          default session timeout in seconds
+  -T, --max-session-timeout <MAX_SESSION_TIMEOUT>  maximum allowed session timeout in seconds
+  -U, --tui                                        run terminal user interface
+  -h, --help                                       Print help
+  -V, --version                                    Print version
 
 ```
 
 # vaux-broker Roadmap
-Last Update: May 15, 2022
+Last Update: March 7, 2025
 
 ### Basic Session Management
 Complete implementation of connect and acknowledgement packets with session creation.
 This will include end-to-end testing for client <-> server session establishment 
 and disconnect scenarios.
 
+### Publish
+Add publication support and basic message management.
+
 ### Session Persistence
 Serialization and deserialization of sessions to persistent store. Startup deserialization
 and evaluation of sessions.
-
-### Publish
-Add publication support and basic message management.
 
 ### Subscription Management
 Add subscribe packet support and basic subscription management
@@ -100,6 +106,3 @@ Simple username password authentication.
 
 ### Extend Session Management
 Support advanced session management scenarios.
-
-### MQTT v3
-Add support for MQTT v3 protocol in MQTT codec, client, and broker. 
