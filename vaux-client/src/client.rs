@@ -236,7 +236,6 @@ impl MqttClient {
             } else {
                 vaux_mqtt::property::PayloadFormat::Bin
             }));
-        let id = if self.auto_packet_id { Some(1) } else { None };
         match qos {
             QoSLevel::AtLeastOnce => {
                 publish.header.set_dup(true);
@@ -269,7 +268,6 @@ impl MqttClient {
     ) -> std::result::Result<(), SendError<Packet>> {
         self.publish(
             Some(topic.to_string()),
-            None,
             None,
             QoSLevel::AtMostOnce,
             payload.as_bytes().to_vec(),
