@@ -144,15 +144,29 @@ async fn publish(
         {
             eprintln!("unable to send packet to broker");
         }
-        if args.qos != QoSLevel::AtMostOnce {
-            let mut packet = packet_in.try_recv();
-            let mut ack_recv = false;
-            while !ack_recv {
-                if packet.is_err() {
-                } else if let Ok(Packet::PubAck(_)) = packet {
-                    ack_recv = true;
+        match args.qos {
+            QoSLevel::AtMostOnce => (),
+            QoSLevel::AtLeastOnce => {
+                let mut packet = packet_in.try_recv();
+                let mut ack_recv = false;
+                while !ack_recv {
+                    if packet.is_err() {
+                    } else if let Ok(Packet::PubAck(_)) = packet {
+                        ack_recv = true;
+                    }
+                    packet = packet_in.try_recv();
                 }
-                packet = packet_in.try_recv();
+            }
+            QoSLevel::ExactlyOnce => {
+                let mut packet = packet_in.try_recv();
+                let mut comp_recv = false;
+                while !comp_recv {
+                    if packet.is_err() {
+                    } else if let Ok(Packet::PubComp(_)) = packet {
+                        comp_recv = true;
+                    }
+                    packet = packet_in.try_recv();
+                }
             }
         }
     }

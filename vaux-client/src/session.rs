@@ -434,8 +434,6 @@ impl ClientSession {
         if let Some(session_expiry) = connack.session_expiry() {
             self.session_expiry = Duration::from_secs(u64::from(session_expiry));
         }
-
-        // TODO set server properties based on ConnAck
         Ok(connack)
     }
 
