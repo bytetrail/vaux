@@ -26,7 +26,7 @@ Vaux workspace consists of :
 | vaux        | A broker application with CLI and TUI                     |
 | vaux-broker | A broker library                                          |
 | vaux-mqtt   | The MQTT codec library.                                   |
-| vaux-client | MQTT client library using vaux-mqtt for embedded devices. |
+| [vaux-client](/vaux-client/README.md) | MQTT client library using vaux-mqtt for embedded devices. |
 | vaux-test   | A client test driver for end-to-end integration tests.    |
 | vaux-pub    | A simple MQTT publisher for testing.                      |
 | vaux-sub    | A simple MQTT subscriber for testing.                     |
