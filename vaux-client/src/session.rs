@@ -317,7 +317,25 @@ impl ClientSession {
                             }
                         }
                     }
-                    vaux_mqtt::QoSLevel::ExactlyOnce => todo!(),
+                    vaux_mqtt::QoSLevel::ExactlyOnce => {
+                        if self.auto_ack {
+                            let mut pubrec = PubResp::new_pubrec();
+                            if let Some(packet_id) = publish.packet_id {
+                                pubrec.packet_id = packet_id;
+                            } else {
+                                let _ = self.packet_stream.shutdown().await;
+                                return Err(MqttError::new(
+                                    "protocol error, packet ID required with QoS > 0",
+                                    ErrorKind::Protocol(Reason::MalformedPacket),
+                                ));
+                            }
+                            if self.send_packet(Packet::PubRec(pubrec)).await.is_err() {
+                                // TODO handle the pub rec next time through
+                                // push a message to the last error channel
+                                todo!()
+                            }
+                        }
+                    }
                 }
             }
             Packet::PubAck(puback) => {
@@ -336,27 +354,53 @@ impl ClientSession {
             }
             Packet::PubRec(pubrec) => {
                 let packet_id = pubrec.packet_id;
-
                 if let Some(p) = self.pending_qos.remove(&packet_id) {
                     match p.next {
                         QoSPacket::PubRec => {
                             // push to next state and re-insert into pending qos
                             let next = p.next().expect("pub rec next");
                             self.pending_qos.insert(packet_id, next);
-                            let mut pubrel = PubResp::new_pubrel();
-                            pubrel.packet_id = pubrec.packet_id;
-                            if self.send_packet(Packet::PubRel(pubrel)).await.is_err() {
-                                // TODO handle the pub rel next time through
-                                // push a message to the last error channel
-                                todo!()
-                            } else {
-                                // move to next state and re-insert into pending qos
-                                let next = self
-                                    .pending_qos
-                                    .remove(&packet_id)
-                                    .expect("expected pubrel");
-                                let next = next.next().expect("pub rec next");
-                                self.pending_qos.insert(packet_id, next);
+                            if self.auto_ack {
+                                let mut pubrel = PubResp::new_pubrel();
+                                pubrel.packet_id = pubrec.packet_id;
+                                if self.send_packet(Packet::PubRel(pubrel)).await.is_err() {
+                                    // TODO handle the pub rel next time through
+                                    // push a message to the last error channel
+                                    todo!()
+                                } else {
+                                    // move to next state and re-insert into pending qos
+                                    let next = self
+                                        .pending_qos
+                                        .remove(&packet_id)
+                                        .expect("expected pubrel");
+                                    let next = next.next().expect("pub rec next");
+                                    self.pending_qos.insert(packet_id, next);
+                                }
+                            }
+                        }
+                        _ => {
+                            // protocol error, unexpected packet
+                            // re-insert into pending qos without change
+                            self.pending_qos.insert(packet_id, p);
+                        }
+                    }
+                } else {
+                    // protocol error, unexpected packet
+                }
+            }
+            Packet::PubRel(pubrel) => {
+                let packet_id = pubrel.packet_id;
+                if let Some(p) = self.pending_qos.remove(&packet_id) {
+                    match p.next {
+                        QoSPacket::PubRel => {
+                            if self.auto_ack {
+                                let mut pubcomp = PubResp::new_pubcomp();
+                                pubcomp.packet_id = pubrel.packet_id;
+                                if self.send_packet(Packet::PubComp(pubcomp)).await.is_err() {
+                                    // TODO handle the pub comp next time through
+                                    // push a message to the last error channel
+                                    todo!()
+                                }
                             }
                         }
                         _ => {
