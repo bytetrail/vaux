@@ -120,6 +120,10 @@ impl ClientSession {
         self.session_expiry
     }
 
+    pub(crate) fn auto_ack(&self) -> bool {
+        self.auto_ack
+    }
+
     pub(crate) async fn connect(
         &mut self,
         max_connect_wait: Duration,
@@ -238,6 +242,11 @@ impl ClientSession {
                     } else if self.auto_packet_id {
                         // if auto packet ID is enabled, generate a packet ID
                         self.last_packet_id = self.last_packet_id.wrapping_add(1);
+                        // verify the packet ID is not already in use
+                        // TODO improve in-use packet ID managment
+                        while self.pending_qos.contains_key(&self.last_packet_id) {
+                            self.last_packet_id = self.last_packet_id.wrapping_add(1);
+                        }
                         p.packet_id = Some(self.last_packet_id);
                     } else {
                         // if no packet ID is set and auto packet ID is disabled, return an error
@@ -323,6 +332,7 @@ impl ClientSession {
                             if let Some(packet_id) = publish.packet_id {
                                 pubrec.packet_id = packet_id;
                             } else {
+                                // protocol error, packet ID required with QoS > 0
                                 let _ = self.packet_stream.shutdown().await;
                                 return Err(MqttError::new(
                                     "protocol error, packet ID required with QoS > 0",
@@ -345,11 +355,11 @@ impl ClientSession {
                             self.pending_qos.remove(&puback.packet_id);
                         }
                         _ => {
-                            // protocol error, unexpected packet
+                            // protocol error, unexpected packet - disconnect
                         }
                     }
                 } else {
-                    // protocol error, unexpected packet
+                    // protocol error, unexpected packet - disconnect
                 }
             }
             Packet::PubRec(pubrec) => {

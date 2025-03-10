@@ -9,13 +9,20 @@ QoS-1  and QoS-2 control packets sent to the MQTT client by the client applicati
 ignored by the MQTT client when auto-ack is enabled.
 
 ### QoS-2 Flow
-The flow of QoS-2 control packets is shown in the diagram below. The MQTT client manages
+The flow of QoS-2 control packets is shown in the diagrams below. The MQTT client manages
 the flow of QoS-2 control packets between the client and the broker when the application
-client send a PUBLISH control packet with QoS-2. The client will send the PUBLISH control
-packet to the broker and wait for the PUBREC control packet. The client will then send the
-PUBREL control packet to the broker and wait for the PUBCOMP control packet. 
+client send or receives a PUBLISH control packet with QoS-2. 
+
+#### Client Initiated PUBLISH
+
+The MQTT client will send the PUBLISH control packet to the broker and wait for the PUBREC
+control packet. The MQTT client will then send the PUBREL control packet to the broker once
+the PUBREC has been received and wait for the PUBCOMP control packet.
 
  ![QOS-2](/images/qos2flow.svg) 
+
+ #### Broker Initiated PUBLISH
+ 
 
 The MQTT client and session state will manage unacknowledged QoS-2 control packets
 and resend the control packets as necessary on a session reconnect with the clean start flag
