@@ -7,6 +7,7 @@ use crate::{
 
 const QOS_MASK: u8 = 0b_0000_0110;
 const RETAIN_MASK: u8 = 0b_0000_0001;
+const DUP_MASK: u8 = 0b_0000_1000;
 
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
 pub struct FixedHeader {
@@ -36,6 +37,14 @@ impl FixedHeader {
 
     pub fn packet_type(&self) -> PacketType {
         self.packet_type
+    }
+
+    pub fn dup(&self) -> bool {
+        (self.flags & DUP_MASK) != 0
+    }
+
+    pub fn set_dup(&mut self, dup: bool) {
+        self.flags = self.flags & !DUP_MASK | (dup as u8) << 3;
     }
 
     pub fn set_retain(&mut self, retain: bool) {

@@ -1,6 +1,6 @@
 use crate::{
     codec::{get_utf8, put_utf8, variable_byte_int_size, SIZE_UTF8_STRING},
-    property::{PacketProperties, PropertyBundle},
+    property::{PacketProperties, Property, PropertyBundle},
     Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyType, QoSLevel, Size,
 };
 use bytes::{Buf, BufMut};
@@ -83,6 +83,19 @@ impl Publish {
         }
         self.packet_id = Some(id);
         Ok(())
+    }
+
+    pub fn topic_alias(&self) -> Option<u16> {
+        self.props
+            .get_property(PropertyType::TopicAlias)
+            .map(|p| match p {
+                Property::TopicAlias(v) => *v,
+                _ => 0,
+            })
+    }
+
+    pub fn set_topic_alias(&mut self, alias: u16) {
+        self.props.set_property(Property::TopicAlias(alias))
     }
 
     pub fn properties(&self) -> &PropertyBundle {

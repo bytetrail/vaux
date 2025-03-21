@@ -10,7 +10,8 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use vaux_mqtt::{Packet, PacketType, QoSLevel, Subscribe, SubscriptionFilter};
+use vaux_mqtt::property::Property;
+use vaux_mqtt::{Packet, PacketType, PropertyType, QoSLevel, Subscribe, SubscriptionFilter};
 
 const DEFAULT_RECV_MAX: u16 = 100;
 const DEFAULT_SESSION_EXPIRY: Duration = Duration::from_secs(1000);
@@ -218,6 +219,55 @@ impl MqttClient {
         self.packet_in.0.send(ping).await
     }
 
+    pub async fn publish(
+        &mut self,
+        topic: Option<String>,
+        topic_alias: Option<u16>,
+        qos: QoSLevel,
+        payload: Vec<u8>,
+        utf8: bool,
+        user_props: Option<Vec<Property>>,
+    ) -> std::result::Result<(), SendError<Packet>> {
+        let mut publish = vaux_mqtt::publish::Publish::default();
+        publish.topic_name = topic;
+        publish.set_payload(payload);
+        publish
+            .properties_mut()
+            .set_property(vaux_mqtt::property::Property::PayloadFormat(if utf8 {
+                vaux_mqtt::property::PayloadFormat::Utf8
+            } else {
+                vaux_mqtt::property::PayloadFormat::Bin
+            }));
+        match qos {
+            QoSLevel::AtLeastOnce => {
+                publish.header.set_dup(true);
+            }
+            QoSLevel::ExactlyOnce => {
+                publish.header.set_dup(false);
+            }
+            _ => {
+                publish.header.set_dup(false);
+            }
+        }
+        publish.set_qos(qos);
+        if let Some(alias) = topic_alias {
+            publish.set_topic_alias(alias);
+        }
+        if let Some(props) = user_props {
+            for prop in props {
+                if let Property::UserProperty(key, value) = prop {
+                    publish
+                        .properties_mut()
+                        .set_property(vaux_mqtt::property::Property::UserProperty(key, value));
+                }
+            }
+        }
+        self.packet_out
+            .0
+            .send(vaux_mqtt::Packet::Publish(publish))
+            .await
+    }
+
     /// Helper method to publish a message to the given topic. This helper
     /// method will publish the message with a QoS level of "At Most Once",
     /// or 0.
@@ -226,19 +276,15 @@ impl MqttClient {
         topic: &str,
         payload: &str,
     ) -> std::result::Result<(), SendError<Packet>> {
-        let mut publish = vaux_mqtt::publish::Publish::default();
-        publish.topic_name = Some(topic.to_string());
-        publish.set_payload(payload.as_bytes().to_vec());
-        publish
-            .properties_mut()
-            .set_property(vaux_mqtt::property::Property::PayloadFormat(
-                vaux_mqtt::property::PayloadFormat::Utf8,
-            ));
-        publish.set_qos(QoSLevel::AtMostOnce);
-        self.packet_out
-            .0
-            .send(vaux_mqtt::Packet::Publish(publish))
-            .await
+        self.publish(
+            Some(topic.to_string()),
+            None,
+            QoSLevel::AtMostOnce,
+            payload.as_bytes().to_vec(),
+            true,
+            None,
+        )
+        .await
     }
 
     /// Helper method to subscribe to the topics in the topic filter. This helper
