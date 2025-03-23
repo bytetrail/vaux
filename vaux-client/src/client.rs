@@ -11,7 +11,7 @@ use tokio::{
     task::JoinHandle,
 };
 use vaux_mqtt::property::Property;
-use vaux_mqtt::{Packet, PacketType, PropertyType, QoSLevel, Subscribe, SubscriptionFilter};
+use vaux_mqtt::{Packet, PacketType, QoSLevel, Subscribe, SubscriptionFilter};
 
 const DEFAULT_RECV_MAX: u16 = 100;
 const DEFAULT_SESSION_EXPIRY: Duration = Duration::from_secs(1000);

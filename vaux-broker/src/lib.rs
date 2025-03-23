@@ -241,7 +241,7 @@ impl Broker {
                                 }
                                 connected = true;
                             } else if let Some(session) = &client_session {
-                                Broker::handle_packet(packet, stream, Arc::clone(&session), Arc::clone(&session_pool)).await?;
+                                Broker::handle_packet(packet, stream, Arc::clone(session), Arc::clone(&session_pool)).await?;
                             }
                             // TODO evaluate cases where connected and session may be None
                         }
