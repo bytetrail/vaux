@@ -105,6 +105,34 @@ impl ConnAck {
             .set_property(Property::KeepAlive(keep_alive));
     }
 
+    pub fn receive_max(&self) -> Option<u16> {
+        self.properties
+            .get_property(PropertyType::RecvMax)
+            .and_then(|p| {
+                if let Property::RecvMax(max) = p {
+                    Some(*max)
+                } else {
+                    None
+                }
+            })
+    }
+
+    /// Sets the maximum number of QoS 1 and QoS 2 messages the session is willing to process.
+    /// This is set as the CONNACK
+    /// [Receive Maximum](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901049)
+    /// property.The property is optional and if set to 0, the property is cleared as it is a
+    /// protocol error to have a value of 0.
+    ///
+    /// # Arguments
+    /// max - The maximum number of QoS 1 and QoS 2 messages the session is willing to process.
+    pub fn set_receive_max(&mut self, max: u16) {
+        if max == 0 {
+            self.properties.clear_property(PropertyType::RecvMax);
+            return;
+        }
+        self.properties.set_property(Property::RecvMax(max));
+    }
+
     pub fn properties(&self) -> &PropertyBundle {
         &self.properties
     }
