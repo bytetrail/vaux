@@ -539,10 +539,7 @@ impl MqttClient {
 
     fn qos_control(packet: &Packet) -> bool {
         match packet {
-            Packet::PubAck(_) => true,
-            Packet::PubRec(_) => true,
-            Packet::PubRel(_) => true,
-            Packet::PubComp(_) => true,
+            Packet::PubAck(_) | Packet::PubRec(_) | Packet::PubRel(_) | Packet::PubComp(_) => true,
             _ => false,
         }
     }
