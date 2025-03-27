@@ -102,9 +102,7 @@ impl SessionPool {
     /// The session is not removed from the pool.
     ///
     pub fn get_active(&self, session_id: &str) -> Option<Arc<RwLock<Session>>> {
-        self.active
-            .get(session_id)
-            .map(|session| Arc::clone(session))
+        self.active.get(session_id).map(Arc::clone)
     }
 
     /// Removes an active session from the pool. The session is removed from the active

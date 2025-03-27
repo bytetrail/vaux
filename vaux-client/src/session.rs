@@ -109,7 +109,7 @@ impl ClientSession {
             session_expiry: *client.session_expiry.read().await,
             qos_send_remaining: client.receive_max as usize,
             pending_qos_send: HashMap::new(),
-            qos_recv_remaining: u16::max_value() as usize,
+            qos_recv_remaining: u16::MAX as usize,
             pending_qos_recv: HashMap::new(),
             auto_packet_id: client.auto_packet_id,
             last_packet_id: 0,
@@ -236,7 +236,7 @@ impl ClientSession {
             Packet::Publish(mut p) => {
                 if p.qos() == QoSLevel::AtLeastOnce || p.qos() == QoSLevel::ExactlyOnce {
                     // check the pending qos for available space
-                    if self.pending_qos_send.len() >= u16::max_value() as usize
+                    if self.pending_qos_send.len() >= u16::MAX as usize
                         || self.qos_send_remaining == 0
                     {
                         return Err(MqttError::new(
@@ -578,15 +578,15 @@ impl ClientSession {
                         Ok(_) => {
                             self.pending_qos_recv.remove(&publish.packet_id.unwrap());
                             self.qos_recv_remaining += 1;
-                            return Ok(());
+                            Ok(())
                         }
                         Err(_) => {
                             // TODO handle the pub ack next time through
                             // push a message to the last error channel
-                            return Err(MqttError::new(
+                            Err(MqttError::new(
                                 "unable to send pub ack",
                                 ErrorKind::Transport,
-                            ));
+                            ))
                         }
                     }
                 } else {
