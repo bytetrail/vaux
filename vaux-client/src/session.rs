@@ -1,6 +1,7 @@
 use crate::{ErrorKind, MqttClient, MqttError};
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
+use vaux_mqtt::publish::Publish;
 use vaux_mqtt::WillMessage;
 use vaux_mqtt::{property::Property, ConnAck, Connect, Packet, PubResp, QoSLevel, Reason};
 
@@ -316,109 +317,7 @@ impl ClientSession {
                 ));
             }
             Packet::Publish(publish) => {
-                match publish.qos() {
-                    vaux_mqtt::QoSLevel::AtMostOnce => {}
-                    vaux_mqtt::QoSLevel::AtLeastOnce => {
-                        if self.qos_recv_remaining == 0 {
-                            // protocol error, no more QoS packets allowed
-                            return Err(MqttError::new(
-                                "no more QoS packets allowed",
-                                ErrorKind::Protocol(Reason::ProtocolErr),
-                            ));
-                        }
-                        // insert into pending receive QoS
-                        self.pending_qos_recv.insert(
-                            publish.packet_id.unwrap(),
-                            QoSPacketState::new_qos1(Packet::Publish(publish.clone())),
-                        );
-                        println!(
-                            "PUBLISH(recv) pending qos recv: {}",
-                            self.pending_qos_recv.len()
-                        );
-                        if self.auto_ack {
-                            let mut puback = PubResp::new_puback();
-                            if let Some(packet_id) = publish.packet_id {
-                                puback.packet_id = packet_id;
-                            } else {
-                                // TODO send disconnect with reason cod
-                                let _ = self.packet_stream.shutdown().await;
-                                return Err(MqttError::new(
-                                    "protocol error, packet ID required with QoS > 0",
-                                    ErrorKind::Protocol(Reason::MalformedPacket),
-                                ));
-                            }
-                            self.qos_recv_remaining -= 1;
-                            if self.send_packet(Packet::PubAck(puback)).await.is_err() {
-                                // TODO handle the pub ack next time through
-                                // push a message to the last error channel\
-                                todo!()
-                            } else {
-                                // remove from pending qos
-                                self.pending_qos_recv.remove(&publish.packet_id.unwrap());
-                                println!(
-                                    "PUBLISH(auto-PUBACK) pending qos recv: {}",
-                                    self.pending_qos_recv.len()
-                                );
-                                self.qos_recv_remaining += 1;
-                            }
-                        } else {
-                            // not auto ack, remaining - 1 until client app sends response
-                            self.qos_recv_remaining -= 1;
-                        }
-                    }
-                    vaux_mqtt::QoSLevel::ExactlyOnce => {
-                        self.pending_qos_recv.insert(
-                            publish.packet_id.unwrap(),
-                            QoSPacketState::new_qos2(Packet::Publish(publish.clone())),
-                        );
-                        println!(
-                            "PUBLISH(recv QOS2) pending qos recv: {}",
-                            self.pending_qos_recv.len()
-                        );
-                        // decrement the remaining QoS packets until ack  sent
-                        self.qos_recv_remaining -= 1;
-                        println!(
-                            "PUBLISH (recv QOS2) receive remaining: {}",
-                            self.qos_recv_remaining
-                        );
-
-                        if self.auto_ack {
-                            let mut pubrec = PubResp::new_pubrec();
-                            if let Some(packet_id) = publish.packet_id {
-                                pubrec.packet_id = packet_id;
-                            } else {
-                                // protocol error, packet ID required with QoS > 0
-                                let _ = self.packet_stream.shutdown().await;
-                                return Err(MqttError::new(
-                                    "protocol error, packet ID required with QoS > 0",
-                                    ErrorKind::Protocol(Reason::MalformedPacket),
-                                ));
-                            }
-                            if self.send_packet(Packet::PubRec(pubrec)).await.is_err() {
-                                // TODO handle the pub rec next time through
-                                // push a message to the last error channel
-                                todo!()
-                            } else {
-                                // move to next state and re-insert into pending qos
-                                let next = self
-                                    .pending_qos_recv
-                                    .remove(&publish.packet_id.unwrap())
-                                    .expect("expected pubrec");
-                                println!(
-                                    "PUBLISH (auto-PUBREC remove) pending qos recv: {}",
-                                    self.pending_qos_recv.len()
-                                );
-                                let next = next.next().expect("pub rec next");
-                                self.pending_qos_recv
-                                    .insert(publish.packet_id.unwrap(), next);
-                                println!(
-                                    "PUBLISH (auto-PUBREC insert) pending qos recv: {}",
-                                    self.pending_qos_recv.len()
-                                );
-                            }
-                        }
-                    }
-                }
+                self.handle_recv_publish(publish.clone()).await?;
             }
             Packet::PubAck(puback) => {
                 if let Some(p) = self.pending_qos_send.get(&puback.packet_id) {
@@ -573,6 +472,115 @@ impl ClientSession {
             self.qos_send_remaining = receive_max as usize;
         }
         Ok(connack)
+    }
+
+    async fn handle_recv_publish(&mut self, publish: Publish) -> crate::Result<()> {
+        match publish.qos() {
+            vaux_mqtt::QoSLevel::AtMostOnce => Ok(()),
+
+            vaux_mqtt::QoSLevel::AtLeastOnce => {
+                if self.qos_recv_remaining == 0 {
+                    // protocol error, no more QoS packets allowed
+                    return Err(MqttError::new(
+                        "no more QoS packets allowed",
+                        ErrorKind::Protocol(Reason::ProtocolErr),
+                    ));
+                }
+                // insert into pending receive QoS
+                self.pending_qos_recv.insert(
+                    publish.packet_id.unwrap(),
+                    QoSPacketState::new_qos1(Packet::Publish(publish.clone())),
+                );
+                println!(
+                    "PUBLISH(recv) pending qos recv: {}",
+                    self.pending_qos_recv.len()
+                );
+                if self.auto_ack {
+                    let mut puback = PubResp::new_puback();
+                    if let Some(packet_id) = publish.packet_id {
+                        puback.packet_id = packet_id;
+                    } else {
+                        // TODO send disconnect with reason cod
+                        let _ = self.packet_stream.shutdown().await;
+                        return Err(MqttError::new(
+                            "protocol error, packet ID required with QoS > 0",
+                            ErrorKind::Protocol(Reason::MalformedPacket),
+                        ));
+                    }
+                    self.qos_recv_remaining -= 1;
+                    if self.send_packet(Packet::PubAck(puback)).await.is_err() {
+                        // TODO handle the pub ack next time through
+                        // push a message to the last error channel\
+                        todo!()
+                    } else {
+                        // remove from pending qos
+                        self.pending_qos_recv.remove(&publish.packet_id.unwrap());
+                        println!(
+                            "PUBLISH(auto-PUBACK) pending qos recv: {}",
+                            self.pending_qos_recv.len()
+                        );
+                        self.qos_recv_remaining += 1;
+                        Ok(())
+                    }
+                } else {
+                    // not auto ack, remaining - 1 until client app sends response
+                    self.qos_recv_remaining -= 1;
+                    Ok(())
+                }
+            }
+            vaux_mqtt::QoSLevel::ExactlyOnce => {
+                self.pending_qos_recv.insert(
+                    publish.packet_id.unwrap(),
+                    QoSPacketState::new_qos2(Packet::Publish(publish.clone())),
+                );
+                println!(
+                    "PUBLISH(recv QOS2) pending qos recv: {}",
+                    self.pending_qos_recv.len()
+                );
+                // decrement the remaining QoS packets until ack  sent
+                self.qos_recv_remaining -= 1;
+                println!(
+                    "PUBLISH (recv QOS2) receive remaining: {}",
+                    self.qos_recv_remaining
+                );
+                if self.auto_ack {
+                    let mut pubrec = PubResp::new_pubrec();
+                    if let Some(packet_id) = publish.packet_id {
+                        pubrec.packet_id = packet_id;
+                    } else {
+                        // protocol error, packet ID required with QoS > 0
+                        let _ = self.packet_stream.shutdown().await;
+                        return Err(MqttError::new(
+                            "protocol error, packet ID required with QoS > 0",
+                            ErrorKind::Protocol(Reason::MalformedPacket),
+                        ));
+                    }
+                    if self.send_packet(Packet::PubRec(pubrec)).await.is_err() {
+                        // TODO handle the pub rec next time through
+                        // push a message to the last error channel
+                        todo!()
+                    } else {
+                        // move to next state and re-insert into pending qos
+                        let next = self
+                            .pending_qos_recv
+                            .remove(&publish.packet_id.unwrap())
+                            .expect("expected pubrec");
+                        println!(
+                            "PUBLISH (auto-PUBREC remove) pending qos recv: {}",
+                            self.pending_qos_recv.len()
+                        );
+                        let next = next.next().expect("pub rec next");
+                        self.pending_qos_recv
+                            .insert(publish.packet_id.unwrap(), next);
+                        println!(
+                            "PUBLISH (auto-PUBREC insert) pending qos recv: {}",
+                            self.pending_qos_recv.len()
+                        );
+                    }
+                }
+                Ok(())
+            }
+        }
     }
 
     pub(crate) async fn handle_keep_alive(&mut self) -> Result<(), MqttError> {
