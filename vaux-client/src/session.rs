@@ -13,6 +13,7 @@ enum QoSPacket {
 
 struct QoSPacketState {
     packet_id: u16,
+    #[allow(dead_code)]
     packet: Option<Packet>,
     next: QoSPacket,
 }
@@ -330,6 +331,10 @@ impl ClientSession {
                             publish.packet_id.unwrap(),
                             QoSPacketState::new_qos1(Packet::Publish(publish.clone())),
                         );
+                        println!(
+                            "PUBLISH(recv) pending qos recv: {}",
+                            self.pending_qos_recv.len()
+                        );
                         if self.auto_ack {
                             let mut puback = PubResp::new_puback();
                             if let Some(packet_id) = publish.packet_id {
@@ -350,6 +355,10 @@ impl ClientSession {
                             } else {
                                 // remove from pending qos
                                 self.pending_qos_recv.remove(&publish.packet_id.unwrap());
+                                println!(
+                                    "PUBLISH(auto-PUBACK) pending qos recv: {}",
+                                    self.pending_qos_recv.len()
+                                );
                                 self.qos_recv_remaining += 1;
                             }
                         } else {
@@ -358,11 +367,21 @@ impl ClientSession {
                         }
                     }
                     vaux_mqtt::QoSLevel::ExactlyOnce => {
-                        // not auto ack, remaining - 1 until client app sends response
                         self.pending_qos_recv.insert(
                             publish.packet_id.unwrap(),
                             QoSPacketState::new_qos2(Packet::Publish(publish.clone())),
                         );
+                        println!(
+                            "PUBLISH(recv QOS2) pending qos recv: {}",
+                            self.pending_qos_recv.len()
+                        );
+                        // decrement the remaining QoS packets until ack  sent
+                        self.qos_recv_remaining -= 1;
+                        println!(
+                            "PUBLISH (recv QOS2) receive remaining: {}",
+                            self.qos_recv_remaining
+                        );
+
                         if self.auto_ack {
                             let mut pubrec = PubResp::new_pubrec();
                             if let Some(packet_id) = publish.packet_id {
@@ -375,8 +394,6 @@ impl ClientSession {
                                     ErrorKind::Protocol(Reason::MalformedPacket),
                                 ));
                             }
-                            // decrement the remaining QoS packets until ack  sent
-                            self.qos_recv_remaining -= 1;
                             if self.send_packet(Packet::PubRec(pubrec)).await.is_err() {
                                 // TODO handle the pub rec next time through
                                 // push a message to the last error channel
@@ -387,13 +404,18 @@ impl ClientSession {
                                     .pending_qos_recv
                                     .remove(&publish.packet_id.unwrap())
                                     .expect("expected pubrec");
+                                println!(
+                                    "PUBLISH (auto-PUBREC remove) pending qos recv: {}",
+                                    self.pending_qos_recv.len()
+                                );
                                 let next = next.next().expect("pub rec next");
                                 self.pending_qos_recv
                                     .insert(publish.packet_id.unwrap(), next);
-                                self.qos_recv_remaining += 1;
+                                println!(
+                                    "PUBLISH (auto-PUBREC insert) pending qos recv: {}",
+                                    self.pending_qos_recv.len()
+                                );
                             }
-                        } else {
-                            self.qos_recv_remaining -= 1;
                         }
                     }
                 }
@@ -404,6 +426,7 @@ impl ClientSession {
                         QoSPacket::PubAck => {
                             self.pending_qos_send.remove(&puback.packet_id);
                             self.qos_send_remaining += 1;
+                            println!("PUBACK receive remaining: {}", self.qos_recv_remaining);
                         }
                         _ => {
                             // protocol error, unexpected packet - disconnect
@@ -445,29 +468,39 @@ impl ClientSession {
             }
             Packet::PubRel(pubrel) => {
                 let packet_id = pubrel.packet_id;
-                if let Some(p) = self.pending_qos_send.remove(&packet_id) {
+                if let Some(p) = self.pending_qos_recv.remove(&packet_id) {
+                    println!(
+                        "PUBREL (recv) pending qos recv: {}",
+                        self.pending_qos_recv.len()
+                    );
                     match p.next {
                         QoSPacket::PubRel => {
                             if self.auto_ack {
                                 let mut pubcomp = PubResp::new_pubcomp();
                                 pubcomp.packet_id = pubrel.packet_id;
                                 if self.send_packet(Packet::PubComp(pubcomp)).await.is_err() {
-                                    self.pending_qos_send.insert(packet_id, p);
-                                    // TODO handle the pub comp next time through
-                                    // push a message to the last error channel
-                                    todo!()
+                                    self.pending_qos_recv.insert(packet_id, p);
+                                    // TODO disconnect or attempt remediate
+                                    println!("pending qos recv: {}", self.pending_qos_recv.len());
                                 } else {
                                     self.qos_recv_remaining += 1;
+                                    println!(
+                                        "PUBREL (auto-PUBCOMP) - receive remaining: {}",
+                                        self.qos_recv_remaining
+                                    );
                                 }
                             }
                         }
                         _ => {
                             // protocol error, unexpected packet
                             // re-insert into pending qos without change
+                            self.pending_qos_recv.insert(packet_id, p);
+                            println!("pending qos recv: {}", self.pending_qos_recv.len());
                         }
                     }
                 } else {
                     // protocol error, unexpected packet
+                    // TODO disconnect
                 }
             }
             Packet::PubComp(pubcomp) => {
