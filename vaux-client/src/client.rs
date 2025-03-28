@@ -505,6 +505,10 @@ impl MqttClient {
                     pending_packet = packet_in_receiver.recv() => {
                         match pending_packet {
                             Some(inbound_packet) => {
+                                // if auto-ack and a QOS control packet, ignore
+                                if MqttClient::qos_control(&inbound_packet) && session.auto_ack() {
+                                    continue;
+                                }
                                 match session.write_next(inbound_packet).await {
                                     Ok(_) => {
                                     }
@@ -542,5 +546,12 @@ impl MqttClient {
 
     async fn keep_alive_timer(keep_alive: Duration) {
         tokio::time::sleep(keep_alive).await;
+    }
+
+    fn qos_control(packet: &Packet) -> bool {
+        matches!(
+            packet,
+            Packet::PubAck(_) | Packet::PubRec(_) | Packet::PubRel(_) | Packet::PubComp(_)
+        )
     }
 }

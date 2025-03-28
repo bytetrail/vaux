@@ -23,6 +23,7 @@ pub enum ErrorKind {
     Connection,
     Timeout,
     Transport,
+    Session,
 }
 
 impl Display for ErrorKind {
@@ -34,6 +35,7 @@ impl Display for ErrorKind {
             ErrorKind::Connection => "Connection",
             ErrorKind::Timeout => "Timeout",
             ErrorKind::Transport => "Transport",
+            ErrorKind::Session => "Session",
         };
 
         write!(f, "{}", kind)
