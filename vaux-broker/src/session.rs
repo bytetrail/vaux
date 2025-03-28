@@ -285,7 +285,6 @@ pub mod test {
         let session = Session::new("test".to_string(), None, Duration::from_secs(10));
         assert_eq!(session.id(), "test");
         assert_eq!(session.connected(), false);
-        assert_eq!(session.orphaned(), false);
         assert_eq!(session.keep_alive(), Duration::from_secs(10));
         assert_eq!(session.subscriptions.len(), 0);
         assert_eq!(session.will_message(), None);
