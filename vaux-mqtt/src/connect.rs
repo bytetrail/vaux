@@ -109,7 +109,7 @@ impl Connect {
         self.clean_start = connect_flags & CONNECT_FLAG_CLEAN_START != 0;
         if connect_flags & CONNECT_FLAG_WILL != 0 {
             let will_retain = connect_flags & CONNECT_FLAG_WILL_RETAIN != 0;
-            let qos = connect_flags & CONNECT_FLAG_WILL_QOS >> CONNECT_FLAG_SHIFT;
+            let qos = connect_flags & (CONNECT_FLAG_WILL_QOS >> CONNECT_FLAG_SHIFT);
             if let Ok(qos) = QoSLevel::try_from(qos) {
                 self.will_message = Some(WillMessage::new(qos, will_retain));
             } else {

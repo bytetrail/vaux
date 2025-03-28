@@ -10,6 +10,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
+use vaux_mqtt::property::Property;
 use vaux_mqtt::{Packet, PacketType, QoSLevel, Subscribe, SubscriptionFilter};
 
 const DEFAULT_RECV_MAX: u16 = 100;
@@ -225,6 +226,7 @@ impl MqttClient {
         qos: QoSLevel,
         payload: Vec<u8>,
         utf8: bool,
+        user_props: Option<Vec<Property>>,
     ) -> std::result::Result<(), SendError<Packet>> {
         let mut publish = vaux_mqtt::publish::Publish::default();
         publish.topic_name = topic;
@@ -248,9 +250,17 @@ impl MqttClient {
             }
         }
         publish.set_qos(qos);
-
         if let Some(alias) = topic_alias {
             publish.set_topic_alias(alias);
+        }
+        if let Some(props) = user_props {
+            for prop in props {
+                if let Property::UserProperty(key, value) = prop {
+                    publish
+                        .properties_mut()
+                        .set_property(vaux_mqtt::property::Property::UserProperty(key, value));
+                }
+            }
         }
         self.packet_out
             .0
@@ -272,6 +282,7 @@ impl MqttClient {
             QoSLevel::AtMostOnce,
             payload.as_bytes().to_vec(),
             true,
+            None,
         )
         .await
     }

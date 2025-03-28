@@ -44,7 +44,7 @@ impl FixedHeader {
     }
 
     pub fn set_dup(&mut self, dup: bool) {
-        self.flags = self.flags & !DUP_MASK | (dup as u8) << 3;
+        self.flags = self.flags & !DUP_MASK | (dup as u8) << 3
     }
 
     pub fn retain(&self) -> bool {

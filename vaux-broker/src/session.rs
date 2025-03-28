@@ -175,7 +175,6 @@ pub struct Session {
     id: String,
     last_active: Instant,
     connected: bool,
-    orphaned: bool,
     keep_alive: Duration,
     pub session_expiry: Option<Duration>,
     will_message: Option<WillMessage>,
@@ -191,7 +190,6 @@ impl Session {
             id,
             last_active: Instant::now(),
             connected: false,
-            orphaned: false,
             keep_alive,
             session_expiry: None,
             will_message,
@@ -239,14 +237,6 @@ impl Session {
 
     pub(crate) fn set_connected(&mut self, connected: bool) {
         self.connected = connected;
-    }
-
-    pub fn orphaned(&self) -> bool {
-        self.orphaned
-    }
-
-    pub(crate) fn set_orphaned(&mut self) {
-        self.orphaned = true;
     }
 
     /// Sets the last session activity to the time that the method is invoked.
