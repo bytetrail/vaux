@@ -181,13 +181,14 @@ impl ClientBuilder {
     }
 
     pub async fn build(self) -> Result<crate::MqttClient, BuilderError> {
-        if self.state.keep_alive < MIN_KEEP_ALIVE {
+        let keep_alive = self.state.keep_alive.read().await;
+        if *keep_alive < MIN_KEEP_ALIVE {
             return Err(BuilderError::MinKeepAlive);
         }
+        drop(keep_alive);
 
         let mut client =
             crate::MqttClient::new_with_connection(self.connection, self.state, self.channel_size);
-        client.set_session_expiry(self.session_expiry).await;
         client.set_max_packet_size(self.max_packet_size);
         client.set_max_connect_wait(self.max_connect_wait);
         if let Some(error_out) = self.error_out {

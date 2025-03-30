@@ -34,7 +34,7 @@ pub async fn basic_connect() {
 #[tokio::test]
 pub async fn connect_with_takeover() {
     const TAKEOVER_CLIENT_ID: &str = "takeover_client_id";
-    const SESSION_EXPIRY: u32 = 1000;
+    const SESSION_EXPIRY: Duration = Duration::from_secs(60 * 10);
     const CONNECT_TIMEOUT: u64 = 5000;
     const TEST_PORT: u16 = 8384;
     let listen_addr = "127.0.0.1:8384";

@@ -4,21 +4,14 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::select;
 use tokio::sync::RwLock;
 use tokio::{
-    sync::{
-        mpsc::{self, error::SendError, Receiver, Sender},
-        Mutex,
-    },
+    sync::mpsc::{self, error::SendError, Receiver, Sender},
     task::JoinHandle,
 };
 use vaux_mqtt::property::Property;
 use vaux_mqtt::{Packet, PacketType, QoSLevel, Subscribe, SubscriptionFilter};
 
-const DEFAULT_RECV_MAX: u16 = 100;
-const DEFAULT_SESSION_EXPIRY: Duration = Duration::from_secs(1000);
 // 64K is the default max packet size
 const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
-const DEFAULT_CLIENT_KEEP_ALIVE: Duration = Duration::from_secs(60);
-const MIN_KEEP_ALIVE: Duration = Duration::from_secs(30);
 const MAX_CONNECT_WAIT: Duration = Duration::from_secs(5);
 const DEFAULT_CHANNEL_SIZE: u16 = 128;
 
@@ -70,7 +63,6 @@ pub struct MqttClient {
     connected: Arc<RwLock<bool>>,
     pub session_expiry: Arc<RwLock<Duration>>,
     pub keep_alive: Arc<RwLock<Duration>>,
-    pub(crate) client_id: Arc<Mutex<Option<String>>>,
     pub(crate) packet_in: PacketChannel,
     pub(crate) packet_out: PacketChannel,
     pub(crate) err_chan: Option<Sender<MqttError>>,
@@ -102,7 +94,6 @@ impl MqttClient {
             connection: None,
             connected: Arc::new(RwLock::new(false)),
             session_expiry: Arc::clone(&state.session_expiry),
-            client_id: Arc::clone(&state.client_id),
             filter_channel: HashMap::new(),
             packet_in: PacketChannel::new_with_size(
                 channel_size.unwrap_or(DEFAULT_CHANNEL_SIZE) as usize
@@ -139,22 +130,8 @@ impl MqttClient {
         *self.session_expiry.read().await
     }
 
-    pub(crate) async fn set_session_expiry(&mut self, session_expiry: u32) {
-        let mut _session_expiry = self.session_expiry.write().await;
-        *_session_expiry = Duration::from_secs(session_expiry as u64);
-    }
-
     pub(crate) fn set_error_out(&mut self, error_out: Sender<MqttError>) {
         self.err_chan = Some(error_out);
-    }
-
-    pub(crate) async fn set_keep_alive(&mut self, keep_alive: Duration) {
-        let mut _keep_alive = self.keep_alive.write().await;
-        if keep_alive < MIN_KEEP_ALIVE {
-            *_keep_alive = MIN_KEEP_ALIVE;
-        } else {
-            *_keep_alive = keep_alive;
-        }
     }
 
     pub async fn keep_alive(&self) -> Duration {
@@ -401,13 +378,13 @@ impl MqttClient {
                 }
             }
             // get the session keep alive duration set after the connect
-            let keep_alive = session.keep_alive();
+            let keep_alive = session.keep_alive().await;
             // set the client keep alive duration
             {
                 *_keep_alive.write().await = keep_alive;
             }
             // get the session expiry duration set after the connect
-            let session_expiry = session.session_expiry();
+            let session_expiry = session.session_expiry().await;
             {
                 *_session_expiry.write().await = session_expiry;
             }
