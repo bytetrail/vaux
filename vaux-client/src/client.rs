@@ -1,8 +1,8 @@
-use crate::session::ClientSession;
+use crate::session::{ClientSession, SessionState};
 use crate::{ErrorKind, MqttConnection, MqttError};
-use async_std::sync::RwLock;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::select;
+use tokio::sync::RwLock;
 use tokio::{
     sync::{
         mpsc::{self, error::SendError, Receiver, Sender},
@@ -66,70 +66,43 @@ impl Default for PacketChannel {
 
 pub struct MqttClient {
     pub(crate) connection: Option<MqttConnection>,
-    pub(crate) auto_ack: bool,
-    pub(crate) receive_max: u16,
-    pub(crate) auto_packet_id: bool,
     filter_channel: FilteredChannel,
     connected: Arc<RwLock<bool>>,
-    pub(crate) session_expiry: Arc<RwLock<Duration>>,
+    pub session_expiry: Arc<RwLock<Duration>>,
+    pub keep_alive: Arc<RwLock<Duration>>,
     pub(crate) client_id: Arc<Mutex<Option<String>>>,
     pub(crate) packet_in: PacketChannel,
     pub(crate) packet_out: PacketChannel,
     pub(crate) err_chan: Option<Sender<MqttError>>,
     pub(crate) max_packet_size: usize,
-    pub(crate) keep_alive: Arc<RwLock<Duration>>,
     max_connect_wait: Duration,
     pub(crate) will_message: Option<vaux_mqtt::WillMessage>,
-    pub(crate) pingresp: bool,
+    pub(crate) session_state: Option<SessionState>,
 }
 
 impl Default for MqttClient {
     fn default() -> Self {
-        Self::new(
-            &uuid::Uuid::new_v4().to_string(),
-            true,
-            DEFAULT_RECV_MAX,
-            true,
-            None,
-        )
+        Self::new(SessionState::default(), Some(DEFAULT_CHANNEL_SIZE))
     }
 }
 
 impl MqttClient {
     pub(crate) fn new_with_connection(
         connection: MqttConnection,
-        client_id: &str,
-        auto_ack: bool,
-        receive_max: u16,
-        auto_packet_id: bool,
+        state: SessionState,
         channel_size: Option<u16>,
     ) -> Self {
-        let mut client = Self::new(
-            client_id,
-            auto_ack,
-            receive_max,
-            auto_packet_id,
-            channel_size,
-        );
+        let mut client = Self::new(state, channel_size);
         client.connection = Some(connection);
         client
     }
 
-    pub(crate) fn new(
-        client_id: &str,
-        auto_ack: bool,
-        receive_max: u16,
-        auto_packet_id: bool,
-        channel_size: Option<u16>,
-    ) -> Self {
+    pub(crate) fn new(state: SessionState, channel_size: Option<u16>) -> Self {
         Self {
             connection: None,
-            auto_ack,
-            auto_packet_id,
-            receive_max,
             connected: Arc::new(RwLock::new(false)),
-            session_expiry: Arc::new(RwLock::new(DEFAULT_SESSION_EXPIRY)),
-            client_id: Arc::new(Mutex::new(Some(client_id.to_string()))),
+            session_expiry: Arc::clone(&state.session_expiry),
+            client_id: Arc::clone(&state.client_id),
             filter_channel: HashMap::new(),
             packet_in: PacketChannel::new_with_size(
                 channel_size.unwrap_or(DEFAULT_CHANNEL_SIZE) as usize
@@ -139,19 +112,11 @@ impl MqttClient {
             ),
             err_chan: None,
             max_packet_size: DEFAULT_MAX_PACKET_SIZE,
-            keep_alive: Arc::new(RwLock::new(DEFAULT_CLIENT_KEEP_ALIVE)),
+            keep_alive: Arc::clone(&state.keep_alive),
             max_connect_wait: MAX_CONNECT_WAIT,
             will_message: None,
-            pingresp: false,
+            session_state: Some(state),
         }
-    }
-
-    pub fn pingresp(&self) -> bool {
-        self.pingresp
-    }
-
-    pub(crate) fn set_pingresp(&mut self, pingresp: bool) {
-        self.pingresp = pingresp;
     }
 
     pub fn packet_producer(&mut self) -> Sender<Packet> {

@@ -1,10 +1,13 @@
 use crate::{ErrorKind, MqttClient, MqttError};
-use rustls::client;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
 use vaux_mqtt::publish::Publish;
 use vaux_mqtt::WillMessage;
 use vaux_mqtt::{property::Property, ConnAck, Connect, Packet, PubResp, QoSLevel, Reason};
+
+const DEFAULT_CLIENT_ID_PREFIX: &str = "vaux-client";
+const DEFAULT_CLIENT_KEEP_ALIVE: Duration = Duration::from_secs(60);
+const DEFAULT_SESSION_EXPIRY: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 enum QoSPacket {
@@ -57,39 +60,42 @@ impl QoSPacketState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SessionState {
-    client_id: Arc<Mutex<Option<String>>>,
-    keep_alive: Duration,
-    session_expiry: Duration,
+    pub(crate) client_id: Arc<Mutex<Option<String>>>,
+    pub(crate) keep_alive: Arc<RwLock<Duration>>,
+    pub(crate) session_expiry: Arc<RwLock<Duration>>,
 
-    qos_send_remaining: usize,
+    pub(crate) qos_send_remaining: usize,
     pending_qos_send: HashMap<u16, QoSPacketState>,
-    qos_recv_remaining: usize,
+    pub(crate) qos_recv_remaining: usize,
     pending_qos_recv: HashMap<u16, QoSPacketState>,
 
-    auto_packet_id: bool,
-    last_packet_id: u16,
-    auto_ack: bool,
-    pingresp: bool,
+    pub(crate) auto_packet_id: bool,
+    pub(crate) last_packet_id: u16,
+    pub(crate) auto_ack: bool,
+    pub(crate) pingresp: bool,
 }
 
 impl SessionState {
-    async fn new_from_client(client: &MqttClient) -> Self {
+    pub fn new() -> Self {
         Self {
-            client_id: Arc::clone(&client.client_id),
-            keep_alive: *client.keep_alive.read().await,
-            session_expiry: *client.session_expiry.read().await,
-
-            qos_send_remaining: client.receive_max as usize,
+            client_id: Arc::new(Mutex::new(Some(format!(
+                "{}-{}",
+                DEFAULT_CLIENT_ID_PREFIX,
+                uuid::Uuid::new_v4()
+            )))),
+            keep_alive: Arc::new(RwLock::new(DEFAULT_CLIENT_KEEP_ALIVE)),
+            session_expiry: Arc::new(RwLock::new(DEFAULT_SESSION_EXPIRY)),
+            qos_send_remaining: u16::MAX as usize,
             pending_qos_send: HashMap::new(),
             qos_recv_remaining: u16::MAX as usize,
             pending_qos_recv: HashMap::new(),
 
-            auto_packet_id: client.auto_packet_id,
+            auto_packet_id: true,
             last_packet_id: 0,
-            auto_ack: client.auto_ack,
-            pingresp: client.pingresp,
+            auto_ack: true,
+            pingresp: false,
         }
     }
 }
@@ -118,7 +124,11 @@ impl ClientSession {
                 Some(client.max_packet_size),
             ),
             last_active: std::time::Instant::now(),
-            state: SessionState::new_from_client(client).await,
+            state: client
+                .session_state
+                .take()
+                .ok_or_else(SessionState::new)
+                .unwrap(),
         })
     }
 
@@ -150,12 +160,12 @@ impl ClientSession {
         *self.connected.read().await
     }
 
-    pub(crate) fn keep_alive(&self) -> Duration {
-        self.state.keep_alive
+    pub(crate) async fn keep_alive(&self) -> Duration {
+        *self.state.keep_alive.read().await
     }
 
-    pub(crate) fn session_expiry(&self) -> Duration {
-        self.state.session_expiry
+    pub(crate) async fn session_expiry(&self) -> Duration {
+        *self.state.session_expiry.read().await
     }
 
     pub(crate) fn auto_ack(&self) -> bool {
@@ -170,7 +180,7 @@ impl ClientSession {
         will: Option<WillMessage>,
     ) -> crate::Result<ConnAck> {
         let mut connect = Connect::default();
-        connect.keep_alive = self.state.keep_alive.as_secs() as u16;
+        connect.keep_alive = self.state.keep_alive.read().await.as_secs() as u16;
         connect.clean_start = clean_start;
         {
             let set_id = self.state.client_id.lock().await;
@@ -181,7 +191,7 @@ impl ClientSession {
         connect
             .properties_mut()
             .set_property(Property::SessionExpiryInterval(
-                self.state.session_expiry.as_secs() as u32,
+                self.state.session_expiry.read().await.as_secs() as u32,
             ));
         if let Some((username, password)) = credentials {
             connect.username = Some(username);
@@ -562,12 +572,14 @@ impl ClientSession {
             }
         }
         // set session keep alive from the server
-        if let Some(keep_alive) = connack.server_keep_alive() {
-            self.state.keep_alive = Duration::from_secs(u64::from(keep_alive));
+        if let Some(server_keep_alive) = connack.server_keep_alive() {
+            let mut keep_alive = self.state.keep_alive.write().await;
+            *keep_alive = Duration::from_secs(u64::from(server_keep_alive));
         }
         // set the server assigned session expiry if present
-        if let Some(session_expiry) = connack.session_expiry() {
-            self.state.session_expiry = Duration::from_secs(u64::from(session_expiry));
+        if let Some(server_session_expiry) = connack.session_expiry() {
+            let mut session_expiry = self.state.session_expiry.write().await;
+            *session_expiry = Duration::from_secs(u64::from(server_session_expiry));
         }
         // set the server assigned receive maximum
         if let Some(receive_max) = connack.receive_max() {
