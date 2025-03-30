@@ -57,8 +57,13 @@ pub async fn connect_with_takeover() {
     .with_auto_ack(true)
     .with_session_expiry(SESSION_EXPIRY)
     .build()
-    .await
-    .expect("failed to create client");
+    .await;
+
+    println!("Client one created");
+    if let Err(e) = client_one {
+        panic!("Failed to create client one: {:?}", e);
+    }
+    let mut client_one = client_one.unwrap();
 
     let client_one_handle = client_one
         .try_start(Duration::from_millis(CONNECT_TIMEOUT), true)

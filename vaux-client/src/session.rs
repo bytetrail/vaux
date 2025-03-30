@@ -60,7 +60,7 @@ impl QoSPacketState {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SessionState {
     pub(crate) client_id: Arc<Mutex<Option<String>>>,
     pub(crate) keep_alive: Arc<RwLock<Duration>>,
@@ -75,6 +75,12 @@ pub struct SessionState {
     pub(crate) last_packet_id: u16,
     pub(crate) auto_ack: bool,
     pub(crate) pingresp: bool,
+}
+
+impl Default for SessionState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SessionState {
