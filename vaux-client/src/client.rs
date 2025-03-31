@@ -66,7 +66,6 @@ pub struct MqttClient {
     pub(crate) packet_in: PacketChannel,
     pub(crate) packet_out: PacketChannel,
     pub(crate) err_chan: Option<Sender<MqttError>>,
-    pub(crate) max_packet_size: usize,
     max_connect_wait: Duration,
     pub(crate) will_message: Option<vaux_mqtt::WillMessage>,
     pub(crate) session_state: Option<SessionState>,
@@ -102,7 +101,6 @@ impl MqttClient {
                 channel_size.unwrap_or(DEFAULT_CHANNEL_SIZE) as usize
             ),
             err_chan: None,
-            max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             keep_alive: Arc::clone(&state.keep_alive),
             max_connect_wait: MAX_CONNECT_WAIT,
             will_message: None,
@@ -116,10 +114,6 @@ impl MqttClient {
 
     pub fn take_packet_consumer(&mut self) -> Option<Receiver<Packet>> {
         self.packet_out.1.take()
-    }
-
-    pub(crate) fn set_max_packet_size(&mut self, max_packet_size: usize) {
-        self.max_packet_size = max_packet_size;
     }
 
     pub async fn connected(&self) -> bool {

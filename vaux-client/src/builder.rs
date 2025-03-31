@@ -3,9 +3,6 @@ use std::{collections::HashMap, fmt::Display, sync::Arc, time::Duration};
 use tokio::sync::{mpsc::Sender, Mutex, RwLock};
 use vaux_mqtt::{Packet, PacketType, WillMessage};
 
-const DEFAULT_RECV_MAX: u16 = 100;
-const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
-const DEFAULT_CLIENT_KEEP_ALIVE: Duration = Duration::from_secs(60);
 const MIN_KEEP_ALIVE: Duration = Duration::from_secs(30);
 const MAX_CONNECT_WAIT: Duration = Duration::from_secs(5);
 
@@ -29,7 +26,6 @@ impl Display for BuilderError {
 pub struct ClientBuilder {
     connection: MqttConnection,
     state: SessionState,
-    max_packet_size: usize,
     max_connect_wait: Duration,
     channel_size: Option<u16>,
     filtered_consumer: Option<HashMap<PacketType, Sender<vaux_mqtt::Packet>>>,
@@ -42,7 +38,6 @@ impl Default for ClientBuilder {
         Self {
             connection: MqttConnection::new(),
             state: SessionState::default(),
-            max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             max_connect_wait: MAX_CONNECT_WAIT,
             channel_size: None,
             filtered_consumer: None,
@@ -108,7 +103,7 @@ impl ClientBuilder {
     }
 
     pub fn with_max_packet_size(mut self, max_packet_size: usize) -> Self {
-        self.max_packet_size = max_packet_size;
+        self.state.max_packet_size = max_packet_size;
         self
     }
 
@@ -189,7 +184,6 @@ impl ClientBuilder {
 
         let mut client =
             crate::MqttClient::new_with_connection(self.connection, self.state, self.channel_size);
-        client.set_max_packet_size(self.max_packet_size);
         client.set_max_connect_wait(self.max_connect_wait);
         if let Some(error_out) = self.error_out {
             client.set_error_out(error_out);

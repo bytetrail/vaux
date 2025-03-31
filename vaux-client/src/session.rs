@@ -5,6 +5,7 @@ use vaux_mqtt::publish::Publish;
 use vaux_mqtt::WillMessage;
 use vaux_mqtt::{property::Property, ConnAck, Connect, Packet, PubResp, QoSLevel, Reason};
 
+const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
 const DEFAULT_CLIENT_ID_PREFIX: &str = "vaux-client";
 const DEFAULT_CLIENT_KEEP_ALIVE: Duration = Duration::from_secs(60);
 const DEFAULT_SESSION_EXPIRY: Duration = Duration::from_secs(600);
@@ -71,6 +72,7 @@ pub struct SessionState {
     pub(crate) qos_recv_remaining: usize,
     pending_qos_recv: HashMap<u16, QoSPacketState>,
 
+    pub(crate) max_packet_size: usize,
     pub(crate) auto_packet_id: bool,
     pub(crate) last_packet_id: u16,
     pub(crate) auto_ack: bool,
@@ -98,6 +100,7 @@ impl SessionState {
             qos_recv_remaining: u16::MAX as usize,
             pending_qos_recv: HashMap::new(),
 
+            max_packet_size: DEFAULT_MAX_PACKET_SIZE,
             auto_packet_id: true,
             last_packet_id: 0,
             auto_ack: true,
@@ -127,7 +130,12 @@ impl ClientSession {
             packet_stream: vaux_async::stream::PacketStream::new(
                 client.connection.take().unwrap().take_stream().unwrap(),
                 None,
-                Some(client.max_packet_size),
+                Some(
+                    client
+                        .session_state
+                        .as_ref()
+                        .map_or(DEFAULT_MAX_PACKET_SIZE, |s| s.max_packet_size),
+                ),
             ),
             last_active: std::time::Instant::now(),
             state: client
@@ -135,30 +143,6 @@ impl ClientSession {
                 .take()
                 .ok_or_else(SessionState::new)
                 .unwrap(),
-        })
-    }
-
-    pub(crate) fn restore_session(
-        &mut self,
-        client: &mut MqttClient,
-        session_state: SessionState,
-    ) -> Result<Self, MqttError> {
-        if client.connection.is_none() {
-            MqttError::new(
-                "connection is required",
-                ErrorKind::Protocol(Reason::ProtocolErr),
-            );
-        }
-
-        Ok(Self {
-            connected: Arc::new(RwLock::new(false)),
-            packet_stream: vaux_async::stream::PacketStream::new(
-                client.connection.take().unwrap().take_stream().unwrap(),
-                None,
-                Some(client.max_packet_size),
-            ),
-            last_active: std::time::Instant::now(),
-            state: session_state,
         })
     }
 
