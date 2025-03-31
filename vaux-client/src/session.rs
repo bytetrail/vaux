@@ -1,4 +1,5 @@
 use crate::{ErrorKind, MqttClient, MqttError};
+use std::mem;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
 use vaux_mqtt::publish::Publish;
@@ -114,6 +115,7 @@ pub(crate) struct ClientSession {
     packet_stream: vaux_async::stream::PacketStream,
     last_active: std::time::Instant,
     state: SessionState,
+    usable: bool,
 }
 
 impl ClientSession {
@@ -143,7 +145,16 @@ impl ClientSession {
                 .take()
                 .ok_or_else(SessionState::new)
                 .unwrap(),
+            usable: true,
         })
+    }
+
+    pub(crate) async fn end_session(&mut self) -> SessionState {
+        // poison the session so that it cannot be used after the state is taken
+        self.usable = false;
+        let mut session_state = SessionState::new();
+        mem::swap(&mut self.state, &mut session_state);
+        session_state
     }
 
     pub(crate) async fn connected(&self) -> bool {
@@ -169,6 +180,12 @@ impl ClientSession {
         clean_start: bool,
         will: Option<WillMessage>,
     ) -> crate::Result<ConnAck> {
+        if !self.usable {
+            return Err(MqttError::new(
+                "session state is not usable",
+                ErrorKind::Session,
+            ));
+        }
         let mut connect = Connect::default();
         connect.keep_alive = self.state.keep_alive.read().await.as_secs() as u16;
         connect.clean_start = clean_start;

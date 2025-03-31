@@ -48,7 +48,7 @@ pub async fn connect_with_takeover() {
     let result = broker.run().await;
     assert!(result.is_ok());
 
-    let mut client_one = vaux_client::ClientBuilder::new(
+    let client_one = vaux_client::ClientBuilder::new(
         MqttConnection::new()
             .with_host("127.0.0.1")
             .with_port(TEST_PORT),

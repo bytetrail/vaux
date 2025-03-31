@@ -11,7 +11,6 @@ use vaux_mqtt::property::Property;
 use vaux_mqtt::{Packet, PacketType, QoSLevel, Subscribe, SubscriptionFilter};
 
 // 64K is the default max packet size
-const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
 const MAX_CONNECT_WAIT: Duration = Duration::from_secs(5);
 const DEFAULT_CHANNEL_SIZE: u16 = 128;
 
@@ -283,7 +282,7 @@ impl MqttClient {
         &mut self,
         max_wait: Duration,
         clean_start: bool,
-    ) -> crate::Result<JoinHandle<crate::Result<()>>> {
+    ) -> crate::Result<JoinHandle<crate::Result<SessionState>>> {
         let handle = self.start(clean_start).await;
         match tokio::time::timeout(max_wait, {
             async {
@@ -324,7 +323,7 @@ impl MqttClient {
     pub async fn start(
         &mut self,
         clean_start: bool,
-    ) -> Result<JoinHandle<crate::Result<()>>, MqttError> {
+    ) -> Result<JoinHandle<crate::Result<SessionState>>, MqttError> {
         if self.connection.is_none() {
             return Err(MqttError::new("connection not set", ErrorKind::Connection));
         }
@@ -463,7 +462,7 @@ impl MqttClient {
                 };
                 if !session.connected().await {
                     *connected.write().await = false;
-                    return Ok(());
+                    return Ok(session.end_session().await);
                 }
             }
         }))
