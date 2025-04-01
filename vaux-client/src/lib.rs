@@ -24,6 +24,7 @@ pub enum ErrorKind {
     Timeout,
     Transport,
     Session,
+    Channel,
 }
 
 impl Display for ErrorKind {
@@ -36,6 +37,7 @@ impl Display for ErrorKind {
             ErrorKind::Timeout => "Timeout",
             ErrorKind::Transport => "Transport",
             ErrorKind::Session => "Session",
+            ErrorKind::Channel => "Channel",
         };
 
         write!(f, "{}", kind)

@@ -1,5 +1,6 @@
 use crate::session::{ClientSession, SessionState};
 use crate::{ErrorKind, MqttConnection, MqttError};
+use std::fmt::Display;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::select;
 use tokio::sync::RwLock;
@@ -53,6 +54,28 @@ impl PacketChannel {
 impl Default for PacketChannel {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Debug)]
+pub struct ClientError {
+    pub mqtt_error: MqttError,
+    pub state: SessionState,
+}
+
+impl ClientError {
+    pub fn new(mqtt_error: MqttError, state: SessionState) -> Self {
+        Self { mqtt_error, state }
+    }
+
+    pub fn kind(&self) -> ErrorKind {
+        self.mqtt_error.kind()
+    }
+}
+
+impl Display for ClientError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.mqtt_error.kind(), self.mqtt_error)
     }
 }
 
@@ -282,7 +305,7 @@ impl MqttClient {
         &mut self,
         max_wait: Duration,
         clean_start: bool,
-    ) -> crate::Result<JoinHandle<crate::Result<SessionState>>> {
+    ) -> crate::Result<JoinHandle<Result<SessionState, ClientError>>> {
         let handle = self.start(clean_start).await;
         match tokio::time::timeout(max_wait, {
             async {
@@ -323,7 +346,7 @@ impl MqttClient {
     pub async fn start(
         &mut self,
         clean_start: bool,
-    ) -> Result<JoinHandle<crate::Result<SessionState>>, MqttError> {
+    ) -> Result<JoinHandle<Result<SessionState, ClientError>>, MqttError> {
         if self.connection.is_none() {
             return Err(MqttError::new("connection not set", ErrorKind::Connection));
         }
@@ -367,7 +390,7 @@ impl MqttClient {
                 Ok(_) => *connected.write().await = true,
                 Err(e) => {
                     *connected.write().await = false;
-                    return Err(e);
+                    return Err(ClientError::new(e, session.end_session().await));
                 }
             }
             // get the session keep alive duration set after the connect
@@ -390,7 +413,7 @@ impl MqttClient {
                             }
                             Err(e) => {
                                 *connected.write().await = false;
-                                return Err(e);
+                                return Err(ClientError::new(e, session.end_session().await));
                             }
                         }
                     }
@@ -403,18 +426,17 @@ impl MqttClient {
                                         if let Some(filter_out) = filter_channel.get(&PacketType::from(&packet)) {
                                             if let Err(e) = filter_out.send(packet.clone()).await {
                                                 *connected.write().await = false;
-                                                return Err(MqttError::new(
-                                                    &format!("unable to send packet: {}", e),
-                                                    ErrorKind::Transport,
-                                                ));
+                                                return Err(ClientError::new(
+                                                    MqttError::new(&format!("unable to send packet to filter: {}", e), ErrorKind::Channel),
+                                                    session.end_session().await));
                                             }
                                         } else {
-                                            packet_out.send(packet).await.map_err(|e| {
-                                                MqttError::new(
-                                                    &format!("unable to send packet: {}", e),
-                                                    ErrorKind::Transport,
-                                                )
-                                            })?;
+                                            if let Err(e) = packet_out.send(packet).await {
+                                                *connected.write().await = false;
+                                                return Err(ClientError::new(
+                                                    MqttError::new(&format!("unable to send packet: {}", e), ErrorKind::Channel),
+                                                    session.end_session().await));
+                                            }
                                         }
                                     }
                                     Ok(None) => {
@@ -422,18 +444,18 @@ impl MqttClient {
                                     }
                                     Err(e) => {
                                         *connected.write().await = false;
-                                        return Err(e);
+                                        return Err(ClientError::new(e, session.end_session().await));
                                     }
                                 }
                             }
                             Ok(None) => {
                                 // socket closed
                                 *connected.write().await = false;
-                                return Err(MqttError::new("socket closed", ErrorKind::Transport));
+                                return Err(ClientError::new(MqttError::new("socket closed", ErrorKind::Transport), session.end_session().await));
                             }
                             Err(e) => {
                                 *connected.write().await = false;
-                                return Err(e);
+                                return Err(ClientError::new(e, session.end_session().await));
                             }
                         }
                     }
@@ -449,13 +471,13 @@ impl MqttClient {
                                     }
                                     Err(e) => {
                                         *connected.write().await = false;
-                                        return Err(e);
+                                        return Err(ClientError::new(e, session.end_session().await));
                                     }
                                 }
                             }
                             None => {
                                 *connected.write().await = false;
-                                return Err(MqttError::new("packet_in channel closed", ErrorKind::Transport));
+                                return Err(ClientError::new(MqttError::new("packet_in channel closed", ErrorKind::Transport), session.end_session().await));
                             }
                         }
                     }
