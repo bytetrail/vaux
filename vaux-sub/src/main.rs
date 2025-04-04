@@ -76,7 +76,7 @@ async fn main() {
     }
     connection = connection.with_host(&args.addr).with_port(args.port);
     let mut client = vaux_client::ClientBuilder::new(connection)
-        .with_auto_ack(true)
+        .with_auto_ack(args.auto_ack)
         .with_auto_packet_id(true)
         .with_receive_max(10)
         .with_session_expiry(Duration::from_secs(600))

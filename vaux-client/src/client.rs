@@ -430,13 +430,11 @@ impl MqttClient {
                                                     MqttError::new(&format!("unable to send packet to filter: {}", e), ErrorKind::Channel),
                                                     session.end_session().await));
                                             }
-                                        } else {
-                                            if let Err(e) = packet_out.send(packet).await {
+                                        } else if let Err(e) = packet_out.send(packet).await {
                                                 *connected.write().await = false;
                                                 return Err(ClientError::new(
                                                     MqttError::new(&format!("unable to send packet: {}", e), ErrorKind::Channel),
                                                     session.end_session().await));
-                                            }
                                         }
                                     }
                                     Ok(None) => {
