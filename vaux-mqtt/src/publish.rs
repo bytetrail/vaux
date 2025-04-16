@@ -1,6 +1,6 @@
 use crate::{
     codec::{get_utf8, put_utf8, variable_byte_int_size, SIZE_UTF8_STRING},
-    property::{PacketProperties, Property, PropertyBundle},
+    property::{PacketProperties, PayloadFormat, Property, PropertyBundle},
     Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyType, QoSLevel, Size,
 };
 use bytes::{Buf, BufMut};
@@ -88,14 +88,37 @@ impl Publish {
     pub fn topic_alias(&self) -> Option<u16> {
         self.props
             .get_property(PropertyType::TopicAlias)
-            .map(|p| match p {
-                Property::TopicAlias(v) => *v,
-                _ => 0,
+            .and_then(|p| {
+                if let Property::TopicAlias(alias) = p {
+                    Some(*alias)
+                } else {
+                    None
+                }
             })
     }
 
     pub fn set_topic_alias(&mut self, alias: u16) {
         self.props.set_property(Property::TopicAlias(alias))
+    }
+
+    pub fn payload_format(&self) -> Option<PayloadFormat> {
+        self.props
+            .get_property(PropertyType::PayloadFormat)
+            .and_then(|p| {
+                if let Property::PayloadFormat(format) = p {
+                    Some(*format)
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn set_payload_format(&mut self, format: PayloadFormat) {
+        if format == PayloadFormat::Bin {
+            self.props.clear_property(PropertyType::PayloadFormat);
+            return;
+        }
+        self.props.set_property(Property::PayloadFormat(format));
     }
 
     pub fn properties(&self) -> &PropertyBundle {
