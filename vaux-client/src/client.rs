@@ -359,10 +359,21 @@ impl MqttClient {
         .await
         {
             Ok(_) => handle,
-            Err(e) => {
-                self.stop().await?;
+            Err(start_err) => {
+                // if the client is connected then stop the client
+                if self.connected().await {
+                    if let Err(stop_err) = self.stop().await {
+                        return Err(MqttError::new(
+                            &format!(
+                                "error starting: {} unable to stop client: {} ",
+                                start_err, stop_err
+                            ),
+                            ErrorKind::Transport,
+                        ));
+                    }
+                }
                 Err(MqttError::new(
-                    &format!("unable to connect to broker: {}", e),
+                    &format!("unable to connect to broker: {}", start_err),
                     ErrorKind::Transport,
                 ))
             }
