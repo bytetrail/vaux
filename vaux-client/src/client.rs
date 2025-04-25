@@ -146,6 +146,14 @@ impl MqttClient {
         }
     }
 
+    pub(crate) fn add_filtered_packet_handler(
+        &mut self,
+        packet_type: PacketType,
+        sender: Sender<vaux_mqtt::Packet>,
+    ) {
+        self.filter_channel.insert(packet_type, sender);
+    }
+
     pub fn pingresp(&self) -> bool {
         self.pingresp
     }

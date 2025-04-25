@@ -211,6 +211,11 @@ impl ClientBuilder {
         }
         client.set_will_message(self.will_message);
         client.set_pingresp(self.pingresp);
+        if let Some(filtered_consumer) = self.filtered_consumer {
+            for (packet_type, sender) in filtered_consumer {
+                client.add_filtered_packet_handler(packet_type, sender);
+            }
+        }
         Ok(client)
     }
 }
