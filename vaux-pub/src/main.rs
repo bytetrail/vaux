@@ -5,7 +5,11 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
 use tokio::{select, task::JoinHandle};
 use vaux_client::PacketChannel;
-use vaux_mqtt::{property::Property, publish::Publish, Packet, QoSLevel};
+use vaux_mqtt::{
+    property::{PacketProperties, Property},
+    publish::Publish,
+    Packet, QoSLevel,
+};
 
 #[derive(Parser, Clone, Debug)]
 #[command(author, version, about, long_about = None)]

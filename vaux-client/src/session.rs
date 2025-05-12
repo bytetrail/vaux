@@ -2,6 +2,7 @@ use crate::{ErrorKind, MqttClient, MqttError};
 use rustls::client;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
+use vaux_mqtt::property::PacketProperties;
 use vaux_mqtt::publish::Publish;
 use vaux_mqtt::WillMessage;
 use vaux_mqtt::{property::Property, ConnAck, Connect, Packet, PubResp, QoSLevel, Reason};

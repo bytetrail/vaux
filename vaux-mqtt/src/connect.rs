@@ -1,5 +1,5 @@
 use crate::codec::{get_bin, get_utf8, put_bin, MqttCodecError};
-use crate::property::{Property, PropertyBundle};
+use crate::property::{PacketProperties, Property, PropertyBundle};
 use crate::{
     put_utf8, variable_byte_int_size, Decode, Encode, FixedHeader, PacketType, PropertyType,
     QoSLevel, Size, WillMessage,
@@ -33,6 +33,18 @@ pub struct Connect {
     pub password: Option<Vec<u8>>,
 }
 
+impl PacketProperties for Connect {
+    fn properties(&self) -> &PropertyBundle {
+        &self.props
+    }
+    fn properties_mut(&mut self) -> &mut PropertyBundle {
+        &mut self.props
+    }
+    fn set_properties(&mut self, props: PropertyBundle) {
+        self.props = props;
+    }
+}
+
 impl Connect {
     pub fn session_expiry(&self) -> Option<u32> {
         self.props
@@ -54,14 +66,6 @@ impl Connect {
         }
         self.props
             .set_property(Property::SessionExpiryInterval(interval));
-    }
-
-    pub fn properties(&self) -> &PropertyBundle {
-        &self.props
-    }
-
-    pub fn properties_mut(&mut self) -> &mut PropertyBundle {
-        &mut self.props
     }
 
     fn encode_flags(&self, dest: &mut BytesMut) {

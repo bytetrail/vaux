@@ -5,7 +5,7 @@ use std::{io::Read, sync::Arc, time::Duration};
 use tokio::sync::mpsc::{Receiver, Sender};
 use vaux_client::MqttClient;
 use vaux_mqtt::{
-    property::{PayloadFormat, Property},
+    property::{PacketProperties, PayloadFormat, Property},
     Packet, PropertyType, PubResp, QoSLevel, Subscribe, SubscriptionFilter,
 };
 

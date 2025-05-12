@@ -120,14 +120,6 @@ impl Publish {
         }
         self.props.set_property(Property::PayloadFormat(format));
     }
-
-    pub fn properties(&self) -> &PropertyBundle {
-        &self.props
-    }
-
-    pub fn properties_mut(&mut self) -> &mut PropertyBundle {
-        &mut self.props
-    }
 }
 
 impl PacketProperties for Publish {
@@ -137,6 +129,7 @@ impl PacketProperties for Publish {
     fn properties_mut(&mut self) -> &mut PropertyBundle {
         &mut self.props
     }
+
     fn set_properties(&mut self, properties: PropertyBundle) {
         self.props = properties;
     }

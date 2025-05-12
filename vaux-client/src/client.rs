@@ -10,7 +10,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use vaux_mqtt::property::Property;
+use vaux_mqtt::property::{PacketProperties, Property};
 use vaux_mqtt::{Packet, PacketType, QoSLevel, Subscribe, SubscriptionFilter};
 
 const DEFAULT_RECV_MAX: u16 = 100;

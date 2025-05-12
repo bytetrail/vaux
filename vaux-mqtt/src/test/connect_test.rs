@@ -1,5 +1,6 @@
 use bytes::BytesMut;
 
+use crate::property::PacketProperties;
 #[allow(unused_imports)]
 use crate::{connect::*, property::Property};
 #[allow(unused_imports)]
