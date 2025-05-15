@@ -7,6 +7,6 @@ members = [
     "vaux-broker",
     "vaux-test",
     "vaux-pub",
-    "vaux-sub",
-    "prop-macro", "vaux",
+    "prop-macro",
+    "vaux",
 ]

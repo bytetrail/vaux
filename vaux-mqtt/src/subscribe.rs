@@ -69,12 +69,22 @@ impl SubAck {
         self.packet_id
     }
 
-    pub fn properties(&self) -> &PropertyBundle {
+    pub fn reason(&self) -> &Vec<Reason> {
+        &self.sub_reason
+    }
+}
+
+impl PacketProperties for SubAck {
+    fn properties(&self) -> &PropertyBundle {
         &self.props
     }
 
-    pub fn reason(&self) -> &Vec<Reason> {
-        &self.sub_reason
+    fn properties_mut(&mut self) -> &mut PropertyBundle {
+        &mut self.props
+    }
+
+    fn set_properties(&mut self, props: PropertyBundle) {
+        self.props = props;
     }
 }
 

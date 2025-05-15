@@ -8,7 +8,7 @@ use tokio::{
     sync::mpsc::{self, error::SendError, Receiver, Sender},
     task::JoinHandle,
 };
-use vaux_mqtt::property::Property;
+use vaux_mqtt::property::{PacketProperties, Property};
 use vaux_mqtt::{Packet, PacketType, QoSLevel, Subscribe, SubscriptionFilter};
 
 // 64K is the default max packet size
@@ -128,6 +128,14 @@ impl MqttClient {
             will_message: None,
             session_state: Some(state),
         }
+    }
+
+    pub(crate) fn add_filtered_packet_handler(
+        &mut self,
+        packet_type: PacketType,
+        sender: Sender<vaux_mqtt::Packet>,
+    ) {
+        self.filter_channel.insert(packet_type, sender);
     }
 
     pub fn packet_producer(&mut self) -> Sender<Packet> {
@@ -317,10 +325,21 @@ impl MqttClient {
         .await
         {
             Ok(_) => handle,
-            Err(e) => {
-                self.stop().await?;
+            Err(start_err) => {
+                // if the client is connected then stop the client
+                if self.connected().await {
+                    if let Err(stop_err) = self.stop().await {
+                        return Err(MqttError::new(
+                            &format!(
+                                "error starting: {} unable to stop client: {} ",
+                                start_err, stop_err
+                            ),
+                            ErrorKind::Transport,
+                        ));
+                    }
+                }
                 Err(MqttError::new(
-                    &format!("unable to connect to broker: {}", e),
+                    &format!("unable to connect to broker: {}", start_err),
                     ErrorKind::Transport,
                 ))
             }

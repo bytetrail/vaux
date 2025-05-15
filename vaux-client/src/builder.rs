@@ -181,7 +181,6 @@ impl ClientBuilder {
             return Err(BuilderError::MinKeepAlive);
         }
         drop(keep_alive);
-
         let mut client =
             crate::MqttClient::new_with_connection(self.connection, self.state, self.channel_size);
         client.set_max_connect_wait(self.max_connect_wait);
@@ -189,6 +188,11 @@ impl ClientBuilder {
             client.set_error_out(error_out);
         }
         client.set_will_message(self.will_message);
+        if let Some(filtered_consumer) = self.filtered_consumer {
+            for (packet_type, sender) in filtered_consumer {
+                client.add_filtered_packet_handler(packet_type, sender);
+            }
+        }
         Ok(client)
     }
 }

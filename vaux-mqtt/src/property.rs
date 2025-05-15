@@ -288,6 +288,10 @@ impl PropertyBundle {
         &self.user_props
     }
 
+    pub fn user_properties_mut(&mut self) -> &mut HashMap<String, Vec<String>> {
+        &mut self.user_props
+    }
+
     pub fn user_property(&self, key: &str) -> Option<&Vec<String>> {
         self.user_props.get(key)
     }
@@ -549,6 +553,22 @@ pub trait PacketProperties {
     fn properties(&self) -> &PropertyBundle;
     fn properties_mut(&mut self) -> &mut PropertyBundle;
     fn set_properties(&mut self, properties: PropertyBundle);
+
+    fn add_user_property(&mut self, key: String, value: String) {
+        let props = self.properties_mut();
+        if let std::collections::hash_map::Entry::Vacant(e) =
+            props.user_properties_mut().entry(key.clone())
+        {
+            let value = vec![value];
+            e.insert(value);
+        } else {
+            props
+                .user_properties_mut()
+                .get_mut(&key)
+                .unwrap()
+                .push(value)
+        }
+    }
 }
 
 pub trait PropertyEncode {

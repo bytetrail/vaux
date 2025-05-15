@@ -3,8 +3,13 @@ use std::{io::Read, sync::Arc, time::Duration};
 use clap::{error::ErrorKind, Parser};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
-use tokio::task::JoinHandle;
-use vaux_mqtt::{property::Property, publish::Publish, Packet, QoSLevel};
+use tokio::{select, task::JoinHandle};
+use vaux_client::PacketChannel;
+use vaux_mqtt::{
+    property::{PacketProperties, Property},
+    publish::Publish,
+    Packet, QoSLevel,
+};
 
 #[derive(Parser, Clone, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -76,6 +81,7 @@ async fn main() {
         connection = connection.with_tls().with_trust_store(Arc::new(root_store))
     }
     let connection = connection.with_host(&args.addr).with_port(args.port);
+    let mut puback_channel = PacketChannel::new_with_size(10);
 
     let mut client = vaux_client::ClientBuilder::new(connection)
         .with_auto_ack(true)
@@ -84,6 +90,9 @@ async fn main() {
         .with_session_expiry(Duration::from_secs(600))
         .with_keep_alive(Duration::from_secs(30))
         .with_max_connect_wait(Duration::from_secs(5))
+        .with_filtered_consumer(vaux_mqtt::PacketType::PubAck, puback_channel.sender())
+        .with_filtered_consumer(vaux_mqtt::PacketType::PubComp, puback_channel.sender())
+        .with_filtered_consumer(vaux_mqtt::PacketType::PubRec, puback_channel.sender())
         .build()
         .await
         .unwrap();
@@ -91,13 +100,21 @@ async fn main() {
     let mut packet_in = client.take_packet_consumer().unwrap();
     let producer = client.packet_producer();
 
-    publish(&mut client, producer, &mut packet_in, args.clone()).await;
+    publish(
+        &mut client,
+        producer,
+        &mut packet_in,
+        &mut puback_channel.take_receiver().unwrap(),
+        args.clone(),
+    )
+    .await;
 }
 
 async fn publish(
     client: &mut vaux_client::MqttClient,
     packet_out: tokio::sync::mpsc::Sender<Packet>,
     packet_in: &mut tokio::sync::mpsc::Receiver<Packet>,
+    puback_recv: &mut tokio::sync::mpsc::Receiver<Packet>,
     args: Args,
 ) {
     let handle: Option<JoinHandle<_>> =
@@ -144,32 +161,59 @@ async fn publish(
         {
             eprintln!("unable to send packet to broker");
         }
-        match args.qos {
-            QoSLevel::AtMostOnce => (),
-            QoSLevel::AtLeastOnce => {
-                let mut packet = packet_in.try_recv();
-                let mut ack_recv = false;
-                while !ack_recv {
-                    if packet.is_err() {
-                    } else if let Ok(Packet::PubAck(_)) = packet {
-                        ack_recv = true;
+        let mut pub_ack_recv = false;
+        let mut pub_comp_recv = false;
+        let mut pub_rec_recv = false;
+        loop {
+            select! {
+                _ = tokio::time::sleep(Duration::from_millis(1000)) => {},
+                puback = puback_recv.recv() => {
+                    if let Some(packet) = puback {
+                        if let Packet::PubAck(p) = packet {
+                            match args.qos {
+                                QoSLevel::AtLeastOnce => {
+                                    println!("received puback: {:?}", p);
+                                    pub_ack_recv = true;
+                                }
+                                _ => eprintln!("unexpected packet type: {:?}", p),
+                            }
+                        } else if let Packet::PubComp(p) = packet {
+                            match args.qos {
+                                QoSLevel::ExactlyOnce => {
+                                    println!("received pubcomp: {:?}", p);
+                                    pub_comp_recv = true;
+                                }
+                                _ => eprintln!("unexpected packet type: {:?}", p),
+                            }
+                        } else if let Packet::PubRec(p) = packet {
+                            match args.qos {
+                                QoSLevel::ExactlyOnce => {
+                                    println!("received pubrec: {:?}", p);
+                                    pub_rec_recv = true;
+                                }
+                                _ => eprintln!("unexpected packet type: {:?}", p),
+                            }
+                        } else {
+                            eprintln!("unexpected packet type: {:?}", packet);
+                        }
+                    } else {
+                        eprintln!("unable to receive puback");
                     }
-                    packet = packet_in.try_recv();
+                }
+                packet = packet_in.recv() => {
+                    println!("received packet: {:?}", packet);
                 }
             }
-            QoSLevel::ExactlyOnce => {
-                let mut packet = packet_in.try_recv();
-                let mut comp_recv = false;
-                while !comp_recv {
-                    if packet.is_err() {
-                    } else if let Ok(Packet::PubComp(_)) = packet {
-                        comp_recv = true;
-                    }
-                    packet = packet_in.try_recv();
-                }
+            if match args.qos {
+                QoSLevel::AtMostOnce => true,
+                QoSLevel::AtLeastOnce => pub_ack_recv,
+                QoSLevel::ExactlyOnce => pub_comp_recv && pub_rec_recv,
+            } {
+                break;
             }
         }
     }
+
     println!("elapsed time: {:?}", start.elapsed());
     match client.stop().await {
         Ok(_) => (),

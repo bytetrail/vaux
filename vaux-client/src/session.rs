@@ -2,6 +2,7 @@ use crate::{ErrorKind, MqttClient, MqttError};
 use std::mem;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
+use vaux_mqtt::property::PacketProperties;
 use vaux_mqtt::publish::Publish;
 use vaux_mqtt::WillMessage;
 use vaux_mqtt::{property::Property, ConnAck, Connect, Packet, PubResp, QoSLevel, Reason};
@@ -127,24 +128,20 @@ impl ClientSession {
             );
         }
 
+        let state = client
+            .session_state
+            .take()
+            .ok_or_else(SessionState::default)
+            .unwrap();
         Ok(Self {
             connected: Arc::new(RwLock::new(false)),
             packet_stream: vaux_async::stream::PacketStream::new(
                 client.connection.take().unwrap().take_stream().unwrap(),
                 None,
-                Some(
-                    client
-                        .session_state
-                        .as_ref()
-                        .map_or(DEFAULT_MAX_PACKET_SIZE, |s| s.max_packet_size),
-                ),
+                Some(state.max_packet_size),
             ),
             last_active: std::time::Instant::now(),
-            state: client
-                .session_state
-                .take()
-                .ok_or_else(SessionState::new)
-                .unwrap(),
+            state,
             usable: true,
         })
     }
