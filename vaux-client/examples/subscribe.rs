@@ -2,7 +2,10 @@ use clap::Parser;
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
 use std::{io::Read, sync::Arc, time::Duration};
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::{
+    select,
+    sync::mpsc::{Receiver, Sender},
+};
 use vaux_client::MqttClient;
 use vaux_mqtt::{
     property::{PacketProperties, PayloadFormat, Property},
@@ -98,11 +101,9 @@ async fn subscribe(
     packet_receiver: &mut Receiver<Packet>,
     args: Args,
 ) {
-    println!("starting");
     let handle = client
         .try_start(Duration::from_secs(10), args.clean_start)
         .await;
-    println!("started");
     let filter = vec![
         // inbound device ops messages for this shadow on this site
         SubscriptionFilter {
@@ -118,45 +119,48 @@ async fn subscribe(
         Ok(_) => {
             println!("subscribed");
             loop {
-                tokio::task::yield_now().await;
-                let iter = packet_receiver.try_recv();
-                if let Ok(Packet::Publish(mut p)) = iter {
-                    if p.properties().has_property(PropertyType::PayloadFormat) {
-                        if let Property::PayloadFormat(indicator) = p
-                            .properties()
-                            .get_property(PropertyType::PayloadFormat)
-                            .unwrap()
-                        {
-                            match indicator {
-                                PayloadFormat::Utf8 => {
-                                    let message =
-                                        String::from_utf8(p.take_payload().unwrap()).unwrap();
-                                    println!("{}", message);
-                                }
-                                PayloadFormat::Bin => {
-                                    println!("received a binary payload");
-                                }
-                            }
-                        }
-                    }
-                    if args.auto_ack {
-                        // check for QOS 1 or 2
-                        match p.qos() {
-                            QoSLevel::AtLeastOnce => {
-                                let mut ack = PubResp::new_puback();
-                                ack.packet_id = p.packet_id.unwrap();
-                                if let Err(e) = packet_sender.send(Packet::PubAck(ack)).await {
-                                    eprintln!("{:?}", e);
+                select! {
+                        // check for incoming packets
+                        Some(packet) = packet_receiver.recv() => {
+                        if let Packet::Publish(mut p) = packet {
+                            if p.properties().has_property(PropertyType::PayloadFormat) {
+                                if let Property::PayloadFormat(indicator) = p
+                                    .properties()
+                                    .get_property(PropertyType::PayloadFormat)
+                                    .unwrap()
+                                {
+                                    match indicator {
+                                        PayloadFormat::Utf8 => {
+                                            let message =
+                                                String::from_utf8(p.take_payload().unwrap()).unwrap();
+                                            println!("{}", message);
+                                        }
+                                        PayloadFormat::Bin => {
+                                            println!("received a binary payload");
+                                        }
+                                    }
                                 }
                             }
-                            QoSLevel::ExactlyOnce => {
-                                let mut ack = PubResp::new_pubrec();
-                                ack.packet_id = p.packet_id.unwrap();
-                                if let Err(e) = packet_sender.send(Packet::PubRec(ack)).await {
-                                    eprintln!("{:?}", e);
+                            if args.auto_ack {
+                                // check for QOS 1 or 2
+                                match p.qos() {
+                                    QoSLevel::AtLeastOnce => {
+                                        let mut ack = PubResp::new_puback();
+                                        ack.packet_id = p.packet_id.unwrap();
+                                        if let Err(e) = packet_sender.send(Packet::PubAck(ack)).await {
+                                            eprintln!("{:?}", e);
+                                        }
+                                    }
+                                    QoSLevel::ExactlyOnce => {
+                                        let mut ack = PubResp::new_pubrec();
+                                        ack.packet_id = p.packet_id.unwrap();
+                                        if let Err(e) = packet_sender.send(Packet::PubRec(ack)).await {
+                                            eprintln!("{:?}", e);
+                                        }
+                                    }
+                                    _ => {}
                                 }
                             }
-                            _ => {}
                         }
                     }
                 }
@@ -165,8 +169,8 @@ async fn subscribe(
                 }
             }
         }
-        Err(e) => {
-            eprintln!("{:?}", e);
+        Err(_) => {
+            eprintln!("failed to subscribe");
         }
     }
     if let Ok(handle) = handle {
