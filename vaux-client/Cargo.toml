@@ -1,6 +1,6 @@
 [package]
 name = "vaux-client"
-version = "0.6.13"
+version = "0.6.14"
 edition = "2021"
 
 [features]
@@ -20,8 +20,8 @@ tokio = { version = "1.41.0", features = [
 ] }
 tokio-rustls = { version = "0.26" }
 uuid = "1.11"
-vaux-mqtt = { version = "0.6.13", path = "../vaux-mqtt" }
-vaux-async = { version = "0.6.13", path = "../vaux-async" }
+vaux-mqtt = { version = "0.6.14", path = "../vaux-mqtt" }
+vaux-async = { version = "0.6.14", path = "../vaux-async" }
 
 [dev-dependencies]
 clap = { version = "4.1", features = ["derive"] }
