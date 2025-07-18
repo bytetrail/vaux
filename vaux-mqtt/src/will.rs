@@ -1,5 +1,5 @@
 use crate::codec::{get_bin, get_utf8, put_bin, variable_byte_int_size};
-use crate::property::PropertyBundle;
+use crate::property::{Property, PropertyBundle};
 use crate::{put_utf8, Decode, Encode, MqttCodecError, PropertyType, QoSLevel, Size};
 use bytes::BytesMut;
 use std::collections::HashSet;
@@ -46,6 +46,46 @@ impl WillMessage {
             payload: Vec::new(),
             props: PropertyBundle::new(SUPPORTED_WILL_PROPS.clone()),
         }
+    }
+
+    pub fn delay(&self) -> Option<u32> {
+        self.props
+            .get_property(PropertyType::WillDelay)
+            .and_then(|p| {
+                if let Property::WillDelay(delay) = p {
+                    Some(*delay)
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn set_delay(&mut self, delay: u32) {
+        if delay == 0 {
+            self.props.clear_property(PropertyType::WillDelay);
+            return;
+        }
+        self.props.set_property(Property::WillDelay(delay));
+    }
+
+    pub fn expiry(&self) -> Option<u32> {
+        self.props
+            .get_property(PropertyType::MessageExpiry)
+            .and_then(|p| {
+                if let Property::MessageExpiry(expiry) = p {
+                    Some(*expiry)
+                } else {
+                    None
+                }
+            })
+    }
+
+    pub fn set_expiry(&mut self, expiry: u32) {
+        if expiry == 0 {
+            self.props.clear_property(PropertyType::MessageExpiry);
+            return;
+        }
+        self.props.set_property(Property::MessageExpiry(expiry));
     }
 }
 
