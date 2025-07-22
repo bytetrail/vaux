@@ -55,8 +55,9 @@ impl ClientBuilder {
         }
     }
 
-    pub fn with_state(mut self, connection: MqttConnection) -> Self {
+    pub fn with_state(mut self, connection: MqttConnection, state: SessionState) -> Self {
         self.connection = connection;
+        self.state = state;
         self
     }
 
