@@ -39,8 +39,7 @@ impl Display for ErrorKind {
             ErrorKind::Session => "Session",
             ErrorKind::Channel => "Channel",
         };
-
-        write!(f, "{}", kind)
+        write!(f, "{kind}",)
     }
 }
 

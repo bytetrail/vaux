@@ -121,7 +121,7 @@ async fn publish(
         match client.try_start(Duration::from_millis(5000), true).await {
             Ok(h) => Some(h),
             Err(e) => {
-                eprintln!("unable to start client: {:?}", e);
+                eprintln!("unable to start client: {e:?}");
                 return;
             }
         };
@@ -172,36 +172,36 @@ async fn publish(
                         if let Packet::PubAck(p) = packet {
                             match args.qos {
                                 QoSLevel::AtLeastOnce => {
-                                    println!("received puback: {:?}", p);
+                                    println!("received puback: {p:?}");
                                     pub_ack_recv = true;
                                 }
-                                _ => eprintln!("unexpected packet type: {:?}", p),
+                                _ => eprintln!("unexpected packet type: {p:?}"),
                             }
                         } else if let Packet::PubComp(p) = packet {
                             match args.qos {
                                 QoSLevel::ExactlyOnce => {
-                                    println!("received pubcomp: {:?}", p);
+                                    println!("received pubcomp: {p:?}");
                                     pub_comp_recv = true;
                                 }
-                                _ => eprintln!("unexpected packet type: {:?}", p),
+                                _ => eprintln!("unexpected packet type: {p:?}"),
                             }
                         } else if let Packet::PubRec(p) = packet {
                             match args.qos {
                                 QoSLevel::ExactlyOnce => {
-                                    println!("received pubrec: {:?}", p);
+                                    println!("received pubrec: {p:?}" );
                                     pub_rec_recv = true;
                                 }
-                                _ => eprintln!("unexpected packet type: {:?}", p),
+                                _ => eprintln!("unexpected packet type: {p:?}"),
                             }
                         } else {
-                            eprintln!("unexpected packet type: {:?}", packet);
+                            eprintln!("unexpected packet type: {packet:?}");
                         }
                     } else {
                         eprintln!("unable to receive puback");
                     }
                 }
                 packet = packet_in.recv() => {
-                    println!("received packet: {:?}", packet);
+                    println!("received packet: {packet:?}" );
                 }
             }
             if match args.qos {
@@ -217,16 +217,16 @@ async fn publish(
     println!("elapsed time: {:?}", start.elapsed());
     match client.stop().await {
         Ok(_) => (),
-        Err(e) => eprintln!("unable to stop client: {:?}", e),
+        Err(e) => eprintln!("unable to stop client: {e:?}"),
     }
     if let Some(h) = handle {
         println!("waiting for client thread to finish");
         match h.await {
             Ok(r) => match r {
                 Ok(_) => (),
-                Err(e) => eprintln!("client thread failed: {:?}", e),
+                Err(e) => eprintln!("client thread failed: {e:?}"),
             },
-            Err(e) => eprintln!("unable to join client thread: {:?}", e),
+            Err(e) => eprintln!("unable to join client thread: {e:?}"),
         }
     }
 }
