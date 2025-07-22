@@ -83,10 +83,10 @@ impl MqttError {
 impl std::fmt::Display for MqttError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         if let Some(version) = &self.version {
-            write!(f, "MQTT{} ", version)?;
+            write!(f, "MQTT{version} ")?;
         }
         if let Some(section) = &self.section {
-            write!(f, " {}: ", section)?;
+            write!(f, " {section}: ")?;
         }
         write!(f, "{}", self.message)
     }

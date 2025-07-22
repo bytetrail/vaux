@@ -26,7 +26,7 @@ async fn main() {
         match client.try_start(Duration::from_millis(5000), true).await {
             Ok(h) => Some(h),
             Err(e) => {
-                eprintln!("unable to start client: {:?}", e);
+                eprintln!("unable to start client: {e:?}");
                 return;
             }
         };

@@ -133,7 +133,7 @@ async fn subscribe(
                                         PayloadFormat::Utf8 => {
                                             let message =
                                                 String::from_utf8(p.take_payload().unwrap()).unwrap();
-                                            println!("{}", message);
+                                            println!("{message}");
                                         }
                                         PayloadFormat::Bin => {
                                             println!("received a binary payload");
@@ -148,14 +148,14 @@ async fn subscribe(
                                         let mut ack = PubResp::new_puback();
                                         ack.packet_id = p.packet_id.unwrap();
                                         if let Err(e) = packet_sender.send(Packet::PubAck(ack)).await {
-                                            eprintln!("{:?}", e);
+                                            eprintln!("{e:?}");
                                         }
                                     }
                                     QoSLevel::ExactlyOnce => {
                                         let mut ack = PubResp::new_pubrec();
                                         ack.packet_id = p.packet_id.unwrap();
                                         if let Err(e) = packet_sender.send(Packet::PubRec(ack)).await {
-                                            eprintln!("{:?}", e);
+                                            eprintln!("{e:?}");
                                         }
                                     }
                                     _ => {}

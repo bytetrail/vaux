@@ -240,7 +240,7 @@ impl ClientSession {
                             }
                             _ => {
                                 return Err(MqttError::new(
-                                    &format!("unable to read packet: {}", e),
+                                    &format!("unable to read packet: {e}"),
                                     ErrorKind::Transport,
                                 ));
                             }
@@ -253,7 +253,7 @@ impl ClientSession {
                 ))
             }
             Err(e) => Err(MqttError::new(
-                &format!("Unable to write packet(s) to broker: {}", e),
+                &format!("Unable to write packet(s) to broker: {e}"),
                 ErrorKind::Transport,
             )),
         }
@@ -266,7 +266,7 @@ impl ClientSession {
     pub(crate) async fn read_next(&mut self) -> crate::Result<Option<Packet>> {
         self.packet_stream.read().await.map_err(|e| {
             MqttError::new(
-                &format!("unable to read packet: {}", e),
+                &format!("unable to read packet: {e}"),
                 ErrorKind::Transport,
             )
         })
@@ -358,7 +358,7 @@ impl ClientSession {
                 let _ = self.packet_stream.shutdown().await;
                 //self.pending_qos1.append(&mut self.pending_publish);
                 return Err(MqttError::new(
-                    &format!("disconnect received: {:?}", d),
+                    &format!("disconnect received: {d:?}"),
                     ErrorKind::Protocol(d.reason),
                 ));
             }

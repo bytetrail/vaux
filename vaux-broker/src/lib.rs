@@ -34,9 +34,9 @@ pub enum BrokerError {
 impl std::fmt::Display for BrokerError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            BrokerError::Codec(e) => write!(f, "codec error: {}", e),
-            BrokerError::Io(e) => write!(f, "io error: {}", e),
-            BrokerError::Stream(e) => write!(f, "stream error {}", e),
+            BrokerError::Codec(e) => write!(f, "codec error: {e}"),
+            BrokerError::Io(e) => write!(f, "io error: {e}"),
+            BrokerError::Stream(e) => write!(f, "stream error {e}"),
         }
     }
 }
@@ -149,7 +149,7 @@ impl Broker {
                                         });
                                     }
                                     Err(e) => {
-                                        println!("broker error accepting connection: {}", e);
+                                        println!("broker error accepting connection: {e}");
                                         return Err(e.into());
                                     }
                                 }

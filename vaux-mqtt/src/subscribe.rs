@@ -51,7 +51,7 @@ impl TryFrom<u8> for RetainHandling {
             0x01 => Ok(RetainHandling::SendNew),
             0x02 => Ok(RetainHandling::None),
             v => Err(MqttCodecError::new(
-                format!("Mqttv5 3.8.3.1 invalid retain option: {}", v).as_str(),
+                format!("Mqttv5 3.8.3.1 invalid retain option: {v}").as_str(),
             )),
         }
     }

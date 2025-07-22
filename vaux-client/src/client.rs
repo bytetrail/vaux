@@ -331,15 +331,14 @@ impl MqttClient {
                     if let Err(stop_err) = self.stop().await {
                         return Err(MqttError::new(
                             &format!(
-                                "error starting: {} unable to stop client: {} ",
-                                start_err, stop_err
+                                "error starting: {start_err} unable to stop client: {stop_err} "
                             ),
                             ErrorKind::Transport,
                         ));
                     }
                 }
                 Err(MqttError::new(
-                    &format!("unable to connect to broker: {}", start_err),
+                    &format!("unable to connect to broker: {start_err}"),
                     ErrorKind::Transport,
                 ))
             }
@@ -384,7 +383,7 @@ impl MqttClient {
                 Ok(c) => c,
                 Err(e) => {
                     return Err(MqttError::new(
-                        &format!("unable to connect to broker socket: {}", e),
+                        &format!("unable to connect to broker socket: {e}"),
                         ErrorKind::Transport,
                     ));
                 }
@@ -394,7 +393,7 @@ impl MqttClient {
             Ok(s) => s,
             Err(e) => {
                 return Err(MqttError::new(
-                    &format!("unable to create client session: {}", e),
+                    &format!("unable to create client session: {e}"),
                     ErrorKind::Transport,
                 ));
             }
@@ -446,13 +445,13 @@ impl MqttClient {
                                             if let Err(e) = filter_out.send(packet.clone()).await {
                                                 *connected.write().await = false;
                                                 return Err(ClientError::new(
-                                                    MqttError::new(&format!("unable to send packet to filter: {}", e), ErrorKind::Channel),
+                                                    MqttError::new(&format!("unable to send packet to filter: {e}"), ErrorKind::Channel),
                                                     session.end_session().await));
                                             }
                                         } else if let Err(e) = packet_out.send(packet).await {
                                                 *connected.write().await = false;
                                                 return Err(ClientError::new(
-                                                    MqttError::new(&format!("unable to send packet: {}", e), ErrorKind::Channel),
+                                                    MqttError::new(&format!("unable to send packet: {e}"), ErrorKind::Channel),
                                                     session.end_session().await));
                                         }
                                     }
@@ -511,7 +510,7 @@ impl MqttClient {
         let disconnect = Packet::Disconnect(Default::default());
         if let Err(e) = self.packet_in.0.send(disconnect).await {
             return Err(MqttError::new(
-                &format!("unable to send disconnect: {}", e),
+                &format!("unable to send disconnect: {e}"),
                 ErrorKind::Transport,
             ));
         }

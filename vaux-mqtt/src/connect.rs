@@ -93,7 +93,7 @@ impl Connect {
         let len = src.get_u16();
         if len != 0x04 {
             return Err(MqttCodecError::new(
-                format!("invalid protocol name length: {}", len).as_str(),
+                format!("invalid protocol name length: {len}").as_str(),
             ));
         }
         let mqtt_str = src.get_u32();
@@ -103,7 +103,7 @@ impl Connect {
         let protocol_version = src.get_u8();
         if protocol_version != MQTT_PROTOCOL_VERSION {
             return Err(MqttCodecError::new(
-                format!("unsupported protocol version: {}", protocol_version).as_str(),
+                format!("unsupported protocol version: {protocol_version}").as_str(),
             ));
         }
         // connect flags

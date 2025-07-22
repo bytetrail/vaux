@@ -10,7 +10,7 @@ use tokio_rustls::client::TlsStream;
 #[derive(Debug)]
 pub enum MqttStream {
     TcpStream(TcpStream),
-    TlsStream(TlsStream<TcpStream>),
+    TlsStream(Box<TlsStream<TcpStream>>),
 }
 
 #[derive(Debug)]
