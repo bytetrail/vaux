@@ -1,9 +1,9 @@
 mod builder;
-mod client;
+pub mod client;
 mod connection;
 #[cfg(feature = "developer")]
 mod developer;
-mod session;
+pub mod session;
 
 pub use builder::ClientBuilder;
 pub use client::{MqttClient, PacketChannel};
