@@ -218,8 +218,7 @@ impl TryFrom<u8> for PropertyType {
             0x29 => Ok(PropertyType::SubIdAvail),
             0x2a => Ok(PropertyType::ShardSubAvail),
             p => Err(MqttCodecError::new(&format!(
-                "MQTTv5 2.2.2.2 invalid property type identifier: {}",
-                p
+                "MQTTv5 2.2.2.2 invalid property type identifier: {p}"
             ))),
         }
     }
@@ -276,7 +275,7 @@ impl PropertyBundle {
         } else if self.supports_property(PropertyType::from(&prop)) {
             self.properties.insert((&prop).into(), prop);
         } else {
-            panic!("Unsupported property: {:?}", prop);
+            panic!("Unsupported property: {prop:?}");
         }
     }
 

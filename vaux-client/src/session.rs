@@ -1,11 +1,16 @@
 use crate::{ErrorKind, MqttClient, MqttError};
-use rustls::client;
+use std::mem;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
 use vaux_mqtt::property::PacketProperties;
 use vaux_mqtt::publish::Publish;
 use vaux_mqtt::WillMessage;
 use vaux_mqtt::{property::Property, ConnAck, Connect, Packet, PubResp, QoSLevel, Reason};
+
+const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
+const DEFAULT_CLIENT_ID_PREFIX: &str = "vaux-client";
+const DEFAULT_CLIENT_KEEP_ALIVE: Duration = Duration::from_secs(60);
+const DEFAULT_SESSION_EXPIRY: Duration = Duration::from_secs(600);
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 enum QoSPacket {
@@ -60,37 +65,48 @@ impl QoSPacketState {
 
 #[derive(Debug)]
 pub struct SessionState {
-    client_id: Arc<Mutex<Option<String>>>,
-    keep_alive: Duration,
-    session_expiry: Duration,
+    pub(crate) client_id: Arc<Mutex<Option<String>>>,
+    pub(crate) keep_alive: Arc<RwLock<Duration>>,
+    pub(crate) session_expiry: Arc<RwLock<Duration>>,
 
-    qos_send_remaining: usize,
+    pub(crate) qos_send_remaining: usize,
     pending_qos_send: HashMap<u16, QoSPacketState>,
-    qos_recv_remaining: usize,
+    pub(crate) qos_recv_remaining: usize,
     pending_qos_recv: HashMap<u16, QoSPacketState>,
 
-    auto_packet_id: bool,
-    last_packet_id: u16,
-    auto_ack: bool,
-    pingresp: bool,
+    pub(crate) max_packet_size: usize,
+    pub(crate) auto_packet_id: bool,
+    pub(crate) last_packet_id: u16,
+    pub(crate) auto_ack: bool,
+    pub(crate) pingresp: bool,
+}
+
+impl Default for SessionState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SessionState {
-    async fn new_from_client(client: &MqttClient) -> Self {
+    pub fn new() -> Self {
         Self {
-            client_id: Arc::clone(&client.client_id),
-            keep_alive: *client.keep_alive.read().await,
-            session_expiry: *client.session_expiry.read().await,
-
-            qos_send_remaining: client.receive_max as usize,
+            client_id: Arc::new(Mutex::new(Some(format!(
+                "{}-{}",
+                DEFAULT_CLIENT_ID_PREFIX,
+                uuid::Uuid::new_v4()
+            )))),
+            keep_alive: Arc::new(RwLock::new(DEFAULT_CLIENT_KEEP_ALIVE)),
+            session_expiry: Arc::new(RwLock::new(DEFAULT_SESSION_EXPIRY)),
+            qos_send_remaining: u16::MAX as usize,
             pending_qos_send: HashMap::new(),
             qos_recv_remaining: u16::MAX as usize,
             pending_qos_recv: HashMap::new(),
 
-            auto_packet_id: client.auto_packet_id,
+            max_packet_size: DEFAULT_MAX_PACKET_SIZE,
+            auto_packet_id: true,
             last_packet_id: 0,
-            auto_ack: client.auto_ack,
-            pingresp: client.pingresp,
+            auto_ack: true,
+            pingresp: false,
         }
     }
 }
@@ -100,6 +116,7 @@ pub(crate) struct ClientSession {
     packet_stream: vaux_async::stream::PacketStream,
     last_active: std::time::Instant,
     state: SessionState,
+    usable: bool,
 }
 
 impl ClientSession {
@@ -111,52 +128,42 @@ impl ClientSession {
             );
         }
 
+        let state = client
+            .session_state
+            .take()
+            .ok_or_else(SessionState::default)
+            .unwrap();
         Ok(Self {
             connected: Arc::new(RwLock::new(false)),
             packet_stream: vaux_async::stream::PacketStream::new(
                 client.connection.take().unwrap().take_stream().unwrap(),
                 None,
-                Some(client.max_packet_size),
+                Some(state.max_packet_size),
             ),
             last_active: std::time::Instant::now(),
-            state: SessionState::new_from_client(client).await,
+            state,
+            usable: true,
         })
     }
 
-    pub(crate) fn restore_session(
-        &mut self,
-        client: &mut MqttClient,
-        session_state: SessionState,
-    ) -> Result<Self, MqttError> {
-        if client.connection.is_none() {
-            MqttError::new(
-                "connection is required",
-                ErrorKind::Protocol(Reason::ProtocolErr),
-            );
-        }
-
-        Ok(Self {
-            connected: Arc::new(RwLock::new(false)),
-            packet_stream: vaux_async::stream::PacketStream::new(
-                client.connection.take().unwrap().take_stream().unwrap(),
-                None,
-                Some(client.max_packet_size),
-            ),
-            last_active: std::time::Instant::now(),
-            state: session_state,
-        })
+    pub(crate) async fn end_session(&mut self) -> SessionState {
+        // poison the session so that it cannot be used after the state is taken
+        self.usable = false;
+        let mut session_state = SessionState::new();
+        mem::swap(&mut self.state, &mut session_state);
+        session_state
     }
 
     pub(crate) async fn connected(&self) -> bool {
         *self.connected.read().await
     }
 
-    pub(crate) fn keep_alive(&self) -> Duration {
-        self.state.keep_alive
+    pub(crate) async fn keep_alive(&self) -> Duration {
+        *self.state.keep_alive.read().await
     }
 
-    pub(crate) fn session_expiry(&self) -> Duration {
-        self.state.session_expiry
+    pub(crate) async fn session_expiry(&self) -> Duration {
+        *self.state.session_expiry.read().await
     }
 
     pub(crate) fn auto_ack(&self) -> bool {
@@ -170,8 +177,14 @@ impl ClientSession {
         clean_start: bool,
         will: Option<WillMessage>,
     ) -> crate::Result<ConnAck> {
+        if !self.usable {
+            return Err(MqttError::new(
+                "session state is not usable",
+                ErrorKind::Session,
+            ));
+        }
         let mut connect = Connect::default();
-        connect.keep_alive = self.state.keep_alive.as_secs() as u16;
+        connect.keep_alive = self.state.keep_alive.read().await.as_secs() as u16;
         connect.clean_start = clean_start;
         {
             let set_id = self.state.client_id.lock().await;
@@ -182,7 +195,7 @@ impl ClientSession {
         connect
             .properties_mut()
             .set_property(Property::SessionExpiryInterval(
-                self.state.session_expiry.as_secs() as u32,
+                self.state.session_expiry.read().await.as_secs() as u32,
             ));
         if let Some((username, password)) = credentials {
             connect.username = Some(username);
@@ -227,7 +240,7 @@ impl ClientSession {
                             }
                             _ => {
                                 return Err(MqttError::new(
-                                    &format!("unable to read packet: {}", e),
+                                    &format!("unable to read packet: {e}"),
                                     ErrorKind::Transport,
                                 ));
                             }
@@ -240,7 +253,7 @@ impl ClientSession {
                 ))
             }
             Err(e) => Err(MqttError::new(
-                &format!("Unable to write packet(s) to broker: {}", e),
+                &format!("Unable to write packet(s) to broker: {e}"),
                 ErrorKind::Transport,
             )),
         }
@@ -253,7 +266,7 @@ impl ClientSession {
     pub(crate) async fn read_next(&mut self) -> crate::Result<Option<Packet>> {
         self.packet_stream.read().await.map_err(|e| {
             MqttError::new(
-                &format!("unable to read packet: {}", e),
+                &format!("unable to read packet: {e}"),
                 ErrorKind::Transport,
             )
         })
@@ -345,7 +358,7 @@ impl ClientSession {
                 let _ = self.packet_stream.shutdown().await;
                 //self.pending_qos1.append(&mut self.pending_publish);
                 return Err(MqttError::new(
-                    &format!("disconnect received: {:?}", d),
+                    &format!("disconnect received: {d:?}"),
                     ErrorKind::Protocol(d.reason),
                 ));
             }
@@ -563,12 +576,14 @@ impl ClientSession {
             }
         }
         // set session keep alive from the server
-        if let Some(keep_alive) = connack.server_keep_alive() {
-            self.state.keep_alive = Duration::from_secs(u64::from(keep_alive));
+        if let Some(server_keep_alive) = connack.server_keep_alive() {
+            let mut keep_alive = self.state.keep_alive.write().await;
+            *keep_alive = Duration::from_secs(u64::from(server_keep_alive));
         }
         // set the server assigned session expiry if present
-        if let Some(session_expiry) = connack.session_expiry() {
-            self.state.session_expiry = Duration::from_secs(u64::from(session_expiry));
+        if let Some(server_session_expiry) = connack.session_expiry() {
+            let mut session_expiry = self.state.session_expiry.write().await;
+            *session_expiry = Duration::from_secs(u64::from(server_session_expiry));
         }
         // set the server assigned receive maximum
         if let Some(receive_max) = connack.receive_max() {

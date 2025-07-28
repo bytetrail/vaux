@@ -1,9 +1,9 @@
 mod builder;
-mod client;
+pub mod client;
 mod connection;
 #[cfg(feature = "developer")]
 mod developer;
-mod session;
+pub mod session;
 
 pub use builder::ClientBuilder;
 pub use client::{MqttClient, PacketChannel};
@@ -24,6 +24,7 @@ pub enum ErrorKind {
     Timeout,
     Transport,
     Session,
+    Channel,
 }
 
 impl Display for ErrorKind {
@@ -36,9 +37,9 @@ impl Display for ErrorKind {
             ErrorKind::Timeout => "Timeout",
             ErrorKind::Transport => "Transport",
             ErrorKind::Session => "Session",
+            ErrorKind::Channel => "Channel",
         };
-
-        write!(f, "{}", kind)
+        write!(f, "{kind}",)
     }
 }
 

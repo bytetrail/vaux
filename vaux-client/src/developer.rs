@@ -14,10 +14,10 @@ impl rustls::client::danger::ServerCertVerifier for Verifier {
         ocsp_response: &[u8],
         _now: UnixTime,
     ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        println!("Host name {:?}", server_name);
-        println!("End entity certificate {:?}", end_entity);
-        println!("Intermediate certificates {:?}", intermediates);
-        println!("OCSP response {:?}", ocsp_response);
+        println!("Host name {server_name:?}",);
+        println!("End entity certificate {end_entity:?}",);
+        println!("Intermediate certificates {intermediates:?}",);
+        println!("OCSP response {ocsp_response:?}",);
         Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 

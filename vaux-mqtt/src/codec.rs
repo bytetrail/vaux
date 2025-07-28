@@ -112,7 +112,7 @@ pub enum Reason {
 
 impl Display for Reason {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -170,7 +170,7 @@ impl TryFrom<u8> for Reason {
             0xa0 => Ok(Reason::MaxConnectTime),
             0xa1 => Ok(Reason::SubIdUnsupported),
             0xa2 => Ok(Reason::WildcardSubUnsupported),
-            value => Err(MqttCodecError::new(&format!("Invalid reason: {}", value))),
+            value => Err(MqttCodecError::new(&format!("Invalid reason: {value}"))),
         }
     }
 }
@@ -194,8 +194,7 @@ impl TryFrom<u8> for QoSLevel {
             0x01 => Ok(QoSLevel::AtLeastOnce),
             0x02 => Ok(QoSLevel::ExactlyOnce),
             value => Err(MqttCodecError::new(&format!(
-                "{} is not a value QoSLevel",
-                value
+                "{value} is not a value QoSLevel"
             ))),
         }
     }
@@ -470,7 +469,7 @@ pub(crate) fn get_utf8(src: &mut BytesMut) -> Result<String, MqttCodecError> {
     }
     match String::from_utf8(chars) {
         Ok(s) => Ok(s),
-        Err(e) => Err(MqttCodecError::new(&format!("{:?}", e))),
+        Err(e) => Err(MqttCodecError::new(&format!("{e:?}"))),
     }
 }
 
@@ -553,8 +552,7 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
         val if val < packet_remaining as usize => {
             return Err(MqttCodecError {
                 reason: format!(
-                    "malformed packet: remaining length actual: {} expected: {}",
-                    val, packet_remaining
+                    "malformed packet: remaining length actual: {val} expected: {packet_remaining}",
                 ),
                 kind: ErrorKind::InsufficientData(packet_remaining as usize, val),
             })
@@ -573,9 +571,7 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
         | PacketType::Subscribe
         | PacketType::Unsubscribe => {
             if flags != PACKET_RESERVED_NONE {
-                MqttCodecError::new(
-                    format!("invalid flags for {}: {}", packet_type, flags).as_str(),
-                );
+                MqttCodecError::new(format!("invalid flags for {packet_type}: {flags}").as_str());
             }
             Ok(Some(FixedHeader::new_with_remaining(
                 packet_type,
@@ -592,9 +588,7 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
         | PacketType::Disconnect
         | PacketType::Auth => {
             if flags != PACKET_RESERVED_NONE {
-                MqttCodecError::new(
-                    format!("invalid flags for {}: {}", packet_type, flags).as_str(),
-                );
+                MqttCodecError::new(format!("invalid flags for {packet_type}: {flags}").as_str());
             }
             Ok(Some(FixedHeader::new_with_remaining(
                 packet_type,

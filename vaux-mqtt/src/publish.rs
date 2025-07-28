@@ -53,7 +53,7 @@ impl Publish {
                 payload: None,
             }),
             p => Err(MqttCodecError {
-                reason: format!("unable to construct from {}", p),
+                reason: format!("unable to construct from {p}"),
                 kind: crate::codec::ErrorKind::MalformedPacket,
             }),
         }

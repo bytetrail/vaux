@@ -1,15 +1,10 @@
-use crate::{MqttConnection, MqttError};
-use std::{collections::HashMap, fmt::Display, time::Duration};
-use tokio::sync::mpsc::Sender;
+use crate::{session::SessionState, MqttConnection, MqttError};
+use std::{collections::HashMap, fmt::Display, sync::Arc, time::Duration};
+use tokio::sync::{mpsc::Sender, Mutex, RwLock};
 use vaux_mqtt::{Packet, PacketType, WillMessage};
 
-const DEFAULT_RECV_MAX: u16 = 100;
-const DEFAULT_SESSION_EXPIRY: u32 = 1000;
-const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
-const DEFAULT_CLIENT_KEEP_ALIVE: Duration = Duration::from_secs(60);
 const MIN_KEEP_ALIVE: Duration = Duration::from_secs(30);
 const MAX_CONNECT_WAIT: Duration = Duration::from_secs(5);
-const DEFAULT_CLIENT_ID_PREFIX: &str = "vaux-client";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuilderError {
@@ -30,38 +25,24 @@ impl Display for BuilderError {
 
 pub struct ClientBuilder {
     connection: MqttConnection,
-    auto_ack: bool,
-    auto_packet_id: bool,
-    receive_max: u16,
-    session_expiry: u32,
-    client_id: String,
-    max_packet_size: usize,
-    keep_alive: Duration,
+    state: SessionState,
     max_connect_wait: Duration,
     channel_size: Option<u16>,
     filtered_consumer: Option<HashMap<PacketType, Sender<vaux_mqtt::Packet>>>,
     error_out: Option<Sender<MqttError>>,
     will_message: Option<WillMessage>,
-    pingresp: bool,
 }
 
 impl Default for ClientBuilder {
     fn default() -> Self {
         Self {
             connection: MqttConnection::new(),
-            auto_ack: true,
-            auto_packet_id: true,
-            receive_max: DEFAULT_RECV_MAX,
-            session_expiry: DEFAULT_SESSION_EXPIRY,
-            client_id: format!("{}-{}", DEFAULT_CLIENT_ID_PREFIX, uuid::Uuid::new_v4()),
-            max_packet_size: DEFAULT_MAX_PACKET_SIZE,
-            keep_alive: DEFAULT_CLIENT_KEEP_ALIVE,
+            state: SessionState::default(),
             max_connect_wait: MAX_CONNECT_WAIT,
             channel_size: None,
             filtered_consumer: None,
             error_out: None,
             will_message: None,
-            pingresp: false,
         }
     }
 }
@@ -74,13 +55,19 @@ impl ClientBuilder {
         }
     }
 
+    pub fn with_state(mut self, connection: MqttConnection, state: SessionState) -> Self {
+        self.connection = connection;
+        self.state = state;
+        self
+    }
+
     /// Enables or disables automatic acknowledgement of packets. If enabled, the client
     /// will automatically acknowledge packets that require acknowledgement. If disabled,
     /// the client will not acknowledge packets that require acknowledgement and the
     /// calling client is responsible for acknowledging packets that require
     /// acknowledgement.
     pub fn with_auto_ack(mut self, auto_ack: bool) -> Self {
-        self.auto_ack = auto_ack;
+        self.state.auto_ack = auto_ack;
         self
     }
 
@@ -93,17 +80,17 @@ impl ClientBuilder {
     ///
     /// Defaults to true.
     pub fn with_auto_packet_id(mut self, auto_packet_id: bool) -> Self {
-        self.auto_packet_id = auto_packet_id;
+        self.state.auto_packet_id = auto_packet_id;
         self
     }
 
     pub fn with_receive_max(mut self, receive_max: u16) -> Self {
-        self.receive_max = receive_max;
+        self.state.qos_recv_remaining = receive_max as usize;
         self
     }
 
-    pub fn with_session_expiry(mut self, session_expiry: u32) -> Self {
-        self.session_expiry = session_expiry;
+    pub fn with_session_expiry(mut self, session_expiry: Duration) -> Self {
+        self.state.session_expiry = Arc::new(RwLock::new(session_expiry));
         self
     }
 
@@ -112,12 +99,12 @@ impl ClientBuilder {
     /// not set, a random client ID will be generated.
     /// Defaults to `vaux-client-{uuid}`.
     pub fn with_client_id(mut self, client_id: &str) -> Self {
-        self.client_id = client_id.to_string();
+        self.state.client_id = Arc::new(Mutex::new(Some(client_id.to_string())));
         self
     }
 
     pub fn with_max_packet_size(mut self, max_packet_size: usize) -> Self {
-        self.max_packet_size = max_packet_size;
+        self.state.max_packet_size = max_packet_size;
         self
     }
 
@@ -126,7 +113,7 @@ impl ClientBuilder {
     /// broker. If the client does not send a PINGREQ packet within this time, the
     /// broker may assume that the client is no longer connected close the connection.
     pub fn with_keep_alive(mut self, keep_alive: Duration) -> Self {
-        self.keep_alive = keep_alive;
+        self.state.keep_alive = Arc::new(RwLock::new(keep_alive));
         self
     }
 
@@ -185,32 +172,23 @@ impl ClientBuilder {
     /// PINGRESP packets to the packet consumer. If with_pingresp is set to true, the
     /// client will pass PINGRESP packets to the packet consumer.
     pub fn with_pingresp(mut self, pingresp: bool) -> Self {
-        self.pingresp = pingresp;
+        self.state.pingresp = pingresp;
         self
     }
 
     pub async fn build(self) -> Result<crate::MqttClient, BuilderError> {
-        if self.keep_alive < MIN_KEEP_ALIVE {
+        let keep_alive = self.state.keep_alive.read().await;
+        if *keep_alive < MIN_KEEP_ALIVE {
             return Err(BuilderError::MinKeepAlive);
         }
-
-        let mut client = crate::MqttClient::new_with_connection(
-            self.connection,
-            &self.client_id,
-            self.auto_ack,
-            self.receive_max,
-            self.auto_packet_id,
-            self.channel_size,
-        );
-        client.set_session_expiry(self.session_expiry).await;
-        client.set_max_packet_size(self.max_packet_size);
-        client.set_keep_alive(self.keep_alive).await;
+        drop(keep_alive);
+        let mut client =
+            crate::MqttClient::new_with_connection(self.connection, self.state, self.channel_size);
         client.set_max_connect_wait(self.max_connect_wait);
         if let Some(error_out) = self.error_out {
             client.set_error_out(error_out);
         }
         client.set_will_message(self.will_message);
-        client.set_pingresp(self.pingresp);
         if let Some(filtered_consumer) = self.filtered_consumer {
             for (packet_type, sender) in filtered_consumer {
                 client.add_filtered_packet_handler(packet_type, sender);

@@ -34,7 +34,7 @@ pub async fn basic_connect() {
 #[tokio::test]
 pub async fn connect_with_takeover() {
     const TAKEOVER_CLIENT_ID: &str = "takeover_client_id";
-    const SESSION_EXPIRY: u32 = 1000;
+    const SESSION_EXPIRY: Duration = Duration::from_secs(60 * 10);
     const CONNECT_TIMEOUT: u64 = 5000;
     const TEST_PORT: u16 = 8384;
     let listen_addr = "127.0.0.1:8384";
@@ -48,7 +48,7 @@ pub async fn connect_with_takeover() {
     let result = broker.run().await;
     assert!(result.is_ok());
 
-    let mut client_one = vaux_client::ClientBuilder::new(
+    let client_one = vaux_client::ClientBuilder::new(
         MqttConnection::new()
             .with_host("127.0.0.1")
             .with_port(TEST_PORT),
@@ -57,8 +57,13 @@ pub async fn connect_with_takeover() {
     .with_auto_ack(true)
     .with_session_expiry(SESSION_EXPIRY)
     .build()
-    .await
-    .expect("failed to create client");
+    .await;
+
+    println!("Client one created");
+    if let Err(e) = client_one {
+        panic!("Failed to create client one: {:?}", e);
+    }
+    let mut client_one = client_one.unwrap();
 
     let client_one_handle = client_one
         .try_start(Duration::from_millis(CONNECT_TIMEOUT), true)

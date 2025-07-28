@@ -18,10 +18,10 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Io(e) => write!(f, "IO error: {}", e),
-            Error::ReadTimeout(e) => write!(f, "Read timeout: {}", e),
+            Error::Io(e) => write!(f, "IO error: {e}"),
+            Error::ReadTimeout(e) => write!(f, "Read timeout: {e}"),
             Error::ReadBuffer => write!(f, "Read buffer full"),
-            Error::Codec(e) => write!(f, "MQTT codec error: {}", e),
+            Error::Codec(e) => write!(f, "MQTT codec error: {e}"),
         }
     }
 }

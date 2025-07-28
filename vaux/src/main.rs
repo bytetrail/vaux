@@ -47,10 +47,7 @@ async fn main() {
         if let Ok(addr) = Ipv4Addr::from_str(&listen_addr) {
             addr
         } else {
-            panic!(
-                "Listen address, \"{}\" is not a valid IPV4 address",
-                listen_addr
-            );
+            panic!("Listen address, \"{listen_addr}\" is not a valid IPV4 address",);
         }
     } else {
         Ipv4Addr::from_str(DEFAULT_LISTEN_ADDR).unwrap()
@@ -64,8 +61,8 @@ async fn main() {
     let mut broker = Broker::new_with_config(config);
     // TODO initialize from storage for long lived sessions
     let result = broker.run().await;
-    println!("Broker started on: {}", listen_addr);
+    println!("Broker started on: {listen_addr}");
     if let Err(e) = result {
-        eprintln!("Error starting broker: {}", e);
+        eprintln!("Error starting broker: {e}");
     }
 }

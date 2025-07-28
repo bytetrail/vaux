@@ -44,7 +44,7 @@ impl FixedHeader {
     }
 
     pub fn set_dup(&mut self, dup: bool) {
-        self.flags = self.flags & !DUP_MASK | (dup as u8) << 3
+        self.flags = self.flags & !DUP_MASK | ((dup as u8) << 3)
     }
 
     pub fn retain(&self) -> bool {
@@ -60,7 +60,7 @@ impl FixedHeader {
     }
 
     pub fn set_qos(&mut self, qos: QoSLevel) {
-        self.flags = self.flags & !QOS_MASK | (qos as u8) << 1;
+        self.flags = self.flags & !QOS_MASK | ((qos as u8) << 1);
     }
 
     pub fn flags(&self) -> u8 {

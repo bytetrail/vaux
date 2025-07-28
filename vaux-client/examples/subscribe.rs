@@ -79,10 +79,10 @@ async fn main() {
     }
     connection = connection.with_host(&args.addr).with_port(args.port);
     let mut client = vaux_client::ClientBuilder::new(connection)
-        .with_auto_ack(true)
+        .with_auto_ack(args.auto_ack)
         .with_auto_packet_id(true)
         .with_receive_max(10)
-        .with_session_expiry(1000)
+        .with_session_expiry(Duration::from_secs(600))
         .with_keep_alive(Duration::from_secs(30))
         .with_max_connect_wait(Duration::from_secs(5))
         .build()
@@ -133,7 +133,7 @@ async fn subscribe(
                                         PayloadFormat::Utf8 => {
                                             let message =
                                                 String::from_utf8(p.take_payload().unwrap()).unwrap();
-                                            println!("{}", message);
+                                            println!("{message}");
                                         }
                                         PayloadFormat::Bin => {
                                             println!("received a binary payload");
@@ -148,14 +148,14 @@ async fn subscribe(
                                         let mut ack = PubResp::new_puback();
                                         ack.packet_id = p.packet_id.unwrap();
                                         if let Err(e) = packet_sender.send(Packet::PubAck(ack)).await {
-                                            eprintln!("{:?}", e);
+                                            eprintln!("{e:?}");
                                         }
                                     }
                                     QoSLevel::ExactlyOnce => {
                                         let mut ack = PubResp::new_pubrec();
                                         ack.packet_id = p.packet_id.unwrap();
                                         if let Err(e) = packet_sender.send(Packet::PubRec(ack)).await {
-                                            eprintln!("{:?}", e);
+                                            eprintln!("{e:?}");
                                         }
                                     }
                                     _ => {}

@@ -63,7 +63,7 @@ async fn server_assigned_expiry() {
     .with_client_id("connack_client")
     .with_auto_ack(true)
     .with_keep_alive(Duration::from_secs(120))
-    .with_session_expiry(REQUESTED_SESSION_EXPIRY.as_secs() as u32)
+    .with_session_expiry(REQUESTED_SESSION_EXPIRY)
     .build()
     .await
     .expect("failed to create client");

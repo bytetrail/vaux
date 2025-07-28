@@ -51,7 +51,7 @@ impl TryFrom<u8> for RetainHandling {
             0x01 => Ok(RetainHandling::SendNew),
             0x02 => Ok(RetainHandling::None),
             v => Err(MqttCodecError::new(
-                format!("Mqttv5 3.8.3.1 invalid retain option: {}", v).as_str(),
+                format!("Mqttv5 3.8.3.1 invalid retain option: {v}").as_str(),
             )),
         }
     }
@@ -152,9 +152,9 @@ impl SubscriptionFilter {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         put_utf8(&self.filter, dest)?;
         let flags = self.qos as u8
-            | (self.no_local as u8) << 2
-            | (self.retain_as as u8) << 3
-            | (self.handling as u8) << 4;
+            | ((self.no_local as u8) << 2)
+            | ((self.retain_as as u8) << 3)
+            | ((self.handling as u8) << 4);
         dest.put_u8(flags);
         Ok(())
     }
@@ -165,7 +165,7 @@ impl SubscriptionFilter {
         self.qos = QoSLevel::try_from(flags & 0b_0000_0011)?;
         self.no_local = flags & 0b_0000_0100 == 0b_0000_0100;
         self.retain_as = flags & 0b_0000_1000 == 0b_0000_1000;
-        self.handling = RetainHandling::try_from(flags & 0b_0011_0000 >> 4)?;
+        self.handling = RetainHandling::try_from(flags & (0b_0011_0000 >> 4))?;
 
         Ok(())
     }

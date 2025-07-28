@@ -15,7 +15,7 @@ async fn main() {
         .with_auto_ack(true)
         .with_auto_packet_id(true)
         .with_receive_max(10)
-        .with_session_expiry(10000)
+        .with_session_expiry(Duration::from_secs(600))
         .with_keep_alive(Duration::from_secs(30))
         .with_max_connect_wait(Duration::from_secs(5))
         .build()
@@ -26,7 +26,7 @@ async fn main() {
         match client.try_start(Duration::from_millis(5000), true).await {
             Ok(h) => Some(h),
             Err(e) => {
-                eprintln!("unable to start client: {:?}", e);
+                eprintln!("unable to start client: {e:?}");
                 return;
             }
         };

@@ -103,13 +103,13 @@ impl MqttConnection {
         let addr = self.host.clone() + ":" + &self.port.unwrap().to_string();
         let socket_addr = addr.to_socket_addrs().await.map_err(|e| {
             MqttError::new(
-                &format!("unable to resolve host: {}", e),
+                &format!("unable to resolve host: {e}"),
                 ErrorKind::Connection,
             )
         });
         if let Err(e) = socket_addr {
             return Err(MqttError::new(
-                &format!("unable to resolve host: {}", e),
+                &format!("unable to resolve host: {e}"),
                 ErrorKind::Connection,
             ));
         }
@@ -127,7 +127,7 @@ impl MqttConnection {
                     }
                 }
                 Err(e) => Err(MqttError::new(
-                    &format!("unable to connect: {}", e),
+                    &format!("unable to connect: {e}"),
                     ErrorKind::Connection,
                 )),
             },
@@ -141,7 +141,7 @@ impl MqttConnection {
     async fn connect_tls(&mut self, stream: TcpStream) -> crate::Result<AsyncMqttStream> {
         let server_name = ServerName::try_from(self.host.clone()).map_err(|e| {
             MqttError::new(
-                &format!("unable to convert host to server name: {}", e),
+                &format!("unable to convert host to server name: {e}"),
                 ErrorKind::Connection,
             )
         })?;
@@ -160,11 +160,11 @@ impl MqttConnection {
             let connector = TlsConnector::from(Arc::new(config));
             let stream = connector.connect(server_name, stream).await.map_err(|e| {
                 MqttError::new(
-                    &format!("unable to establish TLS connection: {}", e),
+                    &format!("unable to establish TLS connection: {e}"),
                     ErrorKind::Connection,
                 )
             })?;
-            Ok(AsyncMqttStream(MqttStream::TlsStream(stream)))
+            Ok(AsyncMqttStream(MqttStream::TlsStream(Box::new(stream))))
         } else {
             Err(MqttError::new(
                 "no trusted CA(s) provided for TLS connection",
