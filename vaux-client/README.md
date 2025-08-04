@@ -1,3 +1,34 @@
+## Examples
+
+### Publish
+A command line publish example that uses the vaux client to publish a packet using options
+specified in the command line interface.
+
+```
+Usage: publish [OPTIONS]
+
+Options:
+  -q, --qos <QOS>                    [default: 0]
+  -t, --topic <TOPIC>                [default: hello-vaux]
+  -a, --addr <ADDR>                  [default: localhost]
+  -s, --tls                          
+  -p, --port <PORT>                  [default: 1883]
+  -c, --trusted-ca <TRUSTED_CA>      
+  -w, --username <USERNAME>          
+  -u, --password <PASSWORD>          
+  -f, --message-file <MESSAGE_FILE>  
+  -m, --message <MESSAGE>            
+  -i, --iterations <ITERATIONS>      
+  -h, --help                         Print help
+  -V, --version                      Print version
+```
+
+### Subscribe
+A command line publish example that uses the vaux client to publish a packet using options
+specified in the command line interface.
+
+
+
 ## auto-ack
 The client manages all QoS-1 and QoS-2 control packets when auto-ack is enabled. The 
 QoS-1 and 2 control packets are still sent to the client application so that the application 
