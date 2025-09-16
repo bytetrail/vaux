@@ -4,22 +4,20 @@ use crate::{
     Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyType, QoSLevel, Size,
 };
 use bytes::{Buf, BufMut};
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::LazyLock};
 
-lazy_static! {
-    static ref SUPPORTED: HashSet<PropertyType> = {
-        let mut set = HashSet::new();
-        set.insert(PropertyType::PayloadFormat);
-        set.insert(PropertyType::MessageExpiry);
-        set.insert(PropertyType::TopicAlias);
-        set.insert(PropertyType::ResponseTopic);
-        set.insert(PropertyType::CorrelationData);
-        set.insert(PropertyType::SubscriptionIdentifier);
-        set.insert(PropertyType::ContentType);
-        set.insert(PropertyType::UserProperty);
-        set
-    };
-}
+static PUBLISH_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
+    let mut set = HashSet::new();
+    set.insert(PropertyType::PayloadFormat);
+    set.insert(PropertyType::MessageExpiry);
+    set.insert(PropertyType::TopicAlias);
+    set.insert(PropertyType::ResponseTopic);
+    set.insert(PropertyType::CorrelationData);
+    set.insert(PropertyType::SubscriptionIdentifier);
+    set.insert(PropertyType::ContentType);
+    set.insert(PropertyType::UserProperty);
+    set
+});
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Publish {
@@ -36,7 +34,7 @@ impl Default for Publish {
             header: FixedHeader::new(PacketType::Publish),
             topic_name: None,
             packet_id: None,
-            props: PropertyBundle::new(SUPPORTED.clone()),
+            props: PropertyBundle::new(&PUBLISH_PROPS),
             payload: None,
         }
     }
@@ -49,7 +47,7 @@ impl Publish {
                 header,
                 topic_name: None,
                 packet_id: None,
-                props: PropertyBundle::new(SUPPORTED.clone()),
+                props: PropertyBundle::new(&PUBLISH_PROPS),
                 payload: None,
             }),
             p => Err(MqttCodecError {

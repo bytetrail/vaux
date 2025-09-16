@@ -1,37 +1,41 @@
-use std::collections::HashSet;
-
-use bytes::{Buf, BufMut};
-
 use crate::{
     codec::variable_byte_int_size,
     property::{PacketProperties, PropertyBundle},
     Decode, Encode, FixedHeader, PacketType, PropertyType, Reason, Size,
 };
-
-lazy_static! {
-    static ref SUPPORTED_DISCONNECT_PROPS: HashSet<PropertyType> = {
-        let mut set = HashSet::new();
-        set.insert(PropertyType::SessionExpiryInterval);
-        set.insert(PropertyType::ReasonString);
-        set.insert(PropertyType::UserProperty);
-        set.insert(PropertyType::ServerReference);
-        set
-    };
-}
+use bytes::{Buf, BufMut};
+use std::{collections::HashSet, sync::LazyLock};
 
 const DEFAULT_DISCONNECT_REMAINING: u32 = 1;
+static DISCONNECT_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
+    let mut set = HashSet::new();
+    set.insert(PropertyType::SessionExpiryInterval);
+    set.insert(PropertyType::ReasonString);
+    set.insert(PropertyType::UserProperty);
+    set.insert(PropertyType::ServerReference);
+    set
+});
 
-#[derive(Default, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Disconnect {
     pub reason: Reason,
     props: PropertyBundle,
+}
+
+impl Default for Disconnect {
+    fn default() -> Self {
+        Disconnect {
+            reason: Reason::Success,
+            props: PropertyBundle::new(&DISCONNECT_PROPS),
+        }
+    }
 }
 
 impl Disconnect {
     pub fn new(reason: Reason) -> Self {
         Self {
             reason,
-            props: PropertyBundle::new(SUPPORTED_DISCONNECT_PROPS.clone()),
+            props: PropertyBundle::new(&DISCONNECT_PROPS),
         }
     }
 }

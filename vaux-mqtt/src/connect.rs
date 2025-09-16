@@ -6,6 +6,7 @@ use crate::{
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
 const MQTT_PROTOCOL_NAME_LEN: u16 = 0x00_04;
 const MQTT_PROTOCOL_U32: u32 = 0x4d515454;
@@ -21,6 +22,20 @@ pub(crate) const CONNECT_FLAG_SHIFT: u8 = 0x03;
 
 /// Default remaining size for connect packet
 const DEFAULT_CONNECT_REMAINING: u32 = 10;
+
+static CONNECT_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
+    let mut set = HashSet::new();
+    set.insert(PropertyType::SessionExpiryInterval);
+    set.insert(PropertyType::RecvMax);
+    set.insert(PropertyType::MaxPacketSize);
+    set.insert(PropertyType::TopicAliasMax);
+    set.insert(PropertyType::ReqRespInfo);
+    set.insert(PropertyType::ReqProblemInfo);
+    set.insert(PropertyType::UserProperty);
+    set.insert(PropertyType::AuthMethod);
+    set.insert(PropertyType::AuthData);
+    set
+});
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Connect {
@@ -217,19 +232,8 @@ impl Decode for Connect {
 
 impl Default for Connect {
     fn default() -> Self {
-        let mut allowed = HashSet::new();
-        allowed.insert(PropertyType::SessionExpiryInterval);
-        allowed.insert(PropertyType::RecvMax);
-        allowed.insert(PropertyType::MaxPacketSize);
-        allowed.insert(PropertyType::TopicAliasMax);
-        allowed.insert(PropertyType::ReqRespInfo);
-        allowed.insert(PropertyType::ReqProblemInfo);
-        allowed.insert(PropertyType::UserProperty);
-        allowed.insert(PropertyType::AuthMethod);
-        allowed.insert(PropertyType::AuthData);
-
         Connect {
-            props: PropertyBundle::new(allowed),
+            props: PropertyBundle::new(&CONNECT_PROPS),
             clean_start: false,
             keep_alive: 0,
             will_message: None,

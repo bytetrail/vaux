@@ -1,13 +1,17 @@
-use std::collections::HashSet;
-
-use bytes::{Buf, BufMut};
-
 use crate::{
     codec::variable_byte_int_size, property::PropertyBundle, Decode, Encode, FixedHeader,
     MqttCodecError, PacketType, PropertyType, Reason, Size,
 };
+use bytes::{Buf, BufMut};
+use std::{collections::HashSet, sync::LazyLock};
 
 const VARIABLE_HEADER_LEN: u32 = 2;
+static PUBRESP_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
+    let mut set = HashSet::new();
+    set.insert(PropertyType::ReasonString);
+    set.insert(PropertyType::UserProperty);
+    set
+});
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PubResp {
@@ -33,17 +37,13 @@ impl PubResp {
     }
 
     fn new(resp_type: PacketType) -> Result<Self, MqttCodecError> {
-        let mut supported = HashSet::new();
-        supported.insert(PropertyType::ReasonString);
-        supported.insert(PropertyType::UserProperty);
-
         match resp_type {
             PacketType::PubAck | PacketType::PubComp | PacketType::PubRec | PacketType::PubRel => {
                 Ok(Self {
                     resp_type,
                     reason: Reason::Success,
                     packet_id: 0,
-                    props: PropertyBundle::new(supported),
+                    props: PropertyBundle::new(&PUBRESP_PROPS),
                 })
             }
             _ => Err(MqttCodecError {

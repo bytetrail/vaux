@@ -4,6 +4,29 @@ use crate::{Decode, Encode, PropertyType, Size};
 use crate::{FixedHeader, MqttCodecError, PacketType};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
+use std::sync::LazyLock;
+
+static CONNACK_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
+    let mut set = HashSet::new();
+    set.insert(PropertyType::SessionExpiryInterval);
+    set.insert(PropertyType::RecvMax);
+    set.insert(PropertyType::MaxQoS);
+    set.insert(PropertyType::RetainAvail);
+    set.insert(PropertyType::MaxPacketSize);
+    set.insert(PropertyType::AssignedClientId);
+    set.insert(PropertyType::TopicAliasMax);
+    set.insert(PropertyType::ReasonString);
+    set.insert(PropertyType::SubIdAvail);
+    set.insert(PropertyType::UserProperty);
+    set.insert(PropertyType::WildcardSubAvail);
+    set.insert(PropertyType::ShardSubAvail);
+    set.insert(PropertyType::KeepAlive);
+    set.insert(PropertyType::RespInfo);
+    set.insert(PropertyType::ServerReference);
+    set.insert(PropertyType::AuthMethod);
+    set.insert(PropertyType::AuthData);
+    set
+});
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ConnAck {
@@ -13,29 +36,6 @@ pub struct ConnAck {
 }
 
 impl ConnAck {
-    fn allowed_properties() -> HashSet<PropertyType> {
-        let mut allowed = HashSet::new();
-        allowed.insert(PropertyType::SessionExpiryInterval);
-        allowed.insert(PropertyType::RecvMax);
-        allowed.insert(PropertyType::MaxQoS);
-        allowed.insert(PropertyType::RetainAvail);
-        allowed.insert(PropertyType::MaxPacketSize);
-        allowed.insert(PropertyType::AssignedClientId);
-        allowed.insert(PropertyType::TopicAliasMax);
-        allowed.insert(PropertyType::ReasonString);
-        allowed.insert(PropertyType::SubIdAvail);
-        allowed.insert(PropertyType::UserProperty);
-        allowed.insert(PropertyType::WildcardSubAvail);
-        allowed.insert(PropertyType::ShardSubAvail);
-        allowed.insert(PropertyType::KeepAlive);
-        allowed.insert(PropertyType::RespInfo);
-        allowed.insert(PropertyType::ServerReference);
-        allowed.insert(PropertyType::AuthMethod);
-        allowed.insert(PropertyType::AuthData);
-
-        allowed
-    }
-
     pub fn reason(&self) -> Reason {
         self.reason
     }
@@ -147,7 +147,7 @@ impl Default for ConnAck {
         ConnAck {
             session_present: false,
             reason: Reason::Success,
-            properties: PropertyBundle::new(ConnAck::allowed_properties()),
+            properties: PropertyBundle::new(&CONNACK_PROPS),
         }
     }
 }

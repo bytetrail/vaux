@@ -179,7 +179,7 @@ async fn subscribe(
     }
 }
 
-fn load_cert(path: &str) -> Result<CertificateDer, std::io::Error> {
+fn load_cert(path: &str) -> Result<CertificateDer<'_>, std::io::Error> {
     let mut cert_buffer = Vec::new();
     let cert_file = std::fs::File::open(path)?;
     let mut reader = std::io::BufReader::new(cert_file);

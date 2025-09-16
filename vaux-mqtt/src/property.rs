@@ -14,6 +14,8 @@ use crate::{
     Decode, Encode, MqttCodecError, QoSLevel, Size,
 };
 
+pub type UserPropertyMap = HashMap<String, Vec<String>>;
+
 /// MQTT property type. For more information on the specific property types,
 /// please see the
 /// [MQTT Specification](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901027).
@@ -224,15 +226,15 @@ impl TryFrom<u8> for PropertyType {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PropertyBundle {
-    supported: HashSet<PropertyType>,
+    supported: &'static HashSet<PropertyType>,
     properties: HashMap<PropertyType, Property>,
-    user_props: HashMap<String, Vec<String>>,
+    user_props: UserPropertyMap,
 }
 
 impl PropertyBundle {
-    pub(crate) fn new(supported: HashSet<PropertyType>) -> Self {
+    pub(crate) fn new(supported: &'static HashSet<PropertyType>) -> Self {
         Self {
             supported,
             properties: HashMap::new(),

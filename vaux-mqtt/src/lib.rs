@@ -8,6 +8,7 @@ pub mod publish;
 pub mod pubresp;
 pub mod subscribe;
 pub mod test;
+pub mod unsubscribe;
 mod will;
 
 use crate::codec::{put_utf8, variable_byte_int_size};
