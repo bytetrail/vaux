@@ -26,8 +26,6 @@ pub use crate::{
     subscribe::SubscriptionFilter,
 };
 use bytes::BytesMut;
-#[macro_use]
-extern crate lazy_static;
 
 pub trait Size {
     fn size(&self) -> u32;

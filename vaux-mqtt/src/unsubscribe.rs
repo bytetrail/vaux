@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::LazyLock};
 use bytes::{Buf, BufMut};
 
 use crate::{
-    codec::{get_var_u32, variable_byte_int_size},
+    codec::{get_var_u32, variable_byte_int_size, SIZE_UTF8_STRING},
     property::{PacketProperties, PropertyBundle, UserPropertyMap},
     Decode, Encode, FixedHeader, PacketType, PropertyType, Reason, Size,
 };
@@ -24,6 +24,7 @@ static UNSUBSCRIBE_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
     supported
 });
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsubAck {
     packet_id: u16,
     reason_codes: Vec<Reason>,
@@ -174,10 +175,129 @@ impl UnsubAck {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unsubscribe {
     pub packet_id: u16,
     pub topics: Vec<String>,
     pub props: PropertyBundle,
+}
+
+impl Default for Unsubscribe {
+    fn default() -> Self {
+        Unsubscribe {
+            packet_id: 0,
+            topics: Vec::new(),
+            props: PropertyBundle::new(&UNSUBSCRIBE_PROPS),
+        }
+    }
+}
+
+impl PacketProperties for Unsubscribe {
+    fn properties(&self) -> &PropertyBundle {
+        &self.props
+    }
+
+    fn properties_mut(&mut self) -> &mut PropertyBundle {
+        &mut self.props
+    }
+
+    fn set_properties(&mut self, props: PropertyBundle) {
+        self.props = props;
+    }
+}
+
+impl Size for Unsubscribe {
+    fn size(&self) -> u32 {
+        let mut remaining = self.property_size() + UNSUBSCRIBE_VAR_HEADER_LEN;
+        for topic in &self.topics {
+            remaining += SIZE_UTF8_STRING + topic.len() as u32;
+        }
+        let len = variable_byte_int_size(remaining);
+        len + remaining
+    }
+
+    fn property_size(&self) -> u32 {
+        self.props.size()
+    }
+
+    fn payload_size(&self) -> u32 {
+        let mut size = 0;
+        for topic in &self.topics {
+            size += 2 + topic.len() as u32;
+        }
+        size
+    }
+}
+
+impl Decode for Unsubscribe {
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), crate::MqttCodecError> {
+        if src.remaining() < 4 {
+            return Err(crate::MqttCodecError {
+                reason: "insufficient data to decode packet identifier".to_string(),
+                kind: crate::codec::ErrorKind::InsufficientData(4, src.remaining()),
+            });
+        }
+        self.packet_id = src.get_u16();
+        let expected_remaining = get_var_u32(src)?;
+        if src.remaining() < expected_remaining as usize {
+            return Err(crate::MqttCodecError {
+                reason: "insufficient data to decode unsubscribe".to_string(),
+                kind: crate::codec::ErrorKind::InsufficientData(
+                    expected_remaining as usize,
+                    src.remaining(),
+                ),
+            });
+        }
+        if src.remaining() == 0 {
+            return Ok(());
+        }
+        self.props.decode(src)?;
+        while src.remaining() > 0 {
+            let topic_len = get_var_u32(src)? as usize;
+            if src.remaining() < topic_len {
+                return Err(crate::MqttCodecError {
+                    reason: "insufficient data to decode topic filter".to_string(),
+                    kind: crate::codec::ErrorKind::InsufficientData(topic_len, src.remaining()),
+                });
+            }
+            let topic = String::from_utf8(src.split_to(topic_len).to_vec()).map_err(|_| {
+                crate::MqttCodecError {
+                    reason: "invalid UTF-8 in topic filter".to_string(),
+                    kind: crate::codec::ErrorKind::InvalidUTF8,
+                }
+            })?;
+            self.topics.push(topic);
+        }
+        Ok(())
+    }
+}
+
+impl Encode for Unsubscribe {
+    fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), crate::MqttCodecError> {
+        let mut header = FixedHeader::new(PacketType::Unsubscribe);
+        header.remaining = self.size();
+        header.encode(dest)?;
+        dest.put_u16(self.packet_id);
+        self.props.encode(dest)?;
+        for topic in &self.topics {
+            if topic.is_empty() {
+                return Err(crate::MqttCodecError {
+                    reason: "topic filter cannot be empty".to_string(),
+                    kind: crate::codec::ErrorKind::MalformedPacket,
+                });
+            }
+            let topic_bytes = topic.as_bytes();
+            if topic_bytes.len() > u16::MAX as usize {
+                return Err(crate::MqttCodecError {
+                    reason: "topic filter too long".to_string(),
+                    kind: crate::codec::ErrorKind::MalformedPacket,
+                });
+            }
+            dest.put_u16(topic_bytes.len() as u16);
+            dest.put_slice(topic_bytes);
+        }
+        Ok(())
+    }
 }
 
 impl Unsubscribe {
@@ -187,5 +307,27 @@ impl Unsubscribe {
             topics,
             props: PropertyBundle::new(&UNSUBSCRIBE_PROPS),
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    #[test]
+    fn test_suback_size() {
+        use super::*;
+        let suback = UnsubAck::new(10, vec![Reason::NoSubscriptionExisted]);
+        assert_eq!(suback.size(), 4);
+    }
+
+    #[test]
+    fn test_suback_size_with_props() {
+        use super::*;
+        use crate::property::Property;
+        let mut suback = UnsubAck::new(10, vec![Reason::NoSubscriptionExisted]);
+        suback
+            .properties_mut()
+            .set_property(Property::ReasonString("test".to_string()));
+        assert_eq!(suback.size(), 11);
     }
 }
