@@ -80,7 +80,6 @@ impl Decode for UnsubAck {
             });
         }
         self.packet_id = src.get_u16();
-        println!("packet_id: {}", self.packet_id);
         self.props.decode(src)?;
         while src.remaining() > 0 {
             let code: Reason = src.get_u8().try_into().map_err(|_| crate::MqttCodecError {

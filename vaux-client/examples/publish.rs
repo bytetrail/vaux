@@ -172,7 +172,6 @@ async fn publish(
                         if let Packet::PubAck(p) = packet {
                             match args.qos {
                                 QoSLevel::AtLeastOnce => {
-                                    println!("received puback: {p:?}");
                                     pub_ack_recv = true;
                                 }
                                 _ => eprintln!("unexpected packet type: {p:?}"),
@@ -180,7 +179,6 @@ async fn publish(
                         } else if let Packet::PubComp(p) = packet {
                             match args.qos {
                                 QoSLevel::ExactlyOnce => {
-                                    println!("received pubcomp: {p:?}");
                                     pub_comp_recv = true;
                                 }
                                 _ => eprintln!("unexpected packet type: {p:?}"),
@@ -188,7 +186,6 @@ async fn publish(
                         } else if let Packet::PubRec(p) = packet {
                             match args.qos {
                                 QoSLevel::ExactlyOnce => {
-                                    println!("received pubrec: {p:?}" );
                                     pub_rec_recv = true;
                                 }
                                 _ => eprintln!("unexpected packet type: {p:?}"),
