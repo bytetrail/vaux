@@ -402,6 +402,16 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecErro
                         suback.decode(src)?;
                         Ok(Some((Packet::SubAck(suback), decode_len)))
                     }
+                    PacketType::Unsubscribe => {
+                        let mut unsubscribe = Unsubscribe::default();
+                        unsubscribe.decode(src)?;
+                        Ok(Some((Packet::Unsubscribe(unsubscribe), decode_len)))
+                    }
+                    PacketType::UnsubAck => {
+                        let mut unsuback = UnsubAck::default();
+                        unsuback.decode(src)?;
+                        Ok(Some((Packet::UnsubAck(unsuback), decode_len)))
+                    }
                     _ => Err(MqttCodecError::new("unsupported packet type")),
                 }
             }

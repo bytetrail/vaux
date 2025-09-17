@@ -265,10 +265,8 @@ impl ClientSession {
     ///
     pub(crate) async fn read_next(&mut self) -> crate::Result<Option<Packet>> {
         self.packet_stream.read().await.map_err(|e| {
-            MqttError::new(
-                &format!("unable to read packet: {e}"),
-                ErrorKind::Transport,
-            )
+            println!("read error: {e}");
+            MqttError::new(&format!("unable to read packet: {e}"), ErrorKind::Transport)
         })
     }
 
