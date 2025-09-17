@@ -27,7 +27,7 @@ static UNSUBSCRIBE_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsubAck {
     packet_id: u16,
-    reason_codes: Vec<Reason>,
+    reason_code: Vec<Reason>,
     props: PropertyBundle,
 }
 
@@ -35,7 +35,7 @@ impl Default for UnsubAck {
     fn default() -> Self {
         UnsubAck {
             packet_id: 0,
-            reason_codes: Vec::new(),
+            reason_code: Vec::new(),
             props: PropertyBundle::new(&UNSUBACK_PROPS),
         }
     }
@@ -67,7 +67,7 @@ impl Size for UnsubAck {
     }
 
     fn payload_size(&self) -> u32 {
-        self.reason_codes.len() as u32
+        self.reason_code.len() as u32
     }
 }
 
@@ -80,26 +80,14 @@ impl Decode for UnsubAck {
             });
         }
         self.packet_id = src.get_u16();
-        let expected_remaining = get_var_u32(src)?;
-        if src.remaining() < expected_remaining as usize {
-            return Err(crate::MqttCodecError {
-                reason: "insufficient data to decode unsuback".to_string(),
-                kind: crate::codec::ErrorKind::InsufficientData(
-                    expected_remaining as usize,
-                    src.remaining(),
-                ),
-            });
-        }
-        if src.remaining() == 0 {
-            return Ok(());
-        }
+        println!("packet_id: {}", self.packet_id);
         self.props.decode(src)?;
         while src.remaining() > 0 {
             let code: Reason = src.get_u8().try_into().map_err(|_| crate::MqttCodecError {
                 reason: "invalid reason code".to_string(),
                 kind: crate::codec::ErrorKind::UnsupportedReason,
             })?;
-            self.reason_codes.push(code);
+            self.reason_code.push(code);
         }
         Ok(())
     }
@@ -112,7 +100,7 @@ impl Encode for UnsubAck {
         header.encode(dest)?;
         dest.put_u16(self.packet_id);
         self.props.encode(dest)?;
-        for reason in &self.reason_codes {
+        for reason in &self.reason_code {
             dest.put_u8(*reason as u8);
         }
         Ok(())
@@ -123,7 +111,7 @@ impl UnsubAck {
     pub fn new(packet_id: u16, reason_codes: Vec<Reason>) -> UnsubAck {
         UnsubAck {
             packet_id,
-            reason_codes,
+            reason_code: reason_codes,
             props: PropertyBundle::new(&UNSUBACK_PROPS),
         }
     }
@@ -136,12 +124,12 @@ impl UnsubAck {
         self.packet_id = packet_id;
     }
 
-    pub fn reason_codes(&self) -> &Vec<Reason> {
-        &self.reason_codes
+    pub fn reason_code(&self) -> &Vec<Reason> {
+        &self.reason_code
     }
 
-    pub fn reason_codes_mut(&mut self) -> &mut Vec<Reason> {
-        &mut self.reason_codes
+    pub fn reason_code_mut(&mut self) -> &mut Vec<Reason> {
+        &mut self.reason_code
     }
 
     pub fn reason(&self) -> String {
@@ -238,19 +226,6 @@ impl Decode for Unsubscribe {
             });
         }
         self.packet_id = src.get_u16();
-        let expected_remaining = get_var_u32(src)?;
-        if src.remaining() < expected_remaining as usize {
-            return Err(crate::MqttCodecError {
-                reason: "insufficient data to decode unsubscribe".to_string(),
-                kind: crate::codec::ErrorKind::InsufficientData(
-                    expected_remaining as usize,
-                    src.remaining(),
-                ),
-            });
-        }
-        if src.remaining() == 0 {
-            return Ok(());
-        }
         self.props.decode(src)?;
         while src.remaining() > 0 {
             let topic_len = get_var_u32(src)? as usize;
