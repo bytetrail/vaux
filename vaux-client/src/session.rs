@@ -348,8 +348,7 @@ impl ClientSession {
         let mut packet_to_consumer = true;
         match &packet {
             Packet::PingResponse(_pingresp) => {
-                // do not send to consumer
-                packet_to_consumer = !self.state.pingresp;
+                packet_to_consumer = self.state.pingresp;
             }
             Packet::Disconnect(d) => {
                 // TODO handle disconnect - verify shutdown behavior
