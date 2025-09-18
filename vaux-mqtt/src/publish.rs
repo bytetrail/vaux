@@ -41,6 +41,73 @@ impl Default for Publish {
 }
 
 impl Publish {
+    /// Create a new Publish packet with the given topic name and QoS level and message
+    /// string payload. The payload format is set to UTF-8.
+    ///
+    /// ### Header Flags
+    /// * QoS level is set to the given value.
+    /// * Duplicate flag is set to false.
+    /// * Retain flag is set to false.
+    ///
+    /// ### Errors
+    /// * If `packet_id` is `None` and `qos_level` is not `AtMostOnce`, an error is returned.
+    ///   This is because a packet identifier is required for QoS 1 and 2. See MQTTv5 specification
+    ///   section 3.3.2.2.
+    /// * If `packet_id` is `Some`, not 0, and `qos_level` is `AtMostOnce`, an error is returned.
+    ///   This is because a packet identifier is not supported for QoS 0. See MQTTv5 specification
+    ///  section 3.3.2.2.
+    pub fn new_with_message(
+        packet_id: Option<u16>,
+        topic: String,
+        qos_level: QoSLevel,
+        message: &str,
+    ) -> Result<Self, MqttCodecError> {
+        Publish::new_with_payload(packet_id, topic, qos_level, message.as_bytes().to_vec())
+            .and_then(|p| Ok(p.with_payload_format(PayloadFormat::Utf8)))
+    }
+
+    /// Create a new Publish packet with the given topic name and QoS level and
+    /// binary payload.
+    ///
+    /// ### Header Flags
+    /// * QoS level is set to the given value.
+    /// * Duplicate flag is set to false.
+    /// * Retain flag is set to false.
+    ///
+    /// ### Errors
+    /// * If `packet_id` is `None` and `qos_level` is not `AtMostOnce`, an error is returned.
+    ///   This is because a packet identifier is required for QoS 1 and 2. See MQTTv5 specification
+    ///   section 3.3.2.2.
+    /// * If `packet_id` is `Some`, not 0, and `qos_level` is `AtMostOnce`, an error is returned.
+    ///   This is because a packet identifier is not supported for QoS 0. See MQTTv5 specification
+    ///  section 3.3.2.2.
+    pub fn new_with_payload(
+        packet_id: Option<u16>,
+        topic: String,
+        qos_level: QoSLevel,
+        payload: Vec<u8>,
+    ) -> Result<Self, MqttCodecError> {
+        if packet_id.is_none() && qos_level != QoSLevel::AtMostOnce {
+            return Err(MqttCodecError::new(
+                "Mqttv5 3.3.2.2 QOS level must be \"At Most Once\" (0) when no packet identifier set",
+            ));
+        } else if packet_id.is_some() && qos_level == QoSLevel::AtMostOnce {
+            return Err(MqttCodecError::new(
+                "Mqttv5 3.3.2.2 Packet Identifier not supported when QOS level is set to \"At Most Once\" (0)",
+            ));
+        }
+        Publish {
+            header: FixedHeader::new(PacketType::Publish),
+            topic_name: Some(topic),
+            packet_id,
+            props: PropertyBundle::new(&PUBLISH_PROPS),
+            payload: Some(payload),
+        }
+        .with_qos(qos_level)
+        .with_payload_format(PayloadFormat::Bin)
+        .with_dup(false)
+    }
+
     pub fn new_from_header(header: FixedHeader) -> Result<Self, MqttCodecError> {
         match header.packet_type {
             PacketType::Publish => Ok(Publish {
@@ -65,6 +132,44 @@ impl Publish {
         self.header.set_qos(qos);
     }
 
+    pub fn with_qos(mut self, qos: QoSLevel) -> Self {
+        self.set_qos(qos);
+        self
+    }
+
+    pub fn dup(&self) -> bool {
+        self.header.dup()
+    }
+
+    pub fn set_dup(&mut self, dup: bool) -> Result<(), MqttCodecError> {
+        if self.header.qos() == QoSLevel::AtMostOnce && dup {
+            return Err(MqttCodecError::new(
+                "Mqttv53.3.2.2 QOS level must not be At
+    Most Once with DUP true",
+            ));
+        }
+        self.header.set_dup(dup);
+        Ok(())
+    }
+
+    pub fn with_dup(mut self, dup: bool) -> Result<Self, MqttCodecError> {
+        self.set_dup(dup)?;
+        Ok(self)
+    }
+
+    pub fn retain(&self) -> bool {
+        self.header.retain()
+    }
+
+    pub fn set_retain(&mut self, retain: bool) {
+        self.header.set_retain(retain);
+    }
+
+    pub fn with_retain(mut self, retain: bool) -> Self {
+        self.set_retain(retain);
+        self
+    }
+
     pub fn set_payload(&mut self, data: Vec<u8>) {
         self.payload = Some(data);
     }
@@ -83,6 +188,11 @@ impl Publish {
         Ok(())
     }
 
+    pub fn with_packet_id(mut self, id: u16) -> Result<Self, MqttCodecError> {
+        self.set_packet_id(id)?;
+        Ok(self)
+    }
+
     pub fn topic_alias(&self) -> Option<u16> {
         self.props
             .get_property(PropertyType::TopicAlias)
@@ -97,6 +207,11 @@ impl Publish {
 
     pub fn set_topic_alias(&mut self, alias: u16) {
         self.props.set_property(Property::TopicAlias(alias))
+    }
+
+    pub fn with_topic_alias(mut self, alias: u16) -> Self {
+        self.set_topic_alias(alias);
+        self
     }
 
     pub fn payload_format(&self) -> Option<PayloadFormat> {
@@ -117,6 +232,11 @@ impl Publish {
             return;
         }
         self.props.set_property(Property::PayloadFormat(format));
+    }
+
+    pub fn with_payload_format(mut self, format: PayloadFormat) -> Self {
+        self.set_payload_format(format);
+        self
     }
 }
 
@@ -377,6 +497,56 @@ mod test {
             Err(e) => {
                 assert_eq!("MQTTv5 2.2.2.1 invalid property length", e.reason);
             }
+        }
+    }
+
+    #[test]
+    fn test_new_with_message() {
+        let publish = Publish::new_with_message(
+            Some(10),
+            "topic".to_string(),
+            QoSLevel::AtLeastOnce,
+            "hello",
+        )
+        .expect("unable to create publish");
+        assert_eq!(Some("topic".to_string()), publish.topic_name);
+        assert_eq!(Some(10), publish.packet_id);
+        assert_eq!(Some(PayloadFormat::Utf8), publish.payload_format());
+        assert_eq!(Some(b"hello".to_vec()), publish.payload);
+    }
+
+    #[test]
+    fn test_new_with_payload() {
+        let publish = Publish::new_with_payload(
+            Some(10),
+            "topic".to_string(),
+            QoSLevel::AtLeastOnce,
+            b"hello".to_vec(),
+        )
+        .expect("unable to create publish");
+        assert_eq!(Some("topic".to_string()), publish.topic_name);
+        assert_eq!(Some(10), publish.packet_id);
+        assert_eq!(None, publish.payload_format());
+        assert_eq!(Some(b"hello".to_vec()), publish.payload);
+    }
+
+    #[test]
+    fn test_new_with_payload_no_packet_id() {
+        match Publish::new_with_payload(
+            None,
+            "topic".to_string(),
+            QoSLevel::AtLeastOnce,
+            b"hello".to_vec(),
+        ) {
+            Ok(_) => panic!("expected error"),
+            Err(e) => assert!(e.reason.starts_with("Mqttv5 3.3.2.2")),
+        }
+    }
+    #[test]
+    fn test_new_with_message_no_packet_id() {
+        match Publish::new_with_message(None, "topic".to_string(), QoSLevel::AtLeastOnce, "hello") {
+            Ok(_) => panic!("expected error"),
+            Err(e) => assert!(e.reason.starts_with("Mqttv5 3.3.2.2")),
         }
     }
 }

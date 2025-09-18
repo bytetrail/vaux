@@ -58,12 +58,10 @@ pub async fn connect_with_takeover() {
     .with_session_expiry(SESSION_EXPIRY)
     .build()
     .await;
-
     if let Err(e) = client_one {
         panic!("Failed to create client one: {:?}", e);
     }
     let mut client_one = client_one.unwrap();
-
     let client_one_handle = client_one
         .try_start(Duration::from_millis(CONNECT_TIMEOUT), true)
         .await
@@ -77,6 +75,7 @@ pub async fn connect_with_takeover() {
     .with_client_id(TAKEOVER_CLIENT_ID)
     .with_auto_ack(true)
     .with_session_expiry(SESSION_EXPIRY)
+    .with_pingresp(true)
     .build()
     .await
     .expect("failed to create client");
@@ -97,6 +96,7 @@ pub async fn connect_with_takeover() {
         _ => panic!("Expected PINGRESP"),
     }
     broker.stop().await;
+    // verify client one got disconnected with takeover reason
     let result = client_one_handle.await;
     assert!(result.is_ok());
     let result = result.unwrap();
