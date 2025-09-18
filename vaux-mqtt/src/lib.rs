@@ -8,6 +8,7 @@ pub mod publish;
 pub mod pubresp;
 pub mod subscribe;
 pub mod test;
+pub mod unsubscribe;
 mod will;
 
 use crate::codec::{put_utf8, variable_byte_int_size};
@@ -25,8 +26,6 @@ pub use crate::{
     subscribe::SubscriptionFilter,
 };
 use bytes::BytesMut;
-#[macro_use]
-extern crate lazy_static;
 
 pub trait Size {
     fn size(&self) -> u32;

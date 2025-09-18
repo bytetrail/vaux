@@ -59,7 +59,6 @@ pub async fn connect_with_takeover() {
     .build()
     .await;
 
-    println!("Client one created");
     if let Err(e) = client_one {
         panic!("Failed to create client one: {:?}", e);
     }
@@ -94,10 +93,7 @@ pub async fn connect_with_takeover() {
     client_two.ping().await.expect("failed to ping");
     let packet = consumer.recv().await.expect("failed to receive packet");
     match packet {
-        vaux_mqtt::Packet::PingResponse(_) => {
-            // PINGRESP received
-            println!("Received PINGRESP");
-        }
+        vaux_mqtt::Packet::PingResponse(_) => {}
         _ => panic!("Expected PINGRESP"),
     }
     broker.stop().await;

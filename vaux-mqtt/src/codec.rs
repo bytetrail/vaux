@@ -1,5 +1,6 @@
 use crate::publish::Publish;
 use crate::subscribe::SubAck;
+use crate::unsubscribe::{UnsubAck, Unsubscribe};
 use crate::{ConnAck, Connect, Decode, Disconnect, Encode, FixedHeader, PubResp, Size, Subscribe};
 use bytes::{Buf, BufMut, BytesMut};
 use std::fmt::{Display, Formatter};
@@ -214,6 +215,8 @@ pub enum Packet {
     Disconnect(Disconnect),
     Subscribe(Subscribe),
     SubAck(SubAck),
+    Unsubscribe(Unsubscribe),
+    UnsubAck(UnsubAck),
 }
 
 impl Size for Packet {
@@ -230,6 +233,8 @@ impl Size for Packet {
             Packet::Disconnect(disc) => disc.size(),
             Packet::Subscribe(sub) => sub.size(),
             Packet::SubAck(ack) => ack.size(),
+            Packet::Unsubscribe(unsub) => unsub.size(),
+            Packet::UnsubAck(unsuback) => unsuback.size(),
         }
     }
 
@@ -246,6 +251,8 @@ impl Size for Packet {
             Packet::Disconnect(disc) => disc.property_size(),
             Packet::Subscribe(sub) => sub.property_size(),
             Packet::SubAck(ack) => ack.property_size(),
+            Packet::Unsubscribe(unsub) => unsub.property_size(),
+            Packet::UnsubAck(unsuback) => unsuback.property_size(),
         }
     }
 
@@ -262,6 +269,8 @@ impl Size for Packet {
             Packet::Disconnect(disc) => disc.payload_size(),
             Packet::Subscribe(sub) => sub.payload_size(),
             Packet::SubAck(ack) => ack.payload_size(),
+            Packet::Unsubscribe(unsub) => unsub.payload_size(),
+            Packet::UnsubAck(unsuback) => unsuback.payload_size(),
         }
     }
 }
@@ -281,6 +290,8 @@ impl From<&Packet> for PacketType {
             Packet::Disconnect(_) => PacketType::Disconnect,
             Packet::Subscribe(_) => PacketType::Subscribe,
             Packet::SubAck(_) => PacketType::SubAck,
+            Packet::Unsubscribe(_) => PacketType::Unsubscribe,
+            Packet::UnsubAck(_) => PacketType::UnsubAck,
         }
     }
 }
@@ -293,6 +304,7 @@ pub enum ErrorKind {
     UnsupportedQosLevel,
     UnsupportedResponseType,
     UnsupportedReason,
+    InvalidUTF8,
 }
 
 #[derive(Default, Debug)]
@@ -390,6 +402,16 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecErro
                         suback.decode(src)?;
                         Ok(Some((Packet::SubAck(suback), decode_len)))
                     }
+                    PacketType::Unsubscribe => {
+                        let mut unsubscribe = Unsubscribe::default();
+                        unsubscribe.decode(src)?;
+                        Ok(Some((Packet::Unsubscribe(unsubscribe), decode_len)))
+                    }
+                    PacketType::UnsubAck => {
+                        let mut unsuback = UnsubAck::default();
+                        unsuback.decode(src)?;
+                        Ok(Some((Packet::UnsubAck(unsuback), decode_len)))
+                    }
                     _ => Err(MqttCodecError::new("unsupported packet type")),
                 }
             }
@@ -417,6 +439,8 @@ pub fn encode(packet: &Packet, dest: &mut BytesMut) -> Result<(), MqttCodecError
         }
         Packet::Subscribe(s) => s.encode(dest),
         Packet::SubAck(s) => s.encode(dest),
+        Packet::Unsubscribe(u) => u.encode(dest),
+        Packet::UnsubAck(u) => u.encode(dest),
     }?;
     Ok(())
 }

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::LazyLock};
 
 use bytes::{Buf, BufMut, BytesMut};
 
@@ -9,20 +9,19 @@ use crate::{
     Reason, Size,
 };
 
-lazy_static! {
-    static ref SUBACK_SUPPORTED: HashSet<PropertyType> = {
-        let mut supported = HashSet::new();
-        supported.insert(PropertyType::ReasonString);
-        supported.insert(PropertyType::UserProperty);
-        supported
-    };
-    static ref SUBSCRIPTION_SUPPORTED: HashSet<PropertyType> = {
-        let mut supported = HashSet::new();
-        supported.insert(PropertyType::SubscriptionIdentifier);
-        supported.insert(PropertyType::UserProperty);
-        supported
-    };
-}
+static SUBACK_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
+    let mut supported = HashSet::new();
+    supported.insert(PropertyType::ReasonString);
+    supported.insert(PropertyType::UserProperty);
+    supported
+});
+
+static SUBSCRIPTION_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
+    let mut supported = HashSet::new();
+    supported.insert(PropertyType::SubscriptionIdentifier);
+    supported.insert(PropertyType::UserProperty);
+    supported
+});
 
 const VAR_HDR_LEN: u32 = 2;
 const MIN_SUBSCRIPTION_ID: u32 = 1;
@@ -57,11 +56,21 @@ impl TryFrom<u8> for RetainHandling {
     }
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubAck {
     packet_id: u16,
     props: PropertyBundle,
     sub_reason: Vec<Reason>,
+}
+
+impl Default for SubAck {
+    fn default() -> Self {
+        SubAck {
+            packet_id: 0,
+            props: PropertyBundle::new(&SUBACK_PROPS),
+            sub_reason: Vec::new(),
+        }
+    }
 }
 
 impl SubAck {
@@ -122,8 +131,13 @@ impl Decode for SubAck {
 }
 
 impl Encode for SubAck {
-    fn encode(&self, _dest: &mut BytesMut) -> Result<(), MqttCodecError> {
-        todo!()
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+        dest.put_u16(self.packet_id);
+        self.props.encode(dest)?;
+        for reason in &self.sub_reason {
+            dest.put_u8(*reason as u8);
+        }
+        Ok(())
     }
 }
 
@@ -284,7 +298,7 @@ impl Default for Subscribe {
     fn default() -> Self {
         Self {
             packet_id: 0,
-            props: PropertyBundle::new(SUBSCRIPTION_SUPPORTED.clone()),
+            props: PropertyBundle::new(&SUBSCRIPTION_PROPS),
             payload: Vec::new(),
         }
     }
@@ -294,7 +308,7 @@ impl Subscribe {
     pub fn new(packet_id: u16, payload: Vec<SubscriptionFilter>) -> Self {
         Self {
             packet_id,
-            props: PropertyBundle::new(SUBSCRIPTION_SUPPORTED.clone()),
+            props: PropertyBundle::new(&SUBSCRIPTION_PROPS),
             payload,
         }
     }

@@ -3,20 +3,19 @@ use crate::property::{Property, PropertyBundle};
 use crate::{put_utf8, Decode, Encode, MqttCodecError, PropertyType, QoSLevel, Size};
 use bytes::BytesMut;
 use std::collections::HashSet;
+use std::sync::LazyLock;
 
-lazy_static! {
-    static ref SUPPORTED_WILL_PROPS: HashSet<PropertyType> = {
-        let mut set = HashSet::new();
-        set.insert(PropertyType::WillDelay);
-        set.insert(PropertyType::PayloadFormat);
-        set.insert(PropertyType::MessageExpiry);
-        set.insert(PropertyType::ContentType);
-        set.insert(PropertyType::ResponseTopic);
-        set.insert(PropertyType::CorrelationData);
-        set.insert(PropertyType::UserProperty);
-        set
-    };
-}
+static WILL_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
+    let mut set = HashSet::new();
+    set.insert(PropertyType::WillDelay);
+    set.insert(PropertyType::PayloadFormat);
+    set.insert(PropertyType::MessageExpiry);
+    set.insert(PropertyType::ContentType);
+    set.insert(PropertyType::ResponseTopic);
+    set.insert(PropertyType::CorrelationData);
+    set.insert(PropertyType::UserProperty);
+    set
+});
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 /// MQTT Will message. The Will message name comes from last will and
@@ -44,7 +43,7 @@ impl WillMessage {
             retain,
             topic: "".to_string(),
             payload: Vec::new(),
-            props: PropertyBundle::new(SUPPORTED_WILL_PROPS.clone()),
+            props: PropertyBundle::new(&WILL_PROPS),
         }
     }
 

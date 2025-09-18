@@ -265,10 +265,8 @@ impl ClientSession {
     ///
     pub(crate) async fn read_next(&mut self) -> crate::Result<Option<Packet>> {
         self.packet_stream.read().await.map_err(|e| {
-            MqttError::new(
-                &format!("unable to read packet: {e}"),
-                ErrorKind::Transport,
-            )
+            println!("read error: {e}");
+            MqttError::new(&format!("unable to read packet: {e}"), ErrorKind::Transport)
         })
     }
 
@@ -350,8 +348,7 @@ impl ClientSession {
         let mut packet_to_consumer = true;
         match &packet {
             Packet::PingResponse(_pingresp) => {
-                // do not send to consumer
-                packet_to_consumer = !self.state.pingresp;
+                packet_to_consumer = self.state.pingresp;
             }
             Packet::Disconnect(d) => {
                 // TODO handle disconnect - verify shutdown behavior
