@@ -1,5 +1,5 @@
 [package]
-name = "prop-macro"
+name = "vaux-macro"
 version = "0.8.1"
 edition = "2021"
 
@@ -7,6 +7,6 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-syn = "1.0"
+syn = { version = "2.0", features = ["full"] }
 quote = "1.0"
 proc-macro-error = "1.0"

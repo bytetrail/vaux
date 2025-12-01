@@ -24,7 +24,7 @@ static UNSUBSCRIBE_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
     supported
 });
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, vaux_macro::PacketProperties)]
 pub struct UnsubAck {
     packet_id: u16,
     reason_code: Vec<Reason>,
@@ -38,20 +38,6 @@ impl Default for UnsubAck {
             reason_code: Vec::new(),
             props: PropertyBundle::new(&UNSUBACK_PROPS),
         }
-    }
-}
-
-impl PacketProperties for UnsubAck {
-    fn properties(&self) -> &PropertyBundle {
-        &self.props
-    }
-
-    fn properties_mut(&mut self) -> &mut PropertyBundle {
-        &mut self.props
-    }
-
-    fn set_properties(&mut self, props: PropertyBundle) {
-        self.props = props;
     }
 }
 
@@ -162,7 +148,7 @@ impl UnsubAck {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, vaux_macro::PacketProperties)]
 pub struct Unsubscribe {
     pub packet_id: u16,
     pub topics: Vec<String>,
@@ -176,20 +162,6 @@ impl Default for Unsubscribe {
             topics: Vec::new(),
             props: PropertyBundle::new(&UNSUBSCRIBE_PROPS),
         }
-    }
-}
-
-impl PacketProperties for Unsubscribe {
-    fn properties(&self) -> &PropertyBundle {
-        &self.props
-    }
-
-    fn properties_mut(&mut self) -> &mut PropertyBundle {
-        &mut self.props
-    }
-
-    fn set_properties(&mut self, props: PropertyBundle) {
-        self.props = props;
     }
 }
 

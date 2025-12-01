@@ -37,7 +37,7 @@ static CONNECT_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
     set
 });
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, vaux_macro::PacketProperties)]
 pub struct Connect {
     props: PropertyBundle,
     pub clean_start: bool,
@@ -46,18 +46,6 @@ pub struct Connect {
     pub client_id: String,
     pub username: Option<String>,
     pub password: Option<Vec<u8>>,
-}
-
-impl PacketProperties for Connect {
-    fn properties(&self) -> &PropertyBundle {
-        &self.props
-    }
-    fn properties_mut(&mut self) -> &mut PropertyBundle {
-        &mut self.props
-    }
-    fn set_properties(&mut self, props: PropertyBundle) {
-        self.props = props;
-    }
 }
 
 impl Connect {

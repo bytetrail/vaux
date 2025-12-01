@@ -27,6 +27,10 @@ pub use crate::{
 };
 use bytes::BytesMut;
 
+pub trait HeaderSize {
+    fn header_size(&self) -> u32;
+}
+
 pub trait Size {
     fn size(&self) -> u32;
     fn property_size(&self) -> u32;

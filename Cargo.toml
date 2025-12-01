@@ -5,6 +5,6 @@ members = [
     "vaux-mqtt",
     "vaux-client",
     "vaux-broker",
-    "prop-macro",
+    "vaux-macro",
     "vaux",
 ]

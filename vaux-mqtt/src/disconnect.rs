@@ -1,10 +1,11 @@
 use crate::{
     codec::variable_byte_int_size,
     property::{PacketProperties, PropertyBundle},
-    Decode, Encode, FixedHeader, PacketType, PropertyType, Reason, Size,
+    Decode, Encode, FixedHeader, HeaderSize, PacketType, PropertyType, Reason, Size,
 };
 use bytes::{Buf, BufMut};
 use std::{collections::HashSet, sync::LazyLock};
+use vaux_macro::{header_size, PacketSize};
 
 const DEFAULT_DISCONNECT_REMAINING: u32 = 1;
 static DISCONNECT_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
@@ -16,7 +17,10 @@ static DISCONNECT_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
     set
 });
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[header_size(1)]
+pub struct Dummy {}
+
+#[derive(Clone, Debug, PartialEq, Eq, PacketSize, vaux_macro::PacketProperties)]
 pub struct Disconnect {
     pub reason: Reason,
     props: PropertyBundle,
@@ -37,20 +41,6 @@ impl Disconnect {
             reason,
             props: PropertyBundle::new(&DISCONNECT_PROPS),
         }
-    }
-}
-
-impl PacketProperties for Disconnect {
-    fn properties(&self) -> &PropertyBundle {
-        &self.props
-    }
-
-    fn properties_mut(&mut self) -> &mut PropertyBundle {
-        &mut self.props
-    }
-
-    fn set_properties(&mut self, props: PropertyBundle) {
-        self.props = props;
     }
 }
 

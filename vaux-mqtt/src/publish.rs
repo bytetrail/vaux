@@ -19,7 +19,7 @@ static PUBLISH_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
     set
 });
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, vaux_macro::PacketProperties)]
 pub struct Publish {
     pub header: FixedHeader,
     pub topic_name: Option<String>,
@@ -237,19 +237,6 @@ impl Publish {
     pub fn with_payload_format(mut self, format: PayloadFormat) -> Self {
         self.set_payload_format(format);
         self
-    }
-}
-
-impl PacketProperties for Publish {
-    fn properties(&self) -> &PropertyBundle {
-        &self.props
-    }
-    fn properties_mut(&mut self) -> &mut PropertyBundle {
-        &mut self.props
-    }
-
-    fn set_properties(&mut self, properties: PropertyBundle) {
-        self.props = properties;
     }
 }
 
