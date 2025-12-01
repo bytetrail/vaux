@@ -5,7 +5,6 @@ use crate::{
 };
 use bytes::{Buf, BufMut};
 use std::{collections::HashSet, sync::LazyLock};
-use vaux_macro::{header_size, PacketSize};
 
 const DEFAULT_DISCONNECT_REMAINING: u32 = 1;
 static DISCONNECT_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
@@ -17,10 +16,7 @@ static DISCONNECT_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
     set
 });
 
-#[header_size(1)]
-pub struct Dummy {}
-
-#[derive(Clone, Debug, PartialEq, Eq, PacketSize, vaux_macro::PacketProperties)]
+#[derive(Clone, Debug, PartialEq, Eq, vaux_macro::PacketProperties)]
 pub struct Disconnect {
     pub reason: Reason,
     props: PropertyBundle,
