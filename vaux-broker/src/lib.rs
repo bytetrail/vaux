@@ -19,7 +19,8 @@ use uuid::Uuid;
 use vaux_async::stream::{AsyncMqttStream, MqttStream, PacketStream};
 use vaux_mqtt::Packet::PingResponse;
 use vaux_mqtt::{
-    ConnAck, Connect, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, Reason,
+    property::PacketProperties, ConnAck, Connect, Disconnect, FixedHeader, MqttCodecError, Packet,
+    PacketType, Reason,
 };
 
 const INIT_STREAM_BUFFER_SIZE: usize = 4096;

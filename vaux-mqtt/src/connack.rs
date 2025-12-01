@@ -1,10 +1,13 @@
 use crate::codec::Reason;
-use crate::property::{Property, PropertyBundle};
-use crate::{Decode, Encode, PropertyType, Size};
-use crate::{FixedHeader, MqttCodecError, PacketType};
+use crate::property::{PacketProperties, Property, PropertyBundle};
+use crate::{
+    variable_byte_int_size, Decode, Encode, FixedHeader, HeaderSize, MqttCodecError, Packet,
+    PacketType, PropertyType, Size,
+};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashSet;
 use std::sync::LazyLock;
+use vaux_macro::{header_size, payload_size};
 
 static CONNACK_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
     let mut set = HashSet::new();
@@ -28,11 +31,12 @@ static CONNACK_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
     set
 });
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, vaux_macro::PacketProperties)]
+
 pub struct ConnAck {
     pub session_present: bool,
     reason: Reason,
-    properties: PropertyBundle,
+    props: PropertyBundle,
 }
 
 impl ConnAck {
@@ -41,7 +45,7 @@ impl ConnAck {
     }
 
     pub fn session_expiry(&self) -> Option<u32> {
-        self.properties
+        self.props
             .get_property(PropertyType::SessionExpiryInterval)
             .and_then(|p| {
                 if let Property::SessionExpiryInterval(interval) = p {
@@ -54,16 +58,16 @@ impl ConnAck {
 
     pub fn set_session_expiry(&mut self, interval: u32) {
         if interval == 0 {
-            self.properties
+            self.props
                 .clear_property(PropertyType::SessionExpiryInterval);
             return;
         }
-        self.properties
+        self.props
             .set_property(Property::SessionExpiryInterval(interval));
     }
 
     pub fn assigned_client_id(&self) -> Option<String> {
-        self.properties
+        self.props
             .get_property(PropertyType::AssignedClientId)
             .and_then(|p| {
                 if let Property::AssignedClientId(client_id) = p {
@@ -76,16 +80,15 @@ impl ConnAck {
 
     pub fn set_assigned_client_id(&mut self, client_id: Option<String>) {
         if let Some(client_id) = client_id {
-            self.properties
+            self.props
                 .set_property(Property::AssignedClientId(client_id));
         } else {
-            self.properties
-                .clear_property(PropertyType::AssignedClientId);
+            self.props.clear_property(PropertyType::AssignedClientId);
         }
     }
 
     pub fn server_keep_alive(&self) -> Option<u16> {
-        self.properties
+        self.props
             .get_property(PropertyType::KeepAlive)
             .and_then(|p| {
                 if let Property::KeepAlive(keep_alive) = p {
@@ -98,15 +101,14 @@ impl ConnAck {
 
     pub fn set_server_keep_alive(&mut self, keep_alive: u16) {
         if keep_alive == 0 {
-            self.properties.clear_property(PropertyType::KeepAlive);
+            self.props.clear_property(PropertyType::KeepAlive);
             return;
         }
-        self.properties
-            .set_property(Property::KeepAlive(keep_alive));
+        self.props.set_property(Property::KeepAlive(keep_alive));
     }
 
     pub fn receive_max(&self) -> Option<u16> {
-        self.properties
+        self.props
             .get_property(PropertyType::RecvMax)
             .and_then(|p| {
                 if let Property::RecvMax(max) = p {
@@ -127,18 +129,10 @@ impl ConnAck {
     /// max - The maximum number of QoS 1 and QoS 2 messages the session is willing to process.
     pub fn set_receive_max(&mut self, max: u16) {
         if max == 0 {
-            self.properties.clear_property(PropertyType::RecvMax);
+            self.props.clear_property(PropertyType::RecvMax);
             return;
         }
-        self.properties.set_property(Property::RecvMax(max));
-    }
-
-    pub fn properties(&self) -> &PropertyBundle {
-        &self.properties
-    }
-
-    pub fn properties_mut(&mut self) -> &mut PropertyBundle {
-        &mut self.properties
+        self.props.set_property(Property::RecvMax(max));
     }
 }
 
@@ -147,7 +141,7 @@ impl Default for ConnAck {
         ConnAck {
             session_present: false,
             reason: Reason::Success,
-            properties: PropertyBundle::new(&CONNACK_PROPS),
+            props: PropertyBundle::new(&CONNACK_PROPS),
         }
     }
 }
@@ -159,7 +153,7 @@ impl crate::Size for ConnAck {
     }
 
     fn property_size(&self) -> u32 {
-        self.properties.size()
+        self.props.size()
     }
 
     /// Implementation of PacketSize. CONNACK packet does not have a payload.
@@ -174,7 +168,7 @@ impl Decode for ConnAck {
         if let Ok(reason) = src.get_u8().try_into() {
             self.reason = reason;
         }
-        self.properties.decode(src)?;
+        self.props.decode(src)?;
         Ok(())
     }
 }
@@ -188,7 +182,7 @@ impl Encode for ConnAck {
         dest.put_u8(self.reason as u8);
         // reserve capacity to avoid intermediate reallocation
         dest.reserve(self.property_size() as usize);
-        self.properties.encode(dest)?;
+        self.props.encode(dest)?;
         Ok(())
     }
 }
