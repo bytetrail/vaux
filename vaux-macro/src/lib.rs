@@ -1,6 +1,11 @@
+mod header;
+mod size;
+
 use proc_macro::{self, TokenStream};
 use quote::quote;
 use syn::{parse_macro_input, ItemStruct};
+
+use crate::size::field_size;
 
 #[proc_macro_attribute]
 pub fn payload_size(attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -116,4 +121,67 @@ pub fn packet_size_derive(input: TokenStream) -> TokenStream {
     };
 
     packet_size_impl.into()
+}
+
+#[proc_macro_attribute]
+pub fn PacketHeader(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as syn::ItemStruct);
+    let struct_name = &input.ident;
+    // get the visibility of the struct
+    let visibility = &input.vis;
+    // parse the attribute to get the packet type
+    let packet_type: syn::LitStr = parse_macro_input!(attr as syn::LitStr);
+    let packet_type_str = packet_type.value();
+    // generate the new struct name
+    let struct_name_str = format!("{}Header", struct_name);
+    let struct_name_ident = syn::Ident::new(&struct_name_str, struct_name.span());
+
+    let gen = quote! {
+        #input
+
+        #visibility type #struct_name_ident = crate::header::VariableHeader<#struct_name>;
+    };
+    gen.into()
+}
+
+#[proc_macro_derive(Size)]
+pub fn derive_size(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    let name = &input.ident;
+
+    // ensure that the struct has named fields
+    let fields = match &input.fields {
+        syn::Fields::Named(fields_named) => &fields_named.named,
+        _ => {
+            return compile_error("Size can only be derived for structs with named fields");
+        }
+    };
+
+    // Generate size calculation for each field
+    let mut field_size_calculations = Vec::new();
+    for field in fields {
+        let field_size_calc = field_size(field);
+        field_size_calculations.push(field_size_calc);
+    }
+
+    let expanded = quote! {
+        impl crate::Size for #name {
+            fn size(&self) -> u32 {
+                let mut total_size = 0;
+
+                #(#field_size_calculations)*
+
+                total_size
+            }
+        }
+    };
+    TokenStream::from(expanded)
+}
+
+/// Generates a compile-time error with the given message.
+pub(crate) fn compile_error(message: &str) -> TokenStream {
+    let error_message = format!("Compile-time error in vaux-macro: {}", message);
+    TokenStream::from(quote! {
+        compile_error!(#error_message);
+    })
 }
