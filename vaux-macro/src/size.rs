@@ -1,16 +1,53 @@
-use proc_macro::{self, TokenStream};
+use crate::compile_error2;
 use quote::quote;
-use syn::{parse_macro_input, ItemStruct};
 
 pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_name = &field.ident;
     let field_type = &field.ty;
-    let _attrs = &field.attrs;
+    let attrs = &field.attrs;
+    // Check for special types first
+    let is_property: bool = crate::has_attribute(attrs, "property");
+    if is_property {
+        compile_error2(&format!(
+            "Property attribute found for field {:?}",
+            field_name
+        ));
+    }
     let field_calc = match field_type {
         syn::Type::Path(type_path) => {
             let segment = &type_path.path.segments.last().unwrap().ident;
             match segment.to_string().as_str() {
-                "String" => size_for_string(field_name),
+                "Vec" => {
+                    let generic_type = match &type_path.path.segments.last().unwrap().arguments {
+                        syn::PathArguments::AngleBracketed(args) => args.args.first().unwrap(),
+                        _ => {
+                            return compile_error2("Unsupported Vec type for Size derive");
+                        }
+                    };
+                    match generic_type {
+                        syn::GenericArgument::Type(syn::Type::Path(vec_inner_type_path)) => {
+                            let vec_inner_segment =
+                                &vec_inner_type_path.path.segments.last().unwrap().ident;
+                            if vec_inner_segment == "u8" {
+                                size_for_vec(field_name, type_path, is_property, false)
+                            } else {
+                                return compile_error2(
+                                    "Unsupported Vec inner type for Size derive",
+                                );
+                            }
+                        }
+                        _ => {
+                            return compile_error2("Unsupported Vec inner type for Size derive");
+                        }
+                    }
+                }
+                "String" => {
+                    if is_property {
+                        size_for_string_property(field_name, false)
+                    } else {
+                        size_for_string(field_name)
+                    }
+                }
                 "Option" => {
                     let generic_type = match &type_path.path.segments.last().unwrap().arguments {
                         syn::PathArguments::AngleBracketed(args) => args.args.first().unwrap(),
@@ -23,10 +60,27 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
                             let inner_segment =
                                 &inner_type_path.path.segments.last().unwrap().ident;
                             match inner_segment.to_string().as_str() {
-                                "String" => size_for_option_string(field_name),
+                                "Vec" => {
+                                    size_for_vec(field_name, inner_type_path, is_property, true)
+                                }
+                                "String" => {
+                                    if is_property {
+                                        size_for_string_property(field_name, true)
+                                    } else {
+                                        size_for_option_string(field_name)
+                                    }
+                                }
                                 type_name => {
                                     if is_primitive_type(type_name) {
-                                        size_for_primitive_optional(field_name, type_name)
+                                        if is_property {
+                                            compile_error2(&format!(
+                                                "Field {:?} is a primitive property",
+                                                field_name,
+                                            ));
+                                            size_for_primitive_property(field_name, type_name, true)
+                                        } else {
+                                            size_for_primitive_optional(field_name, type_name)
+                                        }
                                     } else {
                                         compile_error2(&format!(
                                             "Unsupported Option inner type '{}' for Size derive",
@@ -39,17 +93,87 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
                         _ => compile_error2("Unsupported Option type for Size derive"),
                     }
                 }
-                _ => size_for_primitive(field_type),
+                type_name => {
+                    if is_primitive_type(type_name) {
+                        if is_property {
+                            size_for_primitive_property(field_name, type_name, false)
+                        } else {
+                            size_for_primitive(field_type)
+                        }
+                    } else {
+                        size_for_size(field_name)
+                    }
+                }
             }
         }
         _ => compile_error2("Unsupported field type for Size derive"),
     };
-
     field_calc
+}
+
+fn size_for_size(field_name: &Option<syn::Ident>) -> proc_macro2::TokenStream {
+    let field = field_name.as_ref().unwrap();
+    quote! {
+        total_size += self.#field.size();
+    }
+}
+
+fn size_for_string_property(
+    field_name: &Option<syn::Ident>,
+    optional: bool,
+) -> proc_macro2::TokenStream {
+    let field = field_name.as_ref().unwrap();
+
+    if optional {
+        quote! {
+                if let Some(field) = &self.#field {
+                    let value_size = field.len() as u32 + 2;
+                    property_size += 1 + value_size; // MQTT string length prefix
+                }
+        }
+    } else {
+        quote! {
+            let value_size = self.#field.len() as u32 + 2;
+            property_size += 1 + value_size; // MQTT string length prefix
+        }
+    }
+}
+
+fn size_for_primitive_property(
+    field_name: &Option<syn::Ident>,
+    field_type: &str,
+    optional: bool,
+) -> proc_macro2::TokenStream {
+    let field = field_name.as_ref().unwrap();
+    let size_calc = match field_type {
+        "u8" | "i8" | "bool" => quote! {
+            property_size += 1 + 1;
+        },
+        "u16" | "i16" => quote! {
+            property_size += 1 + 2;
+        },
+        "u32" | "i32" | "char" => quote! {
+            property_size += 1 + 4;
+        },
+        _ => compile_error2(&format!(
+            "Unsupported primitive type '{}' for Size derive",
+            field_type
+        )),
+    };
+    if optional {
+        quote! {
+                if let Some(_) = &self.#field {
+                    #size_calc
+                }
+        }
+    } else {
+        quote! { #size_calc }
+    }
 }
 
 fn size_for_option_string(field_name: &Option<syn::Ident>) -> proc_macro2::TokenStream {
     let field = field_name.as_ref().unwrap();
+
     quote! {
         if let Some(value) = &self.#field {
             total_size += 2; // MQTT string length prefix
@@ -66,11 +190,33 @@ fn size_for_string(field_name: &Option<syn::Ident>) -> proc_macro2::TokenStream 
     }
 }
 
+fn property_size_for_vec_u8(
+    field_name: &Option<syn::Ident>,
+    optional: bool,
+) -> proc_macro2::TokenStream {
+    let field = field_name.as_ref().unwrap();
+
+    if optional {
+        quote! {
+            if let Some(field) = &self.#field {
+                if !field.is_empty() {
+                    property_size += 3 + field.len() as u32;
+                }
+            }
+        }
+    } else {
+        quote! {
+            if !self.#field.is_empty() {
+                property_size += 3 + self.#field.len() as u32;
+            }
+        }
+    }
+}
+
 fn size_for_vec_u8(field_name: &Option<syn::Ident>) -> proc_macro2::TokenStream {
     let field = field_name.as_ref().unwrap();
     quote! {
-        total_size += 2; // MQTT binary length prefix
-        total_size += self.#field.len() as u32;
+        total_size += 2 + self.#field.len() as u32;
     }
 }
 
@@ -98,6 +244,37 @@ fn size_for_primitive(field_type: &syn::Type) -> proc_macro2::TokenStream {
     }
 }
 
+fn size_for_vec(
+    field_name: &Option<syn::Ident>,
+    type_path: &syn::TypePath,
+    is_property: bool,
+    optional: bool,
+) -> proc_macro2::TokenStream {
+    let vec_generic_type = match &type_path.path.segments.last().unwrap().arguments {
+        syn::PathArguments::AngleBracketed(args) => args.args.first().unwrap(),
+        _ => {
+            return compile_error2("Unsupported Vec type for Size derive");
+        }
+    };
+    match vec_generic_type {
+        syn::GenericArgument::Type(syn::Type::Path(vec_inner_type_path)) => {
+            let vec_inner_segment = &vec_inner_type_path.path.segments.last().unwrap().ident;
+            if vec_inner_segment == "u8" {
+                if is_property {
+                    property_size_for_vec_u8(field_name, optional)
+                } else {
+                    size_for_vec_u8(field_name)
+                }
+            } else {
+                return compile_error2("Unsupported Vec inner type for Size derive");
+            }
+        }
+        _ => {
+            return compile_error2("Unsupported Vec inner type for Size derive");
+        }
+    }
+}
+
 fn size_for_primitive_internal(field_type: &str) -> proc_macro2::TokenStream {
     match field_type {
         "u8" | "i8" | "bool" => {
@@ -120,32 +297,6 @@ fn size_for_primitive_internal(field_type: &str) -> proc_macro2::TokenStream {
             field_type
         )),
     }
-}
-
-// Helper for compile_error in quote context
-fn compile_error2(message: &str) -> proc_macro2::TokenStream {
-    let error_message = format!("Compile-time error in vaux-macro: {}", message);
-    quote! {
-        compile_error!(#error_message);
-    }
-}
-
-/// Filters out attributes whose path matches any in the exclude list. We use this
-/// to remove our custom attributes before passing the struct to other macros.
-fn filter_attributes(attrs: &Vec<syn::Attribute>, exclude: &[&str]) -> Vec<syn::Attribute> {
-    attrs
-        .iter()
-        .filter(|attr| !exclude.iter().any(|r| attr.path().is_ident(r)))
-        .cloned()
-        .collect()
-}
-
-/// Checks if the given attribute name exists in the list of attributes. This is used to
-/// determine if a specific custom attribute is present on a struct or field. In the Size
-/// macro, we might use this to check for attributes that specify a specific type for size
-///  calculation.
-fn has_attribute(attrs: &Vec<syn::Attribute>, name: &str) -> bool {
-    attrs.iter().any(|attr| attr.path().is_ident(name))
 }
 
 /// Checks if the given type name is a supported primitive type for size calculation.
@@ -196,8 +347,7 @@ mod tests {
         let field_name = Some(syn::Ident::new("data", proc_macro2::Span::call_site()));
         let tokens = size_for_vec_u8(&field_name);
         let expected = quote! {
-            total_size += 2; // MQTT binary length prefix
-            total_size += self.data.len() as u32;
+            total_size += 2 + self.data.len() as u32;
         };
         assert_eq!(tokens.to_string(), expected.to_string());
     }
@@ -205,7 +355,7 @@ mod tests {
     #[test]
     fn test_size_for_u8_primitive() {
         // u8
-        let field_name = Some(syn::Ident::new("test_u8", proc_macro2::Span::call_site()));
+        let _field_name = Some(syn::Ident::new("test_u8", proc_macro2::Span::call_site()));
         let field_type = syn::parse_str::<syn::Type>("u8").unwrap();
         let tokens = size_for_primitive(&field_type);
         let expected = quote! {
@@ -217,7 +367,7 @@ mod tests {
     #[test]
     fn test_size_for_u16_primitive() {
         // u16
-        let field_name = Some(syn::Ident::new("test_u16", proc_macro2::Span::call_site()));
+        let _field_name = Some(syn::Ident::new("test_u16", proc_macro2::Span::call_site()));
         let field_type = syn::parse_str::<syn::Type>("u16").unwrap();
         let tokens = size_for_primitive(&field_type);
         let expected = quote! {
@@ -229,7 +379,7 @@ mod tests {
     #[test]
     fn test_size_for_u32_primitive() {
         // u32
-        let field_name = Some(syn::Ident::new("test_u32", proc_macro2::Span::call_site()));
+        let _field_name = Some(syn::Ident::new("test_u32", proc_macro2::Span::call_site()));
         let field_type = syn::parse_str::<syn::Type>("u32").unwrap();
         let tokens = size_for_primitive(&field_type);
         let expected = quote! {

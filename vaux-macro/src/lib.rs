@@ -1,157 +1,70 @@
 mod header;
 mod size;
 
+use crate::size::field_size;
 use proc_macro::{self, TokenStream};
 use quote::quote;
 use syn::{parse_macro_input, ItemStruct};
 
-use crate::size::field_size;
-
 #[proc_macro_attribute]
-pub fn payload_size(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as ItemStruct);
-    let struct_name = &input.ident;
-    let payload_size = attr
-        .into_iter()
-        .next()
-        .expect("Expected a payload size argument");
+pub fn packet_header(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let property_codec_impl = derive_codec_property_size(item.clone());
+    //let property_codec_impl = quote! {};
+    //let property_codec_impl = TokenStream::from(property_codec_impl);
+    let header_codec_impl = derive_encode_size(item.clone());
 
-    let payload_size_str = match payload_size {
-        proc_macro::TokenTree::Literal(lit) => lit.to_string(),
-        _ => panic!("Expected a literal for payload size"),
-    };
-
-    let payload_size_value: u32 = payload_size_str
-        .parse()
-        .expect("Invalid payload size value");
-    let payload_size_impl = quote! {
-
-        impl PayloadSize for #struct_name {
-             fn size(&self) -> u32 {
-                 #payload_size_value
-             }
-        }
-    };
-
-    let expanded = quote! {
-        #input
-
-        #payload_size_impl
-    };
-
-    TokenStream::from(expanded)
-}
-
-#[proc_macro_attribute]
-pub fn header_size(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(item as ItemStruct);
-    let struct_name = &input.ident;
-    let header_size = attr
-        .into_iter()
-        .next()
-        .expect("Expected a header size argument");
-    let header_size_str = match header_size {
-        proc_macro::TokenTree::Literal(lit) => lit.to_string(),
-        _ => panic!("Expected a literal for header size"),
-    };
-    let header_size_value: u32 = header_size_str.parse().expect("Invalid header size value");
-    let header_size_impl = quote! {
-
-        impl HeaderSize for #struct_name {
-             fn header_size(&self) -> u32 {
-                 #header_size_value
-             }
-        }
-
-    };
-
-    let expanded = quote! {
-        #input
-
-        #header_size_impl
-    };
-
-    TokenStream::from(expanded)
-}
-
-#[proc_macro_derive(PacketProperties)]
-pub fn packet_properties_derive(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as ItemStruct);
-    let struct_name = &input.ident;
-
-    let packet_properties_impl = quote! {
-        impl PacketProperties for #struct_name {
-            fn properties(&self) -> &PropertyBundle {
-                &self.props
-            }
-
-            fn properties_mut(&mut self) -> &mut PropertyBundle {
-                &mut self.props
-            }
-
-            fn set_properties(&mut self, props: PropertyBundle) {
-                self.props = props;
-            }
-        }
-    };
-    packet_properties_impl.into()
-}
-
-#[proc_macro_derive(PacketSize)]
-pub fn packet_size_derive(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as ItemStruct);
-    let struct_name = &input.ident;
-
-    let packet_size_impl = quote! {
-        impl PacketSize for #struct_name {
-            fn packet_size(&self) -> u32 {
-                let property_remaining = self.property_size();
-                let len = variable_byte_int_size(property_remaining);
-                self.header_size() + len + property_remaining + self.payload_size()
-            }
-
-            fn property_size(&self) -> u32 {
-                self.props.size()
-            }
-
-            fn payload_size(&self) -> u32 {
-                PayloadSize::size(self)
-            }
-        }
-    };
-
-    packet_size_impl.into()
-}
-
-#[proc_macro_attribute]
-pub fn PacketHeader(attr: TokenStream, item: TokenStream) -> TokenStream {
+    // filter out the property attribute from the struct fields
     let input = parse_macro_input!(item as syn::ItemStruct);
+    let struct_attrs = filter_attributes(&input.attrs, &["packet_header"]);
     let struct_name = &input.ident;
     // get the visibility of the struct
     let visibility = &input.vis;
-    // parse the attribute to get the packet type
-    let packet_type: syn::LitStr = parse_macro_input!(attr as syn::LitStr);
-    let packet_type_str = packet_type.value();
-    // generate the new struct name
-    let struct_name_str = format!("{}Header", struct_name);
-    let struct_name_ident = syn::Ident::new(&struct_name_str, struct_name.span());
 
-    let gen = quote! {
-        #input
+    let mut struct_fields = quote! {};
+    // process the fields
+    match &input.fields {
+        syn::Fields::Named(fields_named) => {
+            for field in &fields_named.named {
+                // filter out the property attribute
+                let field_attrs = filter_attributes(&field.attrs, &["property"]);
+                let field_vis = &field.vis;
+                let field_name = field.ident.as_ref().expect("expected field name");
+                let field_ty = &field.ty;
 
-        #visibility type #struct_name_ident = crate::header::VariableHeader<#struct_name>;
+                struct_fields = quote! {
+                    #struct_fields
+                    #(#field_attrs)*
+                    #field_vis #field_name: #field_ty,
+                };
+            }
+        }
+        _ => {
+            return compile_error("packet_header can only be applied to structs with named fields");
+        }
     };
-    gen.into()
+
+    let expanded = quote! {
+        #(#struct_attrs)*
+        #visibility struct #struct_name {
+            #struct_fields
+        }
+    };
+
+    TokenStream::from(expanded)
+        .into_iter()
+        .chain(property_codec_impl)
+        .chain(header_codec_impl)
+        .collect()
 }
 
-#[proc_macro_derive(Size)]
-pub fn derive_size(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(PropertyCodecSize, attributes(property))]
+pub fn derive_codec_property_size(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let name = &input.ident;
 
     // ensure that the struct has named fields
     let fields = match &input.fields {
-        syn::Fields::Named(fields_named) => &fields_named.named,
+        syn::Fields::Named(fields_named) => fields_named,
         _ => {
             return compile_error("Size can only be derived for structs with named fields");
         }
@@ -159,23 +72,61 @@ pub fn derive_size(input: TokenStream) -> TokenStream {
 
     // Generate size calculation for each field
     let mut field_size_calculations = Vec::new();
-    for field in fields {
-        let field_size_calc = field_size(field);
-        field_size_calculations.push(field_size_calc);
+    for field in &fields.named {
+        if has_attribute(&field.attrs, "property") {
+            let field_size_calc = field_size(field);
+            field_size_calculations.push(field_size_calc);
+            continue;
+        }
     }
 
-    let expanded = quote! {
-        impl crate::Size for #name {
-            fn size(&self) -> u32 {
-                let mut total_size = 0;
+    let size_wrapper = quote! {
+        impl crate::PropertyCodecSize for #name {
+            fn property_size(&self) -> u32 {
+                let mut property_size = 0;
 
                 #(#field_size_calculations)*
 
-                total_size
+                property_size
             }
         }
     };
-    TokenStream::from(expanded)
+    TokenStream::from(size_wrapper)
+}
+
+#[proc_macro_derive(HeaderCodecSize)]
+pub fn derive_encode_size(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    let name = &input.ident;
+
+    // ensure that the struct has named fields
+    let fields = match &input.fields {
+        syn::Fields::Named(fields_named) => fields_named,
+        _ => {
+            return compile_error("Size can only be derived for structs with named fields");
+        }
+    };
+    // Generate size calculation for each field
+    let mut field_size_calculations = Vec::new();
+    for field in &fields.named {
+        if !has_attribute(&field.attrs, "property") {
+            let field_size_calc = field_size(field);
+            field_size_calculations.push(field_size_calc);
+            continue;
+        }
+    }
+
+    let size_wrapper = quote! {
+        impl crate::HeaderCodecSize for #name {
+            fn header_size(&self) -> u32 {
+                let mut total_size = 0;
+                #(#field_size_calculations)*
+                let property_size = self.property_size();
+                total_size + property_size + crate::variable_byte_int_size(property_size)
+            }
+        }
+    };
+    TokenStream::from(size_wrapper)
 }
 
 /// Generates a compile-time error with the given message.
@@ -184,4 +135,41 @@ pub(crate) fn compile_error(message: &str) -> TokenStream {
     TokenStream::from(quote! {
         compile_error!(#error_message);
     })
+}
+
+pub(crate) fn compile_error2(message: &str) -> proc_macro2::TokenStream {
+    let error_message = format!("Compile-time error in vaux-macro: {}", message);
+    quote! {
+        compile_error!(#error_message);
+    }
+}
+
+/// Checks if the given attribute name exists in the list of attributes. This is used to
+/// determine if a specific custom attribute is present on a struct or field. In the Size
+/// macro, we might use this to check for attributes that specify a specific type for size
+///  calculation.
+fn has_attribute(attrs: &[syn::Attribute], name: &str) -> bool {
+    attrs.iter().any(|attr| attr.path().is_ident(name))
+}
+
+/// Checks if any of the named fields has the specified attribute.
+pub(crate) fn struct_has_attribute(fields: &syn::FieldsNamed, attribute_name: &str) -> bool {
+    for field in &fields.named {
+        for attr in &field.attrs {
+            if attr.path().is_ident(attribute_name) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Filters out attributes whose path matches any in the exclude list. We use this
+/// to remove our custom attributes before passing the struct to other macros.
+fn filter_attributes(attrs: &Vec<syn::Attribute>, exclude: &[&str]) -> Vec<syn::Attribute> {
+    attrs
+        .iter()
+        .filter(|attr| !exclude.iter().any(|r| attr.path().is_ident(r)))
+        .cloned()
+        .collect()
 }
