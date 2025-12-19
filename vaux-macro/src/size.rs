@@ -5,14 +5,7 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_name = &field.ident;
     let field_type = &field.ty;
     let attrs = &field.attrs;
-    // Check for special types first
     let is_property: bool = crate::has_attribute(attrs, "property");
-    if is_property {
-        compile_error2(&format!(
-            "Property attribute found for field {:?}",
-            field_name
-        ));
-    }
     let field_calc = match field_type {
         syn::Type::Path(type_path) => {
             let segment = &type_path.path.segments.last().unwrap().ident;

@@ -1,3 +1,4 @@
+mod encode;
 mod header;
 mod size;
 
@@ -9,9 +10,9 @@ use syn::{parse_macro_input, ItemStruct};
 #[proc_macro_attribute]
 pub fn packet_header(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let property_codec_impl = derive_codec_property_size(item.clone());
-    //let property_codec_impl = quote! {};
-    //let property_codec_impl = TokenStream::from(property_codec_impl);
-    let header_codec_impl = derive_encode_size(item.clone());
+    let header_codec_impl = derive_header_codec_size(item.clone());
+    let encode_impl = derive_encode(item.clone());
+    let decode_impl = derive_decode(item.clone());
 
     // filter out the property attribute from the struct fields
     let input = parse_macro_input!(item as syn::ItemStruct);
@@ -54,6 +55,8 @@ pub fn packet_header(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .into_iter()
         .chain(property_codec_impl)
         .chain(header_codec_impl)
+        .chain(encode_impl)
+        .chain(decode_impl)
         .collect()
 }
 
@@ -95,7 +98,7 @@ pub fn derive_codec_property_size(input: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_derive(HeaderCodecSize)]
-pub fn derive_encode_size(input: TokenStream) -> TokenStream {
+pub fn derive_header_codec_size(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let name = &input.ident;
 
@@ -127,6 +130,101 @@ pub fn derive_encode_size(input: TokenStream) -> TokenStream {
         }
     };
     TokenStream::from(size_wrapper)
+}
+
+#[proc_macro_derive(Encode, attributes(codec_as))]
+pub fn derive_encode(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    let struct_name = &input.ident;
+    // ensure that the struct has named fields
+    let fields = match &input.fields {
+        syn::Fields::Named(fields_named) => fields_named,
+        _ => {
+            return compile_error("Encode can only be derived for structs with named fields");
+        }
+    };
+    // check if any field has the property attribute
+    let has_properties = struct_has_attribute(
+        match &input.fields {
+            syn::Fields::Named(fields_named) => fields_named,
+            _ => {
+                return compile_error("Encode can only be derived for structs with named fields");
+            }
+        },
+        "property",
+    );
+    // encode the non-property fields first, then the property fields if any
+    let mut encoded = fields
+        .named
+        .iter()
+        .filter_map(|f| {
+            if !has_attribute(&f.attrs, "property") {
+                Some(encode::encode_field(f))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    if has_properties {
+        // encode the property length
+        let property_length_encoding = quote! {
+            let property_size = self.property_size();
+            codec::put_var_u32(property_size, dest);
+        };
+        encoded.push(property_length_encoding);
+        let mut encoded_properties = fields
+            .named
+            .iter()
+            .filter_map(|f| {
+                if has_attribute(&f.attrs, "property") {
+                    Some(encode::encode_field(f))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        encoded.append(&mut encoded_properties);
+    }
+
+    let encode_impl = quote! {
+        impl Encode for #struct_name {
+            fn encode(&mut self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
+                use bytes::{BufMut, BytesMut};
+
+                #(#encoded)*
+
+                Ok(())
+            }
+        }
+    };
+
+    TokenStream::from(encode_impl)
+}
+
+#[proc_macro_derive(Decode, attributes(codec_as))]
+pub fn derive_decode(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    let struct_name = &input.ident;
+    // ensure that the struct has named fields
+    let _fields = match &input.fields {
+        syn::Fields::Named(fields_named) => fields_named,
+        _ => {
+            return compile_error("Decode can only be derived for structs with named fields");
+        }
+    };
+
+    let decode_impl = quote! {
+        impl Decode for #struct_name {
+
+            fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
+                use bytes::{BufMut, BytesMut};
+                Ok(())
+            }
+        }
+    };
+
+    TokenStream::from(decode_impl)
 }
 
 /// Generates a compile-time error with the given message.
@@ -162,6 +260,15 @@ pub(crate) fn struct_has_attribute(fields: &syn::FieldsNamed, attribute_name: &s
         }
     }
     false
+}
+
+/// Checks if the given type name is a supported primitive type for size calculation.
+/// Currently supports u8, i8, bool, u16, i16, u32, i32, and char.
+pub(crate) fn is_primitive_type(type_name: &str) -> bool {
+    matches!(
+        type_name,
+        "u8" | "i8" | "bool" | "u16" | "i16" | "u32" | "i32" | "char"
+    )
 }
 
 /// Filters out attributes whose path matches any in the exclude list. We use this
