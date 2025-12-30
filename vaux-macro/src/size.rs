@@ -6,33 +6,26 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_type = &field.ty;
     let attrs = &field.attrs;
     let is_property: bool = crate::has_attribute(attrs, "property");
+    let codec_as_type = crate::codec_as(attrs);
     let field_calc = match field_type {
         syn::Type::Path(type_path) => {
             let segment = &type_path.path.segments.last().unwrap().ident;
             match segment.to_string().as_str() {
                 "Vec" => {
-                    let generic_type = match &type_path.path.segments.last().unwrap().arguments {
-                        syn::PathArguments::AngleBracketed(args) => args.args.first().unwrap(),
-                        _ => {
-                            return compile_error2("Unsupported Vec type for Size derive");
-                        }
-                    };
-                    match generic_type {
-                        syn::GenericArgument::Type(syn::Type::Path(vec_inner_type_path)) => {
-                            let vec_inner_segment =
-                                &vec_inner_type_path.path.segments.last().unwrap().ident;
-                            if vec_inner_segment == "u8" {
-                                size_for_vec(field_name, type_path, is_property, false)
-                            } else {
-                                return compile_error2(
-                                    "Unsupported Vec inner type for Size derive",
-                                );
-                            }
-                        }
-                        _ => {
-                            return compile_error2("Unsupported Vec inner type for Size derive");
-                        }
-                    }
+                    // let generic_type = match &type_path.path.segments.last().unwrap().arguments {
+                    //     syn::PathArguments::AngleBracketed(args) => args.args.first().unwrap(),
+                    //     _ => {
+                    //         return compile_error2("Unsupported Vec type for Size derive");
+                    //     }
+                    // };
+                    // match generic_type {
+                    //     syn::GenericArgument::Type(syn::Type::Path(vec_inner_type_path)) => {
+                    size_for_vec(field_name, type_path, is_property, false)
+                    //                        }
+                    // _ => {
+                    //     return compile_error2("Unsupported Vec inner type for Size derive");
+                    // }
+                    //                    }
                 }
                 "String" => {
                     if is_property {
@@ -75,10 +68,7 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
                                             size_for_primitive_optional(field_name, type_name)
                                         }
                                     } else {
-                                        compile_error2(&format!(
-                                            "Unsupported Option inner type '{}' for Size derive",
-                                            type_name
-                                        ))
+                                        size_for_codec_size(field_name, is_property, true)
                                     }
                                 }
                             }
@@ -94,7 +84,7 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
                             size_for_primitive(field_type)
                         }
                     } else {
-                        size_for_size(field_name)
+                        size_for_codec_size(field_name, is_property, false)
                     }
                 }
             }
@@ -104,10 +94,33 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
     field_calc
 }
 
-fn size_for_size(field_name: &Option<syn::Ident>) -> proc_macro2::TokenStream {
+fn size_for_codec_size(
+    field_name: &Option<syn::Ident>,
+    is_property: bool,
+    optional: bool,
+) -> proc_macro2::TokenStream {
     let field = field_name.as_ref().unwrap();
-    quote! {
-        total_size += self.#field.size();
+
+    let prefix = if is_property {
+        quote! {
+            property_size += 1
+        }
+    } else {
+        quote! {
+            total_size += 0
+        }
+    };
+
+    if optional {
+        quote! {
+            if let Some(field) = &self.#field {
+                #prefix + field.codec_size();
+            }
+        }
+    } else {
+        quote! {
+            #prefix + self.#field.codec_size();
+        }
     }
 }
 
@@ -183,33 +196,69 @@ fn size_for_string(field_name: &Option<syn::Ident>) -> proc_macro2::TokenStream 
     }
 }
 
-fn property_size_for_vec_u8(
+fn size_for_vec(
     field_name: &Option<syn::Ident>,
+    type_path: &syn::TypePath,
+    is_property: bool,
     optional: bool,
 ) -> proc_macro2::TokenStream {
+    let field_mult = match &type_path.path.segments.last().unwrap().arguments {
+        syn::PathArguments::AngleBracketed(args) => match args.args.first().unwrap() {
+            syn::GenericArgument::Type(syn::Type::Path(vec_inner_type_path)) => {
+                match vec_inner_type_path
+                    .path
+                    .segments
+                    .last()
+                    .unwrap()
+                    .ident
+                    .to_string()
+                    .as_str()
+                {
+                    "u8" | "i8" => quote! {},
+                    "u16" | "i16" => quote! {  * 2 },
+                    "u32" | "i32" | "char" => quote! { * 4 },
+                    _ => {
+                        quote! {
+                             * #field_name.codec_size()
+                        }
+                    }
+                }
+            }
+            _ => {
+                return compile_error2("Unsupported Vec type for Size derive");
+            }
+        },
+        _ => {
+            return compile_error2("Unsupported Vec type for Size derive");
+        }
+    };
+
     let field = field_name.as_ref().unwrap();
+
+    let prefix = if is_property {
+        quote! {
+            property_size += 1
+        }
+    } else {
+        quote! {
+            total_size = total_size
+        }
+    };
 
     if optional {
         quote! {
             if let Some(field) = &self.#field {
                 if !field.is_empty() {
-                    property_size += 3 + field.len() as u32;
+                    #prefix + 2 + field.len() as u32 #field_mult;
                 }
             }
         }
     } else {
         quote! {
             if !self.#field.is_empty() {
-                property_size += 3 + self.#field.len() as u32;
+                #prefix + 2 + self.#field.len() as u32 #field_mult;
             }
         }
-    }
-}
-
-fn size_for_vec_u8(field_name: &Option<syn::Ident>) -> proc_macro2::TokenStream {
-    let field = field_name.as_ref().unwrap();
-    quote! {
-        total_size += 2 + self.#field.len() as u32;
     }
 }
 
@@ -234,37 +283,6 @@ fn size_for_primitive(field_type: &syn::Type) -> proc_macro2::TokenStream {
             size_for_primitive_internal(segment.to_string().as_str())
         }
         _ => compile_error2("Unsupported field type for Size derive"),
-    }
-}
-
-fn size_for_vec(
-    field_name: &Option<syn::Ident>,
-    type_path: &syn::TypePath,
-    is_property: bool,
-    optional: bool,
-) -> proc_macro2::TokenStream {
-    let vec_generic_type = match &type_path.path.segments.last().unwrap().arguments {
-        syn::PathArguments::AngleBracketed(args) => args.args.first().unwrap(),
-        _ => {
-            return compile_error2("Unsupported Vec type for Size derive");
-        }
-    };
-    match vec_generic_type {
-        syn::GenericArgument::Type(syn::Type::Path(vec_inner_type_path)) => {
-            let vec_inner_segment = &vec_inner_type_path.path.segments.last().unwrap().ident;
-            if vec_inner_segment == "u8" {
-                if is_property {
-                    property_size_for_vec_u8(field_name, optional)
-                } else {
-                    size_for_vec_u8(field_name)
-                }
-            } else {
-                return compile_error2("Unsupported Vec inner type for Size derive");
-            }
-        }
-        _ => {
-            return compile_error2("Unsupported Vec inner type for Size derive");
-        }
     }
 }
 
@@ -338,9 +356,14 @@ mod tests {
     #[test]
     fn test_size_for_vec_u8() {
         let field_name = Some(syn::Ident::new("data", proc_macro2::Span::call_site()));
-        let tokens = size_for_vec_u8(&field_name);
+        let tokens = size_for_vec(
+            &field_name,
+            &syn::parse_str::<syn::TypePath>("Vec<u8>").unwrap(),
+            false,
+            false,
+        );
         let expected = quote! {
-            total_size += 2 + self.data.len() as u32;
+            if !self.#field_name.is_empty() { total_size = total_size + 2 + self.data.len() as u32; }
         };
         assert_eq!(tokens.to_string(), expected.to_string());
     }

@@ -1,7 +1,7 @@
-use vaux_macro::{HeaderCodecSize, PropertyCodecSize};
+use vaux_macro::{CodecSize, PropertyCodecSize};
 
-trait HeaderCodecSize {
-    fn header_size(&self) -> u32;
+trait CodecSize {
+    fn codec_size(&self) -> u32;
 }
 
 trait PropertyCodecSize {
@@ -22,19 +22,19 @@ fn variable_byte_int_size(value: u32) -> u32 {
 
 #[test]
 fn test_size_impl_for_string() {
-    #[derive(PropertyCodecSize, HeaderCodecSize)]
+    #[derive(CodecSize)]
     struct TestStruct {
         test_string: String,
     }
     let test_instance = TestStruct {
         test_string: "hello".to_string(),
     };
-    assert_eq!(test_instance.header_size(), 8); // 2 bytes for length + 5 bytes for "hello" + 1 byte for property size wrapper
+    assert_eq!(test_instance.codec_size(), 7); // 2 bytes for length + 5 bytes for "hello"
 }
 
 #[test]
 fn test_size_impl_for_option_string() {
-    #[derive(HeaderCodecSize, PropertyCodecSize)]
+    #[derive(CodecSize, PropertyCodecSize)]
     struct TestStruct {
         optional_string: Option<String>,
     }
@@ -44,13 +44,13 @@ fn test_size_impl_for_option_string() {
     let test_instance_none = TestStruct {
         optional_string: None,
     };
-    assert_eq!(test_instance_some.header_size(), 8); // 2 bytes for length + 5 bytes for "world"
-    assert_eq!(test_instance_none.header_size(), 1); // None should result in size 1 for property size wrapper
+    assert_eq!(test_instance_some.codec_size(), 7); // 2 bytes for length + 5 bytes for "world"
+    assert_eq!(test_instance_none.codec_size(), 0); // None should result in size 0 for codec size
 }
 
 #[test]
 pub fn test_size_impl_for_primitive_types() {
-    #[derive(HeaderCodecSize, PropertyCodecSize)]
+    #[derive(CodecSize)]
     struct TestStruct {
         _a: u8,
         _b: u16,
@@ -69,13 +69,13 @@ pub fn test_size_impl_for_primitive_types() {
         _f: -3,
     };
 
-    let expected_size = 1 + 2 + 4 + 1 + 2 + 4 + 1; // sum of sizes of all fields + property size wrapper
-    assert_eq!(test_instance.header_size(), expected_size);
+    let expected_size = 1 + 2 + 4 + 1 + 2 + 4; // sum of sizes of all fields + property size wrapper
+    assert_eq!(test_instance.codec_size(), expected_size);
 }
 
 #[test]
 fn test_size_impl_for_option_primitive_types() {
-    #[derive(HeaderCodecSize, PropertyCodecSize)]
+    #[derive(CodecSize)]
     struct TestStruct {
         _a: Option<u8>,
         _b: Option<u16>,
@@ -94,14 +94,14 @@ fn test_size_impl_for_option_primitive_types() {
         _c: None,
     };
 
-    let expected_size_some = 1 + 2 + 4 + 1; // sum of sizes of all fields + property size wrapper
-    assert_eq!(test_instance_some.header_size(), expected_size_some);
-    assert_eq!(test_instance_none.header_size(), 1); // None should result in size 1 for property size wrapper
+    let expected_size_some = 1 + 2 + 4; // sum of sizes of all fields
+    assert_eq!(test_instance_some.codec_size(), expected_size_some);
+    assert_eq!(test_instance_none.codec_size(), 0); // None should result in size 0 for codec size
 }
 
 #[test]
 fn test_size_impl_struct() {
-    #[derive(HeaderCodecSize, PropertyCodecSize)]
+    #[derive(CodecSize)]
     struct TestStruct {
         test_string: String,
         optional_string: Option<String>,
@@ -118,6 +118,6 @@ fn test_size_impl_struct() {
         _b: Some(2),
     };
 
-    let expected_size = 7 + 7 + 0 + 1 + 2 + 1; // size of test_string + optional_string + optianl_w_none + _a + _b + property size wrapper
-    assert_eq!(test_instance.header_size(), expected_size);
+    let expected_size = 7 + 7 + 0 + 1 + 2; // size of test_string + optional_string + optianl_w_none + _a + _b
+    assert_eq!(test_instance.codec_size(), expected_size);
 }

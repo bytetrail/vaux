@@ -10,7 +10,7 @@ use syn::{parse_macro_input, ItemStruct};
 #[proc_macro_attribute]
 pub fn packet_header(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let property_codec_impl = derive_codec_property_size(item.clone());
-    let header_codec_impl = derive_header_codec_size(item.clone());
+    let header_codec_impl = derive_codec_size(item.clone());
     let encode_impl = derive_encode(item.clone());
     let decode_impl = derive_decode(item.clone());
 
@@ -97,8 +97,8 @@ pub fn derive_codec_property_size(input: TokenStream) -> TokenStream {
     TokenStream::from(size_wrapper)
 }
 
-#[proc_macro_derive(HeaderCodecSize)]
-pub fn derive_header_codec_size(input: TokenStream) -> TokenStream {
+#[proc_macro_derive(CodecSize, attributes(codec, property))]
+pub fn derive_codec_size(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let name = &input.ident;
 
@@ -109,30 +109,59 @@ pub fn derive_header_codec_size(input: TokenStream) -> TokenStream {
             return compile_error("Size can only be derived for structs with named fields");
         }
     };
-    // Generate size calculation for each field
-    let mut field_size_calculations = Vec::new();
+
+    let has_properties = struct_has_attribute(fields, "property");
+    let mut field_sizes = Vec::new();
+    let mut property_sizes = Vec::new();
     for field in &fields.named {
         if !has_attribute(&field.attrs, "property") {
-            let field_size_calc = field_size(field);
-            field_size_calculations.push(field_size_calc);
+            let prop_size_calc = field_size(field);
+            property_sizes.push(prop_size_calc);
             continue;
         }
     }
 
-    let size_wrapper = quote! {
-        impl crate::HeaderCodecSize for #name {
-            fn header_size(&self) -> u32 {
-                let mut total_size = 0;
-                #(#field_size_calculations)*
-                let property_size = self.property_size();
-                total_size + property_size + crate::variable_byte_int_size(property_size)
+    for field in &fields.named {
+        if !has_attribute(&field.attrs, "property") {
+            let field_size_calc = field_size(field);
+            field_sizes.push(field_size_calc);
+            continue;
+        }
+    }
+
+    let size_wrapper = if has_properties {
+        quote! {
+
+            impl crate::CodecSize for #name {
+                fn codec_size(&self) -> u32 {
+                    let mut total_size = 0;
+
+                    #(#field_sizes)*
+                    #(#property_sizes)*
+
+                    let property_size = self.property_size();
+                    total_size + property_size + crate::variable_byte_int_size(property_size)
+                }
+            }
+        }
+    } else {
+        quote! {
+            impl crate::CodecSize for #name {
+                fn codec_size(&self) -> u32 {
+                    let mut total_size = 0;
+
+                    #(#field_sizes)*
+
+                    total_size
+                }
             }
         }
     };
+
     TokenStream::from(size_wrapper)
 }
 
-#[proc_macro_derive(Encode, attributes(codec_as))]
+#[proc_macro_derive(Encode, attributes(property, codec_as))]
 pub fn derive_encode(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let struct_name = &input.ident;
@@ -269,6 +298,25 @@ pub(crate) fn is_primitive_type(type_name: &str) -> bool {
         type_name,
         "u8" | "i8" | "bool" | "u16" | "i16" | "u32" | "i32" | "char"
     )
+}
+
+pub(crate) fn codec_as(attrs: &[syn::Attribute]) -> Option<String> {
+    let mut codec_as_type = None;
+    attrs
+        .iter()
+        .find(|attr| attr.path().is_ident("codec_as"))
+        .and_then(|attr| {
+            Some(attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("as") {
+                    let value: syn::LitStr = meta.value()?.parse()?;
+                    codec_as_type = Some(value.value());
+                    Ok(())
+                } else {
+                    Err(meta.error("Expected property_type argument"))
+                }
+            }))
+        });
+    codec_as_type
 }
 
 /// Filters out attributes whose path matches any in the exclude list. We use this

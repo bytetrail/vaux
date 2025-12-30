@@ -1,11 +1,11 @@
-use vaux_macro::{HeaderCodecSize, PropertyCodecSize};
+use vaux_macro::{CodecSize, PropertyCodecSize};
 
 enum TestProperty {
     PropertyOne,
 }
 
-trait HeaderCodecSize {
-    fn header_size(&self) -> u32;
+trait CodecSize {
+    fn codec_size(&self) -> u32;
 }
 
 trait PropertyCodecSize {
