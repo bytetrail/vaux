@@ -11,22 +11,7 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
         syn::Type::Path(type_path) => {
             let segment = &type_path.path.segments.last().unwrap().ident;
             match segment.to_string().as_str() {
-                "Vec" => {
-                    // let generic_type = match &type_path.path.segments.last().unwrap().arguments {
-                    //     syn::PathArguments::AngleBracketed(args) => args.args.first().unwrap(),
-                    //     _ => {
-                    //         return compile_error2("Unsupported Vec type for Size derive");
-                    //     }
-                    // };
-                    // match generic_type {
-                    //     syn::GenericArgument::Type(syn::Type::Path(vec_inner_type_path)) => {
-                    size_for_vec(field_name, type_path, is_property, false)
-                    //                        }
-                    // _ => {
-                    //     return compile_error2("Unsupported Vec inner type for Size derive");
-                    // }
-                    //                    }
-                }
+                "Vec" => size_for_vec(field_name, type_path, is_property, false),
                 "String" => {
                     if is_property {
                         size_for_string_property(field_name, false)
@@ -202,7 +187,17 @@ fn size_for_vec(
     is_property: bool,
     optional: bool,
 ) -> proc_macro2::TokenStream {
-    let field_mult = match &type_path.path.segments.last().unwrap().arguments {
+    let field = field_name.as_ref().unwrap();
+    let size_prefix = if is_property {
+        quote! {
+            property_size +=
+        }
+    } else {
+        quote! {
+            total_size +=
+        }
+    };
+    let field_size = match &type_path.path.segments.last().unwrap().arguments {
         syn::PathArguments::AngleBracketed(args) => match args.args.first().unwrap() {
             syn::GenericArgument::Type(syn::Type::Path(vec_inner_type_path)) => {
                 match vec_inner_type_path
@@ -214,12 +209,35 @@ fn size_for_vec(
                     .to_string()
                     .as_str()
                 {
-                    "u8" | "i8" => quote! {},
-                    "u16" | "i16" => quote! {  * 2 },
-                    "u32" | "i32" | "char" => quote! { * 4 },
+                    "u8" | "i8" => {
+                        let prop_ident_size = if is_property {
+                            quote! { 1 + }
+                        } else {
+                            quote! {}
+                        };
+                        if optional {
+                            quote! {
+                                #prop_ident_size 2 + #field.len() as u32
+                            }
+                        } else {
+                            quote! {
+                                  #prop_ident_size 2 + self.#field.len() as u32
+                            }
+                        }
+                    }
+                    //quote! {#field.len() as u32 },
+                    "u16" | "i16" | "u32" | "i32" | "char" => {
+                        compile_error2("Unsupported Vec inner type for CodecSize")
+                    }
                     _ => {
-                        quote! {
-                             * #field_name.codec_size()
+                        if is_property {
+                            quote! {
+                                #field.iter().map(|item| 1 + item.codec_size()).sum::<u32>()
+                            }
+                        } else {
+                            quote! {
+                                self.#field.iter().map(|item| item.codec_size()).sum::<u32>()
+                            }
                         }
                     }
                 }
@@ -233,30 +251,18 @@ fn size_for_vec(
         }
     };
 
-    let field = field_name.as_ref().unwrap();
-
-    let prefix = if is_property {
-        quote! {
-            property_size += 1
-        }
-    } else {
-        quote! {
-            total_size = total_size
-        }
-    };
-
     if optional {
         quote! {
-            if let Some(field) = &self.#field {
-                if !field.is_empty() {
-                    #prefix + 2 + field.len() as u32 #field_mult;
+            if let Some(#field) = &self.#field {
+                if !#field.is_empty() {
+                    #size_prefix #field_size;
                 }
             }
         }
     } else {
         quote! {
             if !self.#field.is_empty() {
-                #prefix + 2 + self.#field.len() as u32 #field_mult;
+                #size_prefix #field_size;
             }
         }
     }
@@ -363,7 +369,7 @@ mod tests {
             false,
         );
         let expected = quote! {
-            if !self.#field_name.is_empty() { total_size = total_size + 2 + self.data.len() as u32; }
+            if !self.#field_name.is_empty() { total_size += 2 + self.data.len() as u32; }
         };
         assert_eq!(tokens.to_string(), expected.to_string());
     }

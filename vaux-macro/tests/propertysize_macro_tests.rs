@@ -1,4 +1,4 @@
-use vaux_macro::{CodecSize, PropertyCodecSize};
+use vaux_macro::PropertyCodecSize;
 
 enum TestProperty {
     PropertyOne,

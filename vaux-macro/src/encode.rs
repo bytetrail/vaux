@@ -107,11 +107,11 @@ pub(crate) fn encode_for_string(field_name: &Option<syn::Ident>,
 
 pub(crate) fn encode_for_vec(
     field_name: &Option<syn::Ident>,
-    _type_path: &syn::TypePath,
+    type_path: &syn::TypePath,
     is_optional: bool,
     property_type: Option<proc_macro2::TokenStream>,
 ) -> proc_macro2::TokenStream {
-
+    let field = field_name.as_ref().unwrap();
     let prop_ident_encode = if let Some(prop_ident) = property_type {
          quote! {
             // Encoding logic for String property            
@@ -121,17 +121,59 @@ pub(crate) fn encode_for_vec(
         quote! {
         }
     };
+    let encode_stmt = match &type_path.path.segments.last().unwrap().arguments {
+        syn::PathArguments::AngleBracketed(args) => match args.args.first().unwrap() {
+            syn::GenericArgument::Type(syn::Type::Path(vec_inner_type_path)) => {
+                match vec_inner_type_path.path.segments.last().unwrap().ident.to_string().as_str() {
+                    "u8" => if is_optional {
+                        quote! {
+                        #prop_ident_encode
+                        codec::put_bin(#field, dest)?;
+                    }} else {
+                        quote! {
+                        #prop_ident_encode
+                        codec::put_bin(&self.#field, dest)?;
+                    } } ,
+                    
+                    "u16" | "i16" | "i32" | "u32" | "i8" => {
+                        return compile_error2("Unsupported Vec inner type for Encode derive");
+                    }
+                    field_type=> if is_optional {
+                        quote! {
+                        println!("{}", #field_type);
+                        // Encoding logic for Vec<ComplexType> property
+                        for item in #field {
+                            #prop_ident_encode
+                            item.encode(dest)?;
+                        }}
+                    } else {
+                        quote! {
+                        // Encoding logic for Vec<ComplexType> property
+                        for item in self.#field.iter_mut() {
+                            #prop_ident_encode
+                            item.encode(dest)?;
+                        }
+                    } } ,
+                }
+            }
+            _ => {
+                return compile_error2("Unsupported Vec inner type for Encode derive");
+            }
+        },  
+        _ => {
+            return compile_error2("Unsupported Vec type for Encode derive");
+        }
+    };
+
     if is_optional {
         quote ! {
-            if let Some(v) = self.#field_name.as_ref() {
-                #prop_ident_encode
-                codec::put_bin(v, dest)?;
+            if let Some(#field) = self.#field.as_ref() {
+                #encode_stmt
             }
         }
     } else  {
         quote ! {
-            #prop_ident_encode
-            codec::put_bin(&self.#field_name, dest)?;
+            #encode_stmt
         }        
     } 
 }
@@ -141,35 +183,46 @@ pub(crate) fn encode_for_option(
     type_path: &syn::TypePath,
     property_type: Option<proc_macro2::TokenStream>,
 ) -> proc_macro2::TokenStream {
-    let segment = &type_path.path.segments.last().unwrap();
-    let generic_args = match &segment.arguments {
-        syn::PathArguments::AngleBracketed(args) => &args.args,
+
+    let generic_type = match &type_path.path.segments.last().unwrap().arguments {
+         syn::PathArguments::AngleBracketed(args) => args.args.first().unwrap(),
         _ => {
-            return compile_error2("Unsupported Option type for Encode derive");
+            return compile_error2("Unsupported Option type for Size derive");
         }
     };
-
-    let inner_type = match generic_args.first() {
-        Some(syn::GenericArgument::Type(syn::Type::Path(type_path))) => {
+    match generic_type {
+        syn::GenericArgument::Type(syn::Type::Path(type_path)) => {
             let inner_segment = &type_path.path.segments.last().unwrap().ident;
-            inner_segment.to_string()
+            match inner_segment.to_string().as_str() {
+                "String" => return encode_for_string(field_name, true, property_type),
+                "Vec" => return encode_for_vec(field_name, type_path, true, property_type),
+                type_name => {
+                    if is_primitive_type(type_name) {
+                        return encode_for_primitive(field_name, type_name, true, property_type);
+                    }
+                    else {
+                        if property_type.is_some() {
+                            return quote! {
+                                if let Some(v) = self.#field_name.as_mut() {
+                                    // Encoding logic for complex property
+                                    dest.put_u8(#property_type as u8);
+                                    v.encode(dest)?;
+                                }
+                            };
+                        } else {
+                            return quote! {
+                                if let Some(v) = self.#field_name.as_mut() {
+                                    // Encoding logic for complex property
+                                    v.encode(dest)?;
+                                }
+                            };
+                        }
+                    }
+                }
+            }
         }
         _ => {
             return compile_error2("Unsupported Option inner type for Encode derive");
-        }
-    };
-
-    if is_primitive_type(&inner_type) {
-        encode_for_primitive(field_name, &inner_type, true, property_type)
-    } else {
-        match inner_type.as_str() {
-            "String" => encode_for_string(field_name, true, property_type),
-            "Vec" => encode_for_vec(field_name, &type_path, true, property_type),
-            _ => quote! {
-                    if let Some(v) = self.#field_name.as_mut() {
-                        v.encode(dest)?;    
-                    }
-            },
         }
     }
 }
@@ -241,3 +294,87 @@ pub(crate) fn encode_for_primitive(
     }
 }
 
+#[cfg(test)]
+mod test {
+    use super::*;
+
+
+    #[test]
+    fn test_encode_for_primitive() {
+        let field_name = Some(syn::Ident::new("test_field", proc_macro2::Span::call_site()));
+        let encode_tokens = encode_for_primitive(&field_name, "u16", false, Some(quote! { TestProperty::PropertyOne }));
+        let expected = quote! {
+            // Encoding logic for String property            
+            dest.put_u8(TestProperty::PropertyOne as u8);
+            dest.put_u16(self.test_field);      
+        };
+        assert_eq!(encode_tokens.to_string(), expected.to_string());
+    }   
+
+    #[test]
+    fn test_encode_for_option_primitive() {
+        let field_name = Some(syn::Ident::new("test_field", proc_macro2::Span::call_site()));
+        let type_path: syn::TypePath = syn::parse_str("Option<u8>").unwrap();
+        let encode_tokens = encode_for_option(&field_name, &type_path, Some(quote! { TestProperty::PropertyTwo }));
+        let expected = quote! {
+            if let Some(v) = self.test_field {
+                // Encoding logic for String property            
+                dest.put_u8(TestProperty::PropertyTwo as u8);
+                dest.put_u8(v);    
+            }
+        };
+        assert_eq!(encode_tokens.to_string(), expected.to_string());
+    }   
+
+    #[test]
+    fn test_encode_for_string() {
+        let field_name = Some(syn::Ident::new("test_string", proc_macro2::Span::call_site()));
+        let encode_tokens = encode_for_string(&field_name, false, Some(quote! { TestProperty::PropertyThree }));
+        let expected = quote! {
+            // Encoding logic for String property            
+            dest.put_u8(TestProperty::PropertyThree as u8);
+            codec::put_utf8(&self.test_string, dest)?;      
+        };
+        assert_eq!(encode_tokens.to_string(), expected.to_string());
+    }   
+
+    #[test]
+    fn test_encode_for_vec() {
+        let field_name = Some(syn::Ident::new("data", proc_macro2::Span::call_site()));
+        let type_path: syn::TypePath = syn::parse_str("Vec<u8>").unwrap();
+        let encode_tokens = encode_for_vec(&field_name, &type_path, false, Some(quote! { TestProperty::PropertyFour }));
+        let expected = quote! {
+            // Encoding logic for String property            
+            dest.put_u8(TestProperty::PropertyFour as u8);
+            codec::put_bin(&self.data, dest)?;      
+        };
+        assert_eq!(encode_tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_encode_simple_struct_vec() {
+        let field_name = Some(syn::Ident::new("data", proc_macro2::Span::call_site()));
+        let type_path: syn::TypePath = syn::parse_str("Vec<ComplexType>").unwrap();
+        let encode_tokens = encode_for_vec(&field_name, &type_path, false, Some(quote! { TestProperty::PropertyFive }));
+        let expected = quote! {
+            // Encoding logic for Vec<ComplexType> property
+            for item in self.data.iter_mut() {
+                // Encoding logic for String property            
+                dest.put_u8(TestProperty::PropertyFive as u8);
+                item.encode(dest)?;
+            }      
+        };
+        assert_eq!(encode_tokens.to_string(), expected.to_string());
+
+        let encode_tokens = encode_for_vec(&field_name, &type_path, false, None);
+        let expected = quote! {
+            // Encoding logic for Vec<ComplexType> property
+            for item in self.data.iter_mut() {
+                item.encode(dest)?;
+            }
+        };
+        assert_eq!(encode_tokens.to_string(), expected.to_string());
+
+    }
+
+}
