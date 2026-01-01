@@ -3,42 +3,54 @@ pub mod connack;
 pub mod connect;
 pub mod disconnect;
 pub mod fixed;
+pub mod packet;
 pub mod property;
 pub mod publish;
 pub mod pubresp;
 pub mod subscribe;
 pub mod test;
-pub mod unsubscribe;
-mod will;
+pub mod will;
 
-use crate::codec::{put_utf8, variable_byte_int_size};
+use crate::codec::{put_bin, variable_byte_int_size};
 
-pub use crate::property::PropertyType;
-
-pub use crate::codec::{
-    decode, decode_fixed_header, encode, MqttCodecError, Packet, PacketType, QoSLevel, Reason,
+use bytes::{Buf, BytesMut};
+pub use codec::{MqttCodecError, Packet, PacketType, QoSLevel, Reason};
+pub use {
+    connack::ConnAck,
+    connect::Connect,
+    disconnect::Disconnect,
+    fixed::FixedHeader,
+    property::PropertyType,
+    publish::Publish,
+    pubresp::{PubAck, PubAckRecReason, PubComp, PubRec, PubRel, PubRelCompReason},
+    subscribe::{Subscribe, SubscriptionFilter},
+    will::{WillHeader, WillMessage},
 };
-pub use crate::connack::ConnAck;
-pub use crate::connect::Connect;
-pub use crate::will::WillMessage;
-pub use crate::{
-    disconnect::Disconnect, fixed::FixedHeader, pubresp::PubResp, subscribe::Subscribe,
-    subscribe::SubscriptionFilter,
-};
-use bytes::BytesMut;
 
-pub trait HeaderSize {
+pub trait PropertyCodecSize {
+    fn property_size(&self) -> u32;
+}
+
+pub trait HeaderCodecSize: PropertyCodecSize {
     fn header_size(&self) -> u32;
 }
 
-pub trait Size {
-    fn size(&self) -> u32;
-    fn property_size(&self) -> u32;
+pub trait PayloadCodecSize {
     fn payload_size(&self) -> u32;
 }
 
-pub trait Encode: Size {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError>;
+pub trait PacketCodecSize: HeaderCodecSize + PayloadCodecSize {
+    fn packet_size(&self) -> u32 {
+        self.header_size() + self.payload_size()
+    }
+}
+
+pub trait CodecSize {
+    fn codec_size(&self) -> u32;
+}
+
+pub trait Encode {
+    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError>;
 }
 
 pub trait Decode {
@@ -96,3 +108,25 @@ impl std::fmt::Display for MqttError {
 }
 
 //pub type Result<T> = std::result::Result<T, MqttError>;
+
+impl Encode for Vec<u8> {
+    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+        put_bin(self, dest)?;
+        Ok(())
+    }
+}
+
+impl Decode for Vec<u8> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+        let idx = src.len() - src.remaining();
+        self.extend(&src[idx..]);
+        src.advance(src.len());
+        Ok(())
+    }
+}
+
+impl CodecSize for Vec<u8> {
+    fn codec_size(&self) -> u32 {
+        self.len() as u32
+    }
+}

@@ -2,7 +2,10 @@ use super::AsyncMqttStream;
 use bytes::{Bytes, BytesMut};
 use std::fmt::Display;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use vaux_mqtt::{decode, encode, Packet};
+use vaux_mqtt::{
+    codec::{decode, Packet},
+    Encode,
+};
 
 const READ_BUFFER_SIZE: usize = 4096;
 const MAX_BUFFER_SIZE: usize = 4096 * 1024;
@@ -166,9 +169,9 @@ impl PacketStream {
         }
     }
 
-    pub async fn write(&mut self, packet: &Packet) -> Result<(), Error> {
+    pub async fn write(&mut self, packet: &mut Packet) -> Result<(), Error> {
         let mut dest = BytesMut::default();
-        let result = encode(packet, &mut dest);
+        let result = packet.encode(&mut dest);
         if let Err(e) = result {
             return Err(Error::Codec(e));
         }

@@ -8,8 +8,7 @@ use tokio::{
 };
 use vaux_client::MqttClient;
 use vaux_mqtt::{
-    property::{PacketProperties, PayloadFormat, Property},
-    Packet, PropertyType, PubResp, QoSLevel, Subscribe, SubscriptionFilter,
+    property::PayloadFormat, Packet, PropertyType, QoSLevel, Subscribe, SubscriptionFilter,
 };
 
 #[derive(Parser, Debug)]

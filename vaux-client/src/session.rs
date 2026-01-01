@@ -2,10 +2,9 @@ use crate::{ErrorKind, MqttClient, MqttError};
 use std::mem;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
-use vaux_mqtt::property::PacketProperties;
 use vaux_mqtt::publish::Publish;
-use vaux_mqtt::WillMessage;
-use vaux_mqtt::{property::Property, ConnAck, Connect, Packet, PubResp, QoSLevel, Reason};
+use vaux_mqtt::{ConnAck, Connect, Packet, QoSLevel, Reason};
+use vaux_mqtt::{PubAck, PubComp, PubRec, PubRel, WillMessage};
 
 const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
 const DEFAULT_CLIENT_ID_PREFIX: &str = "vaux-client";
@@ -184,29 +183,26 @@ impl ClientSession {
             ));
         }
         let mut connect = Connect::default();
-        connect.keep_alive = self.state.keep_alive.read().await.as_secs() as u16;
-        connect.clean_start = clean_start;
+        connect.set_keep_alive(self.state.keep_alive.read().await.as_secs() as u16);
+        connect.set_clean_start(clean_start);
         {
             let set_id = self.state.client_id.lock().await;
             if set_id.is_some() {
-                connect.client_id = (*set_id.as_ref().unwrap()).to_string();
+                connect.set_client_id(set_id.as_ref().unwrap());
             }
         }
         connect
-            .properties_mut()
-            .set_property(Property::SessionExpiryInterval(
-                self.state.session_expiry.read().await.as_secs() as u32,
-            ));
+            .set_session_expiry_interval(self.state.session_expiry.read().await.as_secs() as u32);
         if let Some((username, password)) = credentials {
-            connect.username = Some(username);
-            connect.password = Some(password.into_bytes());
+            connect.set_username(Some(username));
+            connect.set_password(Some(password.into_bytes()));
         }
         if let Some(will) = will {
-            connect.will_message = Some(will);
+            connect.set_will_message(will);
         }
-        let connect_packet = Packet::Connect(Box::new(connect));
+        let mut connect_packet = Packet::Connect(Box::new(connect));
 
-        match self.packet_stream.write(&connect_packet).await {
+        match self.packet_stream.write(&mut connect_packet).await {
             Ok(_) => {
                 let start = std::time::Instant::now();
                 while start.elapsed() < max_connect_wait {
@@ -217,8 +213,8 @@ impl ClientSession {
                             }
                             Packet::Disconnect(disconnect) => {
                                 return Err(MqttError::new(
-                                    &format!("disconnect received: {}", disconnect.reason),
-                                    ErrorKind::Protocol(disconnect.reason),
+                                    &format!("disconnect received: {}", disconnect.reason()),
+                                    ErrorKind::Protocol(disconnect.reason()),
                                 ))
                             }
                             _ => {
@@ -284,7 +280,7 @@ impl ClientSession {
                         ));
                     }
                     // verify client set packet ID is not already in use
-                    if let Some(packet_id) = p.packet_id {
+                    if let Some(packet_id) = p.packet_id() {
                         if self.state.pending_qos_send.contains_key(&packet_id) {
                             return Err(MqttError::new(
                                 "packet ID already in use",
@@ -303,7 +299,7 @@ impl ClientSession {
                         {
                             self.state.last_packet_id = self.state.last_packet_id.wrapping_add(1);
                         }
-                        p.packet_id = Some(self.state.last_packet_id);
+                        p.set_packet_id(Some(self.state.last_packet_id));
                     } else {
                         // if no packet ID is set and auto packet ID is disabled, return an error
                         return Err(MqttError::new(
@@ -314,13 +310,13 @@ impl ClientSession {
                     match p.qos() {
                         QoSLevel::AtLeastOnce => {
                             self.state.pending_qos_send.insert(
-                                p.packet_id.unwrap(),
+                                p.packet_id().unwrap(),
                                 QoSPacketState::new_qos1(Packet::Publish(p.clone())),
                             );
                         }
                         QoSLevel::ExactlyOnce => {
                             self.state.pending_qos_send.insert(
-                                p.packet_id.unwrap(),
+                                p.packet_id().unwrap(),
                                 QoSPacketState::new_qos2(Packet::Publish(p.clone())),
                             );
                         }
@@ -356,17 +352,17 @@ impl ClientSession {
                 //self.pending_qos1.append(&mut self.pending_publish);
                 return Err(MqttError::new(
                     &format!("disconnect received: {d:?}"),
-                    ErrorKind::Protocol(d.reason),
+                    ErrorKind::Protocol(d.reason()),
                 ));
             }
             Packet::Publish(publish) => {
                 self.handle_recv_publish(publish.clone()).await?;
             }
             Packet::PubAck(puback) => {
-                if let Some(p) = self.state.pending_qos_send.get(&puback.packet_id) {
+                if let Some(p) = self.state.pending_qos_send.get(&puback.packet_id()) {
                     match p.next {
                         QoSPacket::PubAck => {
-                            self.state.pending_qos_send.remove(&puback.packet_id);
+                            self.state.pending_qos_send.remove(&puback.packet_id());
                             self.state.qos_send_remaining += 1;
                         }
                         _ => {
@@ -386,7 +382,7 @@ impl ClientSession {
                 }
             }
             Packet::PubRec(pubrec) => {
-                let packet_id = pubrec.packet_id;
+                let packet_id = pubrec.packet_id();
                 if let Some(p) = self.state.pending_qos_send.remove(&packet_id) {
                     match p.next {
                         QoSPacket::PubRec => {
@@ -398,8 +394,7 @@ impl ClientSession {
                                 ))?;
                                 self.state.pending_qos_send.insert(packet_id, pubrec_state);
                                 // create the PUBREL packet
-                                let mut pubrel = PubResp::new_pubrel();
-                                pubrel.packet_id = pubrec.packet_id;
+                                let pubrel = PubRel::new_publish_release(pubrec.packet_id());
                                 match self.send_packet(Packet::PubRel(pubrel)).await {
                                     Ok(_) => {
                                         // remove from pending qos
@@ -462,13 +457,12 @@ impl ClientSession {
                 }
             }
             Packet::PubRel(pubrel) => {
-                let packet_id = pubrel.packet_id;
+                let packet_id = pubrel.packet_id();
                 if let Some(p) = self.state.pending_qos_recv.remove(&packet_id) {
                     match p.next {
                         QoSPacket::PubRel => {
                             if self.state.auto_ack {
-                                let mut pubcomp = PubResp::new_pubcomp();
-                                pubcomp.packet_id = pubrel.packet_id;
+                                let pubcomp = PubComp::new_publish_complete(pubrel.packet_id());
                                 match self.send_packet(Packet::PubComp(pubcomp)).await {
                                     Ok(_) => {
                                         // remove from pending qos
@@ -506,7 +500,7 @@ impl ClientSession {
                 }
             }
             Packet::PubComp(pubcomp) => {
-                let packet_id = pubcomp.packet_id;
+                let packet_id = pubcomp.packet_id();
                 if let Some(p) = self.state.pending_qos_send.remove(&packet_id) {
                     match p.next {
                         QoSPacket::PubComp => {
@@ -603,13 +597,12 @@ impl ClientSession {
                 }
                 // insert into pending receive QoS
                 self.state.pending_qos_recv.insert(
-                    publish.packet_id.unwrap(),
+                    publish.packet_id().unwrap(),
                     QoSPacketState::new_qos1(Packet::Publish(publish.clone())),
                 );
                 if self.state.auto_ack {
-                    let mut puback = PubResp::new_puback();
-                    if let Some(packet_id) = publish.packet_id {
-                        puback.packet_id = packet_id;
+                    let puback = if let Some(packet_id) = publish.packet_id() {
+                        PubAck::new_publish_acknowledge(packet_id)
                     } else {
                         // TODO send disconnect with reason cod
                         let _ = self.packet_stream.shutdown().await;
@@ -617,13 +610,13 @@ impl ClientSession {
                             "protocol error, packet ID required with QoS > 0",
                             ErrorKind::Protocol(Reason::MalformedPacket),
                         ));
-                    }
+                    };
                     self.state.qos_recv_remaining -= 1;
                     match self.send_packet(Packet::PubAck(puback)).await {
                         Ok(_) => {
                             self.state
                                 .pending_qos_recv
-                                .remove(&publish.packet_id.unwrap());
+                                .remove(&publish.packet_id().unwrap());
                             self.state.qos_recv_remaining += 1;
                             Ok(())
                         }
@@ -644,15 +637,14 @@ impl ClientSession {
             }
             vaux_mqtt::QoSLevel::ExactlyOnce => {
                 self.state.pending_qos_recv.insert(
-                    publish.packet_id.unwrap(),
+                    publish.packet_id().unwrap(),
                     QoSPacketState::new_qos2(Packet::Publish(publish.clone())),
                 );
                 // decrement the remaining QoS packets until ack  sent
                 self.state.qos_recv_remaining -= 1;
                 if self.state.auto_ack {
-                    let mut pubrec = PubResp::new_pubrec();
-                    if let Some(packet_id) = publish.packet_id {
-                        pubrec.packet_id = packet_id;
+                    let pubrec = if let Some(packet_id) = publish.packet_id() {
+                        PubRec::new_publish_receive(packet_id)
                     } else {
                         // protocol error, packet ID required with QoS > 0
                         let _ = self.packet_stream.shutdown().await;
@@ -660,14 +652,14 @@ impl ClientSession {
                             "protocol error, packet ID required with QoS > 0",
                             ErrorKind::Protocol(Reason::MalformedPacket),
                         ));
-                    }
+                    };
                     match self.send_packet(Packet::PubRec(pubrec)).await {
                         Ok(_) => {
                             // move to next state and re-insert into pending qos
                             let next = self
                                 .state
                                 .pending_qos_recv
-                                .remove(&publish.packet_id.unwrap())
+                                .remove(&publish.packet_id().unwrap())
                                 .map(|p| p.next().unwrap())
                                 .ok_or(MqttError::new(
                                     "invalid session state",
@@ -675,7 +667,7 @@ impl ClientSession {
                                 ))?;
                             self.state
                                 .pending_qos_recv
-                                .insert(publish.packet_id.unwrap(), next);
+                                .insert(publish.packet_id().unwrap(), next);
                         }
                         Err(_) => {
                             // TODO handle the pub rec next time through
@@ -701,9 +693,9 @@ impl ClientSession {
         Ok(())
     }
 
-    async fn send_packet(&mut self, packet: Packet) -> Result<(), MqttError> {
+    async fn send_packet(&mut self, mut packet: Packet) -> Result<(), MqttError> {
         self.packet_stream
-            .write(&packet)
+            .write(&mut packet)
             .await
             .map_err(|_| MqttError::new("unable to write packet to stream", ErrorKind::Transport))
     }

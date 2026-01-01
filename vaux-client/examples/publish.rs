@@ -5,11 +5,7 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
 use tokio::{select, task::JoinHandle};
 use vaux_client::PacketChannel;
-use vaux_mqtt::{
-    property::{PacketProperties, Property},
-    publish::Publish,
-    Packet, QoSLevel,
-};
+use vaux_mqtt::{publish::Publish, Packet, QoSLevel};
 
 #[derive(Parser, Clone, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -140,20 +136,14 @@ async fn publish(
     let start = std::time::Instant::now();
     for i in 0..iterations {
         let mut publish = Publish::default();
-        publish
-            .properties_mut()
-            .set_property(Property::PayloadFormat(
-                vaux_mqtt::property::PayloadFormat::Utf8,
-            ));
-        publish
-            .properties_mut()
-            .set_property(Property::MessageExpiry(1000));
+        publish.set_payload_format(vaux_mqtt::property::PayloadFormat::Utf8);
+        publish.set_message_expiry(1000);
 
         let message = arg_message.clone();
-        publish.topic_name = Some(topic.clone());
+        publish.set_topic_name(topic.clone());
         publish.set_payload(Vec::from(message.as_bytes()));
         publish.set_qos(args.qos);
-        publish.packet_id = Some((i + 1) as u16);
+        publish.set_packet_id(Some((i + 1) as u16)).unwrap();
         if packet_out
             .send(vaux_mqtt::Packet::Publish(publish.clone()))
             .await

@@ -1,23 +1,26 @@
-use crate::codec::{get_bin, get_utf8, put_bin, variable_byte_int_size};
-use crate::property::{Property, PropertyBundle};
-use crate::{put_utf8, Decode, Encode, MqttCodecError, PropertyType, QoSLevel, Size};
-use bytes::BytesMut;
-use std::collections::HashSet;
-use std::sync::LazyLock;
+use std::collections::HashMap;
 
-static WILL_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
-    let mut set = HashSet::new();
-    set.insert(PropertyType::WillDelay);
-    set.insert(PropertyType::PayloadFormat);
-    set.insert(PropertyType::MessageExpiry);
-    set.insert(PropertyType::ContentType);
-    set.insert(PropertyType::ResponseTopic);
-    set.insert(PropertyType::CorrelationData);
-    set.insert(PropertyType::UserProperty);
-    set
-});
+use crate::connect::{self, Connect, ConnectHeader, ConnectPayload};
+use crate::property::{PayloadFormat, UserProperty};
+use crate::{
+    codec, CodecSize, Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyCodecSize,
+    PropertyType, QoSLevel,
+};
+use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+// static WILL_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
+//     let mut set = HashSet::new();
+//     set.insert(PropertyType::WillDelay);
+//     set.insert(PropertyType::PayloadFormat);
+//     set.insert(PropertyType::MessageExpiry);
+//     set.insert(PropertyType::ContentType);
+//     set.insert(PropertyType::ResponseTopic);
+//     set.insert(PropertyType::CorrelationData);
+//     set.insert(PropertyType::UserProperty);
+//     set
+// });
+
+#[derive(Debug, Default, Clone, Eq, PartialEq, Encode, Decode, PropertyCodecSize, CodecSize)]
 /// MQTT Will message. The Will message name comes from last will and
 /// testament. The will message is typically sent under the following
 /// conditions when a client disconnects:
@@ -28,99 +31,61 @@ static WILL_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
 ///
 /// For more information please see
 /// <https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc479576982>
+pub struct WillHeader {
+    #[property(property_type = "PropertyType::WillDelay")]
+    pub will_delay: Option<u32>,
+    #[property(property_type = "PropertyType::PayloadFormat")]
+    pub payload_format: Option<PayloadFormat>,
+    #[property(property_type = "PropertyType::MessageExpiry")]
+    pub message_expiry: Option<u32>,
+    #[property(property_type = "PropertyType::ContentType")]
+    pub content_type: Option<String>,
+    #[property(property_type = "PropertyType::ResponseTopic")]
+    pub response_topic: Option<String>,
+    //#[property(property_type = "PropertyType::CorrelationData")]
+    //pub correlation_data: Option<Vec<u8>>,
+    #[property(property_type = "PropertyType::UserProperty")]
+    pub user_properties: UserProperty,
+}
+
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct WillMessage {
-    pub qos: QoSLevel,
-    pub retain: bool,
+    pub header: WillHeader,
     pub topic: String,
     pub payload: Vec<u8>,
-    pub props: PropertyBundle,
+    pub qos: QoSLevel,
+    pub retain: bool,
+}
+
+impl From<WillMessage> for Connect {
+    fn from(will: WillMessage) -> Self {
+        let mut connect_header = ConnectHeader::new();
+        let mut connect_payload = ConnectPayload::default();
+
+        connect_payload.will_topic = Some(will.topic);
+        connect_payload.will_payload = will.payload;
+        connect_payload.will_properties = Some(will.header);
+
+        connect_header.set_will(true);
+        connect_header.set_will_qos(will.qos);
+        connect_header.set_will_retain(will.retain);
+
+        Connect {
+            fixed_header: FixedHeader::new(PacketType::Connect),
+            variable_header: connect_header,
+            payload: connect_payload,
+        }
+    }
 }
 
 impl WillMessage {
-    pub fn new(qos: QoSLevel, retain: bool) -> Self {
+    pub fn new(topic: String, payload: Vec<u8>, qos: QoSLevel, retain: bool) -> Self {
         WillMessage {
+            header: WillHeader::default(),
+            topic,
+            payload,
             qos,
             retain,
-            topic: "".to_string(),
-            payload: Vec::new(),
-            props: PropertyBundle::new(&WILL_PROPS),
         }
-    }
-
-    pub fn delay(&self) -> Option<u32> {
-        self.props
-            .get_property(PropertyType::WillDelay)
-            .and_then(|p| {
-                if let Property::WillDelay(delay) = p {
-                    Some(*delay)
-                } else {
-                    None
-                }
-            })
-    }
-
-    pub fn set_delay(&mut self, delay: u32) {
-        if delay == 0 {
-            self.props.clear_property(PropertyType::WillDelay);
-            return;
-        }
-        self.props.set_property(Property::WillDelay(delay));
-    }
-
-    pub fn expiry(&self) -> Option<u32> {
-        self.props
-            .get_property(PropertyType::MessageExpiry)
-            .and_then(|p| {
-                if let Property::MessageExpiry(expiry) = p {
-                    Some(*expiry)
-                } else {
-                    None
-                }
-            })
-    }
-
-    pub fn set_expiry(&mut self, expiry: u32) {
-        if expiry == 0 {
-            self.props.clear_property(PropertyType::MessageExpiry);
-            return;
-        }
-        self.props.set_property(Property::MessageExpiry(expiry));
-    }
-}
-
-impl Decode for WillMessage {
-    /// Implementation of decode for will message. The will message decode does
-    /// not attempt to decode the flags QOS and Retain as these are present in the
-    /// CONNECT flags variable length header prior to the will message properties
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
-        self.props.decode(src)?;
-        self.topic = get_utf8(src)?;
-        self.payload = get_bin(src)?;
-        Ok(())
-    }
-}
-
-impl Encode for WillMessage {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
-        self.props.encode(dest)?;
-        put_utf8(&self.topic, dest)?;
-        put_bin(&self.payload, dest)?;
-        Ok(())
-    }
-}
-
-impl Size for WillMessage {
-    fn size(&self) -> u32 {
-        let property_size = self.property_size();
-        let property_len = variable_byte_int_size(property_size);
-        property_len + property_size + self.payload_size()
-    }
-
-    fn property_size(&self) -> u32 {
-        self.props.size()
-    }
-
-    fn payload_size(&self) -> u32 {
-        (self.topic.len() + 2 + self.payload.len() + 2) as u32
     }
 }

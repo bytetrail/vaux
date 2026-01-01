@@ -79,7 +79,7 @@ impl Decode for UnsubAck {
 }
 
 impl Encode for UnsubAck {
-    fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), crate::MqttCodecError> {
+    fn encode(&mut self, dest: &mut bytes::BytesMut) -> Result<(), crate::MqttCodecError> {
         let mut header = FixedHeader::new(PacketType::UnsubAck);
         header.remaining = self.size();
         header.encode(dest)?;
@@ -219,7 +219,7 @@ impl Decode for Unsubscribe {
 }
 
 impl Encode for Unsubscribe {
-    fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), crate::MqttCodecError> {
+    fn encode(&mut self, dest: &mut bytes::BytesMut) -> Result<(), crate::MqttCodecError> {
         let mut header = FixedHeader::new(PacketType::Unsubscribe);
         header.remaining = self.size();
         header.encode(dest)?;

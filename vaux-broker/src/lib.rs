@@ -17,10 +17,11 @@ use tokio::{
 };
 use uuid::Uuid;
 use vaux_async::stream::{AsyncMqttStream, MqttStream, PacketStream};
+use vaux_mqtt::codec::PingRespCtrl;
 use vaux_mqtt::Packet::PingResponse;
 use vaux_mqtt::{
-    property::PacketProperties, ConnAck, Connect, Disconnect, FixedHeader, MqttCodecError, Packet,
-    PacketType, Reason,
+    property::PacketProperties, ConnAck, Connect, Disconnect, MqttCodecError, Packet, PacketType,
+    Reason,
 };
 
 const INIT_STREAM_BUFFER_SIZE: usize = 4096;
@@ -266,7 +267,7 @@ impl Broker {
     ) -> Result<(), BrokerError> {
         match packet {
             Packet::PingRequest(_) => {
-                let packet = PingResponse(FixedHeader::new(PacketType::PingResp));
+                let packet = PingResponse(PingRespCtrl::new_with_type(PacketType::PingResp));
                 stream.write(&packet).await?;
                 Ok(())
             }
@@ -317,7 +318,7 @@ impl Broker {
             Packet::Connect(packet) => Broker::handle_connect(*packet, stream, session_pool).await,
             Packet::PingRequest(_packet) => {
                 // allow clients without connected session to ping
-                let packet = PingResponse(FixedHeader::new(PacketType::PingResp));
+                let packet = PingResponse(PingRespCtrl::new_with_type(PacketType::PingResp));
                 stream.write(&packet).await?;
                 Ok(None)
             }
