@@ -14,42 +14,45 @@ pub(crate) fn encode_field(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_type = &field.ty;
     let is_property = has_attribute_with_name_value(&field.attrs, "codec", "property_type").unwrap();
     let encode_with = attribute_with_name_value(&field.attrs, "codec", "encode_with").unwrap();
-    let mut property_type = None;  
-    field
+    let property_type: Option<syn::Path> = field
         .attrs
         .iter()
-        .find(|attr| attr.path().is_ident("codec"))
-        .and_then(|attr| {                    
-            Some(attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("property_type") {
-                    let value: syn::LitStr = meta.value()?.parse()?;                            
-                    property_type = Some(value.value());
-                    Ok(())
-                } else {
-                    Ok(())
-                }
-            }))
-        });
+        .find_map(|attr| {
+            if attr.path().is_ident("codec") {
+                let nested = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated);
+                nested.unwrap().iter().find_map(|meta| {
+                    if meta.path().is_ident("property_type") {
+                        if let Meta::NameValue(nv_pair) = meta {
+                            if let syn::Expr::Lit(lit_str) = &nv_pair.value {
+                                if let syn::Lit::Str(lit_str) = &lit_str.lit {
+                                    Some(lit_str.parse().unwrap())                                    
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        }else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        }); //.collect::<Vec<syn::Path>>();
     if property_type.is_none() && is_property {
         return compile_error2("Property attribute requires a property_type argument");
     } 
 
     // convert the property_type str to an enumeration path
     let property_type_ident = if is_property && property_type.is_some() { 
-        let segments: Vec<&str> = property_type.as_ref().unwrap().split("::").collect();
-        let mut tokens = proc_macro2::TokenStream::new();
-        for (i, segment) in segments.iter().enumerate() {
-            let ident = syn::Ident::new(segment, proc_macro2::Span::call_site());
-            if i > 0 {
-                tokens.extend(quote! { :: });
-            }
-            tokens.extend(quote! { #ident });
-        }
-        Some(tokens)
+        Some(quote! { #property_type })
     } else {
         None
     };
-
     let field_encode = match field_type {
         syn::Type::Path(type_path) => {
             let segment = &type_path.path.segments.last().unwrap().ident;

@@ -48,20 +48,6 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
                             syn::GenericArgument::Type(syn::Type::Path(inner_type_path)) => {
                                 let inner_segment =
                                     &inner_type_path.path.segments.last().unwrap().ident;
-                                // if codec_size_with {
-                                //     match crate::attribute_with_name_value(
-                                //         attrs,
-                                //         "codec",
-                                //         "size_with",
-                                //     ) {
-                                //         Ok(Some(attr)) => {
-                                //             size_with_path(field_name, &attr, true, is_property)
-                                //         }
-                                //         Ok(None) | Err(_) => compile_error2(
-                                //             "Invalid 'size_with' attribute for Size derive",
-                                //         ),
-                                //     }
-                                // } else {
                                 match inner_segment.to_string().as_str() {
                                     "Vec" => {
                                         size_for_vec(field_name, inner_type_path, is_property, true)

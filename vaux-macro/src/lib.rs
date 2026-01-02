@@ -1,64 +1,11 @@
+mod decode;
 mod encode;
-mod header;
 mod size;
 
 use crate::size::field_size;
 use proc_macro::{self, TokenStream};
 use quote::quote;
 use syn::{parse_macro_input, punctuated::Punctuated, ItemStruct, Meta, Token};
-
-#[proc_macro_attribute]
-pub fn packet_header(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    let property_codec_impl = derive_codec_property_size(item.clone());
-    let header_codec_impl = derive_codec_size(item.clone());
-    let encode_impl = derive_encode(item.clone());
-    let decode_impl = derive_decode(item.clone());
-
-    // filter out the property attribute from the struct fields
-    let input = parse_macro_input!(item as syn::ItemStruct);
-    let struct_attrs = filter_attributes(&input.attrs, &["packet_header"]);
-    let struct_name = &input.ident;
-    // get the visibility of the struct
-    let visibility = &input.vis;
-
-    let mut struct_fields = quote! {};
-    // process the fields
-    match &input.fields {
-        syn::Fields::Named(fields_named) => {
-            for field in &fields_named.named {
-                // filter out the property attribute
-                let field_attrs = filter_attributes(&field.attrs, &["property"]);
-                let field_vis = &field.vis;
-                let field_name = field.ident.as_ref().expect("expected field name");
-                let field_ty = &field.ty;
-
-                struct_fields = quote! {
-                    #struct_fields
-                    #(#field_attrs)*
-                    #field_vis #field_name: #field_ty,
-                };
-            }
-        }
-        _ => {
-            return compile_error("packet_header can only be applied to structs with named fields");
-        }
-    };
-
-    let expanded = quote! {
-        #(#struct_attrs)*
-        #visibility struct #struct_name {
-            #struct_fields
-        }
-    };
-
-    TokenStream::from(expanded)
-        .into_iter()
-        .chain(property_codec_impl)
-        .chain(header_codec_impl)
-        .chain(encode_impl)
-        .chain(decode_impl)
-        .collect()
-}
 
 #[proc_macro_derive(PropertyCodecSize, attributes(codec))]
 pub fn derive_codec_property_size(input: TokenStream) -> TokenStream {
@@ -77,8 +24,20 @@ pub fn derive_codec_property_size(input: TokenStream) -> TokenStream {
     let mut field_size_calculations = Vec::new();
     for field in &fields.named {
         if let Ok(true) = has_attribute_with_name_value(&field.attrs, "codec", "property_type") {
-            let field_size_calc = field_size(field);
-            field_size_calculations.push(field_size_calc);
+            if let Some(skip_path) = get_skip_if_path(&field.attrs) {
+                let field_name = field.ident.as_ref().unwrap();
+                let field_size_calc = field_size(field);
+                field_size_calculations.push(quote! {
+                    if !#skip_path(&self.#field_name) {
+                        #field_size_calc
+                    }
+                });
+                continue;
+            } else {
+                let field_size_calc = field_size(field);
+                field_size_calculations.push(field_size_calc);
+                continue;
+            }
         }
     }
 
@@ -96,7 +55,23 @@ pub fn derive_codec_property_size(input: TokenStream) -> TokenStream {
     TokenStream::from(size_wrapper)
 }
 
-#[proc_macro_derive(CodecSize, attributes(codec, property))]
+/// Derives the CodecSize trait for a struct, calculating the total size based on its fields.
+/// If the struct contains fields marked as properties, it includes the property size and
+/// the variable byte integer size for the property length. The generated implementation
+/// iterates over each field, calculating its size according to its type and attributes.
+///
+/// # Arguments
+/// * `input` - A TokenStream representing the struct to derive CodecSize for.
+///
+/// #Attributes
+/// * `codec` - Custom attribute used to specify property types for fields.
+///
+/// # Returns
+/// TokenStream representing the generated implementation.
+///
+/// <em>Note:</em> This macro currently only supports structs with named fields and relies on the
+/// 'vaux_mqtt::codec' module for size calculation functions.
+#[proc_macro_derive(CodecSize, attributes(codec))]
 pub fn derive_codec_size(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let name = &input.ident;
@@ -115,14 +90,21 @@ pub fn derive_codec_size(input: TokenStream) -> TokenStream {
     for field in &fields.named {
         if !has_attribute_with_name_value(&field.attrs, "codec", "property_type").unwrap_or(false) {
             let field_size_calc = field_size(field);
-            field_sizes.push(field_size_calc);
+            if let Some(skip_path) = get_skip_if_path(&field.attrs) {
+                let field_name = field.ident.as_ref().unwrap();
+                field_sizes.push(quote! {
+                    if !#skip_path(&self.#field_name) {
+                        #field_size_calc
+                    }
+                });
+            } else {
+                field_sizes.push(field_size_calc);
+            }
             continue;
         }
     }
-
     let size_wrapper = if has_properties {
         quote! {
-
             impl crate::CodecSize for #name {
                 fn codec_size(&self) -> u32 {
                     let mut total_size = 0;
@@ -130,7 +112,7 @@ pub fn derive_codec_size(input: TokenStream) -> TokenStream {
                     #(#field_sizes)*
 
                     let property_size = self.property_size();
-                    total_size + property_size + crate::variable_byte_int_size(property_size)
+                    total_size + property_size + codec::variable_byte_int_size(property_size)
                 }
             }
         }
@@ -151,7 +133,7 @@ pub fn derive_codec_size(input: TokenStream) -> TokenStream {
     TokenStream::from(size_wrapper)
 }
 
-#[proc_macro_derive(Encode, attributes(property, codec))]
+#[proc_macro_derive(Encode, attributes(codec))]
 pub fn derive_encode(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let struct_name = &input.ident;
@@ -179,7 +161,16 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
         .iter()
         .filter_map(|f| {
             if !has_attribute_with_name_value(&f.attrs, "codec", "property_type").unwrap_or(false) {
-                Some(encode::encode_field(f))
+                if let Some(skip_path) = get_skip_if_path(&f.attrs) {
+                    let field_name = f.ident.as_ref().unwrap();
+                    Some(quote! {
+                        if !#skip_path(&self.#field_name) {
+                            encode::encode_field(f)
+                        }
+                    })
+                } else {
+                    Some(encode::encode_field(f))
+                }
             } else {
                 None
             }
@@ -193,7 +184,17 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
         encoded.push(property_length_encoding);
         fields.named.iter().for_each(|f| {
             if has_attribute_with_name_value(&f.attrs, "codec", "property_type").unwrap_or(false) {
-                encoded.push(encode::encode_field(f));
+                let inner_expr = encode::encode_field(f);
+                if let Some(skip_path) = get_skip_if_path(&f.attrs) {
+                    let field_name = f.ident.as_ref().unwrap();
+                    encoded.push(quote! {
+                        if !#skip_path(&self.#field_name) {
+                            #inner_expr
+                        }
+                    })
+                } else {
+                    encoded.push(inner_expr);
+                }
             }
         });
     }
@@ -202,9 +203,7 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
         impl Encode for #struct_name {
             fn encode(&mut self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
                 use bytes::{BufMut, BytesMut};
-
                 #(#encoded)*
-
                 Ok(())
             }
         }
@@ -251,6 +250,39 @@ pub(crate) fn compile_error2(message: &str) -> proc_macro2::TokenStream {
     quote! {
         compile_error!(#error_message);
     }
+}
+
+/// Returns the skip_if path if there is a ```skip_if``` in the attributes for the field.
+/// The skip_if attribute is used to conditionally skip encoding/decoding/size calculation
+/// of a field based on a specific condition. This function extracts the condition specified
+/// in the skip_if attribute.
+///
+/// The path must resolve to  function that is called with &self and returns a bool indicating
+/// whether to skip the field or not.
+///
+pub(crate) fn get_skip_if_path(attrs: &[syn::Attribute]) -> Option<syn::Path> {
+    let codec_attrs = attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("codec"))
+        .collect::<Vec<_>>();
+    for attr in &codec_attrs {
+        let nested = attr
+            .parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
+            .ok()?;
+        for meta in nested {
+            if let Meta::NameValue(nv_pair) = meta {
+                if nv_pair.path.is_ident("skip_if") {
+                    if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
+                        if let syn::Lit::Str(lit_str) = &lit_expr.lit {
+                            let path: syn::Path = lit_str.parse().unwrap();
+                            return Some(path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Checks if the given attribute name exists in the list of attributes. This is used to
@@ -351,14 +383,4 @@ pub(crate) fn is_primitive_type(type_name: &str) -> bool {
         type_name,
         "u8" | "i8" | "bool" | "u16" | "i16" | "u32" | "i32" | "char"
     )
-}
-
-/// Filters out attributes whose path matches any in the exclude list. We use this
-/// to remove our custom attributes before passing the struct to other macros.
-fn filter_attributes(attrs: &Vec<syn::Attribute>, exclude: &[&str]) -> Vec<syn::Attribute> {
-    attrs
-        .iter()
-        .filter(|attr| !exclude.iter().any(|r| attr.path().is_ident(r)))
-        .cloned()
-        .collect()
 }

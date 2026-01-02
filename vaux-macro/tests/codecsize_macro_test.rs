@@ -141,3 +141,33 @@ fn test_size_impl_size_with() {
     let expected_size = custom_size(&test_instance.custom_sized_field); // should be 5 + 10 = 15
     assert_eq!(test_instance.codec_size(), expected_size);
 }
+
+#[test]
+fn test_skip_if_impl() {
+    fn is_zero(s: &u32) -> bool {
+        *s == 0
+    }
+
+    #[derive(CodecSize)]
+    struct TestStruct {
+        #[codec(skip_if = "is_zero")]
+        field_one: u32,
+        field_two: u16,
+    }
+
+    let test_instance_skip = TestStruct {
+        field_one: 0,
+        field_two: 42,
+    };
+
+    let test_instance_no_skip = TestStruct {
+        field_one: 10,
+        field_two: 42,
+    };
+
+    let expected_size_skip = 2; // only field_two size
+    let expected_size_no_skip = 4 + 2; // field_one + field_two sizes
+
+    assert_eq!(test_instance_skip.codec_size(), expected_size_skip);
+    assert_eq!(test_instance_no_skip.codec_size(), expected_size_no_skip);
+}

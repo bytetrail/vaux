@@ -1,10 +1,26 @@
 use bytes::BufMut;
-use vaux_macro::{CodecSize, Encode};
+use vaux_macro::{CodecSize, Encode, PropertyCodecSize};
 
 mod codec {
     pub use crate::MqttCodecError;
     use bytes::BufMut;
     pub use bytes::BytesMut;
+
+    pub fn variable_byte_int_size_ref(value: &u32) -> u32 {
+        variable_byte_int_size(*value)
+    }
+
+    pub fn variable_byte_int_size(value: u32) -> u32 {
+        if value < 128 {
+            1
+        } else if value < 16384 {
+            2
+        } else if value < 2097152 {
+            3
+        } else {
+            4
+        }
+    }
 
     pub fn put_utf8(val: &str, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         let len = val.len();
@@ -56,6 +72,16 @@ pub enum ErrorKind {
     InvalidUTF8,
 }
 
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
+pub enum TestProperty {
+    #[default]
+    PropertyOne,
+    PropertyTwo,
+    PropertyThree,
+    PropertyFour,
+    PropertyFive,
+}
+
 #[derive(Default, Debug)]
 pub struct MqttCodecError {
     pub reason: String,
@@ -64,6 +90,10 @@ pub struct MqttCodecError {
 
 trait CodecSize {
     fn codec_size(&self) -> u32;
+}
+
+trait PropertyCodecSize {
+    fn property_size(&self) -> u32;
 }
 
 trait Encode {
@@ -176,4 +206,73 @@ fn test_custom_encode_with() {
     assert_eq!(&dest[0..2], &[0x12, 0x34]);
     // low part (0x5678)
     assert_eq!(&dest[2..4], &[0x56, 0x78]);
+}
+
+fn is_zero(s: &u32) -> bool {
+    *s == 0
+}
+
+#[test]
+fn test_skip_if_impl() {
+    #[derive(CodecSize)]
+    struct TestStruct {
+        #[codec(skip_if = "is_zero")]
+        optional_w_none: u32,
+        #[codec(skip_if = "String::is_empty")]
+        optional_string: String,
+    }
+
+    let test_instance = TestStruct {
+        optional_w_none: 0,
+        optional_string: "".to_string(),
+    };
+
+    let test_instance_some = TestStruct {
+        optional_w_none: 5,
+        optional_string: "hello".to_string(),
+    };
+
+    let expected_size_some = 4 + 2 + 5; // size of optional_w_none + length of optional_string + string bytes
+    assert_eq!(test_instance_some.codec_size(), expected_size_some);
+    let expected_size_none = 0; // both fields are skipped
+    assert_eq!(test_instance.codec_size(), expected_size_none);
+}
+
+#[test]
+fn test_property_skip_if_impl() {
+    fn is_zero(s: &u32) -> bool {
+        *s == 0
+    }
+
+    #[derive(PropertyCodecSize, CodecSize, Encode)]
+    struct TestStruct {
+        #[codec(property_type = "TestProperty::PropertyOne")]
+        #[codec(skip_if = "is_zero")]
+        optional_w_none: u32,
+        #[codec(property_type = "TestProperty::PropertyTwo")]
+        #[codec(skip_if = "String::is_empty")]
+        optional_string: String,
+    }
+
+    let test_instance = TestStruct {
+        optional_w_none: 0,
+        optional_string: "".to_string(),
+    };
+
+    let test_instance_some = TestStruct {
+        optional_w_none: 5,
+        optional_string: "hello".to_string(),
+    };
+
+    let expected_size_some = 1 + 4 + 1 + 2 + 5; // property id + size of optional_w_none + property id + length of optional_string + string bytes
+    assert_eq!(test_instance_some.property_size(), expected_size_some);
+    let expected_size_none = 0; // both fields are skipped
+    assert_eq!(test_instance.property_size(), expected_size_none);
+    // codec size should be 1 for all skipped properties
+    let expected_codec_size = 1;
+    assert_eq!(test_instance.codec_size(), expected_codec_size);
+    // expected codec size for some
+    // property length field + prop id + size of optional_w_none + prop id + length of optional_string + string bytes
+    let expected_codec_size_some = 1 + 1 + 4 + 1 + 2 + 5;
+    assert_eq!(test_instance_some.codec_size(), expected_codec_size_some);
 }

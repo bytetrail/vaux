@@ -69,3 +69,22 @@ fn test_vec_property_size_impl() {
     };
     assert_eq!(test_instance_some.property_size(), 6); // 1 byte for property identifier + 2 bytes for length + 3 bytes for data
 }
+
+
+#[test]
+fn test_skip_if_impl() {
+    #[derive(PropertyCodecSize)]
+    struct TestStruct {
+        #[codec(property_type = "TestProperty::PropertyOne")]
+        #[codec(skip_if(Vec::is_empty))]
+        data: Vec<u8>,
+    }
+
+    let test_instance_empty = TestStruct { data: vec![] };
+    assert_eq!(test_instance_empty.property_size(), 0); // skipped due to empty vec
+
+    let test_instance_non_empty = TestStruct {
+        data: vec![1, 2, 3],
+    };
+    assert_eq!(test_instance_non_empty.property_size(), 6); // 1 byte for property identifier + 2 bytes for length + 3 bytes for data
+}
