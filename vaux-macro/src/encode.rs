@@ -1,6 +1,6 @@
 use quote::quote;
 use syn::{Meta, Token, punctuated::Punctuated};
-use crate::{attribute_with_name_value, compile_error2, has_attribute, has_attribute_with_name_value, is_primitive_type, struct_has_attribute_with_name_value};
+use crate::{attribute_with_name_value, compile_error2, has_attribute_with_name_value, is_primitive_type, };
 
 /// Generate encode implementation for struct fields. The struct fields are encoded in
 /// the order they are defined with the exception of property length which does not

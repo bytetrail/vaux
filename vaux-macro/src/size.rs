@@ -9,42 +9,59 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
     let is_property: bool =
         crate::has_attribute_with_name_value(attrs, "codec", "property_type").unwrap();
     let codec_size_with =
-        crate::has_attribute_with_name_value(attrs, "codec", "with_size").unwrap();
-
+        crate::has_attribute_with_name_value(attrs, "codec", "size_with").unwrap();
     let field_calc = match field_type {
         syn::Type::Path(type_path) => {
             let segment = &type_path.path.segments.last().unwrap().ident;
-            match segment.to_string().as_str() {
-                "Vec" => size_for_vec(field_name, type_path, is_property, false),
-                "String" => {
-                    if is_property {
-                        size_for_string_property(field_name, false)
-                    } else {
-                        size_for_string(field_name)
+            if codec_size_with {
+                match crate::attribute_with_name_value(attrs, "codec", "size_with") {
+                    Ok(Some(attr)) => {
+                        if matches!(segment.to_string().as_str(), "Option") {
+                            size_with_path(field_name, &attr, true, is_property)
+                        } else {
+                            size_with_path(field_name, &attr, false, is_property)
+                        }
+                    }
+                    Ok(None) | Err(_) => {
+                        compile_error2("Invalid 'size_with' attribute for Size derive")
                     }
                 }
-                "Option" => {
-                    let generic_type = match &type_path.path.segments.last().unwrap().arguments {
-                        syn::PathArguments::AngleBracketed(args) => args.args.first().unwrap(),
-                        _ => {
-                            return compile_error2("Unsupported Option type for Size derive");
+            } else {
+                match segment.to_string().as_str() {
+                    "Vec" => size_for_vec(field_name, type_path, is_property, false),
+                    "String" => {
+                        if is_property {
+                            size_for_string_property(field_name, false)
+                        } else {
+                            size_for_string(field_name)
                         }
-                    };
-                    match generic_type {
-                        syn::GenericArgument::Type(syn::Type::Path(inner_type_path)) => {
-                            let inner_segment =
-                                &inner_type_path.path.segments.last().unwrap().ident;
-                            if codec_size_with {
-                                match crate::attribute_with_name_value(attrs, "codec", "with_size")
-                                {
-                                    Ok(Some(attr)) => {
-                                        size_with_path(field_name, &attr, true, is_property)
-                                    }
-                                    Ok(None) | Err(_) => compile_error2(
-                                        "Invalid 'with_size' attribute for Size derive",
-                                    ),
-                                }
-                            } else {
+                    }
+                    "Option" => {
+                        let generic_type = match &type_path.path.segments.last().unwrap().arguments
+                        {
+                            syn::PathArguments::AngleBracketed(args) => args.args.first().unwrap(),
+                            _ => {
+                                return compile_error2("Unsupported Option type for Size derive");
+                            }
+                        };
+                        match generic_type {
+                            syn::GenericArgument::Type(syn::Type::Path(inner_type_path)) => {
+                                let inner_segment =
+                                    &inner_type_path.path.segments.last().unwrap().ident;
+                                // if codec_size_with {
+                                //     match crate::attribute_with_name_value(
+                                //         attrs,
+                                //         "codec",
+                                //         "size_with",
+                                //     ) {
+                                //         Ok(Some(attr)) => {
+                                //             size_with_path(field_name, &attr, true, is_property)
+                                //         }
+                                //         Ok(None) | Err(_) => compile_error2(
+                                //             "Invalid 'size_with' attribute for Size derive",
+                                //         ),
+                                //     }
+                                // } else {
                                 match inner_segment.to_string().as_str() {
                                     "Vec" => {
                                         size_for_vec(field_name, inner_type_path, is_property, true)
@@ -75,19 +92,19 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
                                     }
                                 }
                             }
+                            _ => compile_error2("Unsupported Option type for Size derive"),
                         }
-                        _ => compile_error2("Unsupported Option type for Size derive"),
                     }
-                }
-                type_name => {
-                    if is_primitive_type(type_name) {
-                        if is_property {
-                            size_for_primitive_property(field_name, type_name, false)
+                    type_name => {
+                        if is_primitive_type(type_name) {
+                            if is_property {
+                                size_for_primitive_property(field_name, type_name, false)
+                            } else {
+                                size_for_primitive(field_type)
+                            }
                         } else {
-                            size_for_primitive(field_type)
+                            size_for_codec_size(field_name, is_property, false)
                         }
-                    } else {
-                        size_for_codec_size(field_name, is_property, false)
                     }
                 }
             }
@@ -350,7 +367,7 @@ fn size_with_path(
         Ok(nested) => {
             let meta = nested.iter().find_map(|m| {
                 if let Meta::NameValue(nv_pair) = m {
-                    if nv_pair.path.is_ident("with_size") {
+                    if nv_pair.path.is_ident("size_with") {
                         if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
                             if let syn::Lit::Str(lit_str) = &lit_expr.lit {
                                 let path: syn::Path = lit_str.parse().unwrap();
@@ -367,12 +384,12 @@ fn size_with_path(
                                 }
                             } else {
                                 Some(compile_error2(
-                                    "Expected string literal for 'with_size' attribute",
+                                    "Expected string literal for 'size_with' attribute",
                                 ))
                             }
                         } else {
                             Some(compile_error2(
-                                "Expected literal expression for 'with_size' attribute",
+                                "Expected literal expression for 'size_with' attribute",
                             ))
                         }
                     } else {
@@ -385,10 +402,10 @@ fn size_with_path(
             if let Some(tokens) = meta {
                 tokens
             } else {
-                compile_error2("Expected 'with_size' attribute with a path literal")
+                compile_error2("Expected 'size_with' attribute with a path literal")
             }
         }
-        Err(_) => compile_error2("Failed to parse 'with_size' attribute"),
+        Err(_) => compile_error2("Failed to parse 'size_with' attribute"),
     }
 }
 
@@ -521,12 +538,12 @@ mod tests {
 
     #[test]
     fn test_size_with_path() {
-        // let field_name = syn::Ident::new("custom_field", proc_macro2::Span::call_site());
-        // let attr: syn::Attribute = syn::parse_quote!(#[codec(with_size = "custom_size_function")]);
-        // let tokens = size_with_path(&field_name, &attr, false, false);
-        // let expected = quote! {
-        //     total_size += custom_size_function(&self.custom_field);
-        // };
-        // assert_eq!(tokens.to_string(), expected.to_string());
+        let field_name = syn::Ident::new("custom_field", proc_macro2::Span::call_site());
+        let attr: syn::Attribute = syn::parse_quote!(#[codec(size_with = "custom_size_function")]);
+        let tokens = size_with_path(&field_name, &attr, false, false);
+        let expected = quote! {
+            total_size += custom_size_function(&self.custom_field);
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
     }
 }

@@ -482,6 +482,10 @@ pub(crate) fn variable_byte_int_size(value: u32) -> u32 {
     }
 }
 
+pub(crate) fn variable_byte_int_size_ref(value: &u32) -> u32 {
+    variable_byte_int_size(*value)
+}
+
 #[cfg(not(feature = "pedantic"))]
 pub fn get_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {
     Ok(src.get_u8() != 0)

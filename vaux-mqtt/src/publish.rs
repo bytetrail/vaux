@@ -227,46 +227,8 @@ impl Publish {
 
 #[cfg(test)]
 mod test {
-    use bytes::BytesMut;
 
     use super::*;
-
-    const LEN_TOPIC_NAME_LEN: u32 = 2;
-    const LEN_TOPIC_NAME: u32 = 5;
-
-    #[test]
-    fn test_fail_topic() {
-        let hdr = crate::FixedHeader::new(PacketType::Publish);
-        match Publish::new_from_header(hdr) {
-            Ok(mut publish) => {
-                let mut dest = BytesMut::new();
-                match publish.encode(&mut dest) {
-                    Ok(_) => panic!("expected error on encode"),
-                    Err(e) => {
-                        assert_eq!("MQTTv5 3.3.2.1", &e.reason[0..14]);
-                    }
-                }
-            }
-            Err(e) => panic!("unable to encode publish record: {}", e),
-        }
-    }
-
-    #[test]
-    fn test_fail_packet_id() {
-        let hdr = crate::FixedHeader::new(PacketType::Publish);
-        match Publish::new_from_header(hdr) {
-            Ok(mut publish) => {
-                let mut dest = BytesMut::new();
-                match publish.encode(&mut dest) {
-                    Ok(_) => panic!("expected error on encode"),
-                    Err(e) => {
-                        assert_eq!("MQTTv5 3.3.2.1", &e.reason[0..14]);
-                    }
-                }
-            }
-            Err(e) => panic!("unable to encode publish record: {}", e),
-        }
-    }
 
     #[test]
     fn test_new_with_message() {

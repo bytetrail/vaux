@@ -110,7 +110,10 @@ impl SubscriptionFilter {
 pub struct SubscribeHeader {
     packet_id: u16,
     #[codec(property_type = "PropertyType::SubscriptionIdentifier")]
-    #[codec(encode_with = "codec::encode_variable_byte_int_ref")]
+    #[codec(
+        size_with = "codec::variable_byte_int_size_ref",
+        encode_with = "codec::encode_variable_byte_int_ref"
+    )]
     pub subscription_id: Option<u32>,
     #[codec(property_type = "PropertyType::UserProperty")]
     pub props: UserProperty,
@@ -194,132 +197,3 @@ impl Subscribe {
         self.payload.filter.clear();
     }
 }
-
-//     pub fn new(filter: Vec<SubscriptionFilter>) -> Self {
-//         Self { filter }
-//     }
-
-//     pub fn new_with_id(id: u32, filter: Vec<SubscriptionFilter>) -> Result<Self, MqttError> {
-//         let mut s = Self { filter };
-//         Ok(s)
-//     }
-
-//     pub fn id(&self) -> Option<u32> {
-//         self.id
-//     }
-
-// }
-
-// impl From<&Subscribe> for Subscription {
-//     fn from(sub: &Subscribe) -> Self {
-//         let mut filter = Vec::new();
-//         for s in &sub.payload {
-//             filter.push(s.clone());
-//         }
-
-//         Self {
-//             id: Self::id_from_properties(sub.properties()),
-//             filter,
-//         }
-//     }
-// }
-
-// impl From<Subscribe> for Subscription {
-//     fn from(sub: Subscribe) -> Self {
-//         let mut filter = Vec::new();
-//         let id = Self::id_from_properties(sub.properties());
-//         for s in sub.payload {
-//             filter.push(s);
-//         }
-//         Self { id, filter }
-//     }
-// }
-
-// /// Create a Subscribe packet from a Subscription. The SUBSCRIBE packet
-// /// is created with the Subscription Identifier property set to the id
-// /// of the Subscription when that ID is Some.
-// impl From<&Subscription> for Subscribe {
-//     fn from(sub: &Subscription) -> Self {
-//         let mut subscribe = Subscribe::default();
-//         if let Some(id) = sub.id {
-//             subscribe
-//                 .props
-//                 .set_codec(Property::SubscriptionIdentifier(id));
-//         }
-//         for s in &sub.filter {
-//             subscribe.add_subscription(s.clone());
-//         }
-//         subscribe
-//     }
-// }
-
-// impl From<Subscription> for Subscribe {
-//     fn from(sub: Subscription) -> Self {
-//         let mut subscribe = Subscribe::default();
-//         if let Some(id) = sub.id {
-//             subscribe
-//                 .props
-//                 .set_codec(Property::SubscriptionIdentifier(id));
-//         }
-//         for s in sub.filter {
-//             subscribe.add_subscription(s);
-//         }
-//         subscribe
-//     }
-// }
-
-// #[derive(Default, Debug, Clone, PartialEq, Eq, CodecSize, PropertyCodecSize, Encode, Decode)]
-// pub struct SubscribeHeader {
-//     packet_id: u16,
-//     #[codec(property_type = "PropertyType::SubscriptionIdentifier")]
-//     pub subscription_id: Option<u32>,
-//     #[codec(property_type = "PropertyType::UserProperty")]
-//     pub props: UserProperty,
-//     //    payload: Vec<SubscriptionFilter>,
-// }
-
-// impl Default for Subscribe {
-//     fn default() -> Self {
-//         Self {
-//             packet_id: 0,
-//             props: PropertyBundle::new(&SUBSCRIPTION_PROPS),
-//             payload: Vec::new(),
-//         }
-//     }
-// }
-
-// impl Subscribe {
-//     pub fn new(packet_id: u16, payload: Vec<SubscriptionFilter>) -> Self {
-//         Self {
-//             packet_id,
-//             props: PropertyBundle::new(&SUBSCRIPTION_PROPS),
-//             payload,
-//         }
-//     }
-
-//     pub fn packet_id(&self) -> u16 {
-//         self.packet_id
-//     }
-
-//     pub fn set_packet_id(&mut self, packet_id: u16) {
-//         // TODO replace with codec error
-//         assert!(packet_id != 0);
-//         self.packet_id = packet_id;
-//     }
-
-//     pub fn add_subscription(&mut self, subscription: SubscriptionFilter) {
-//         self.payload.push(subscription);
-//     }
-
-//     fn encode_payload(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
-//         if self.payload.is_empty() {
-//             return Err(MqttCodecError::new(
-//                 "MQTTv5 3.8.3 subscribe payload must exist",
-//             ));
-//         }
-//         for sub in &mut self.payload {
-//             sub.encode(dest)?;
-//         }
-//         Ok(())
-//     }
-// }

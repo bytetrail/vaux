@@ -127,10 +127,10 @@ fn custom_size(value: &u32) -> u32 {
 }
 
 #[test]
-fn test_size_impl_with_size() {
+fn test_size_impl_size_with() {
     #[derive(CodecSize)]
     struct TestStruct {
-        #[codec(with_size = "custom_size")]
+        #[codec(size_with = "custom_size")]
         custom_sized_field: u32,
     }
 
