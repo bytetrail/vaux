@@ -1,5 +1,6 @@
 use quote::quote;
-use crate::{compile_error2, has_attribute, is_primitive_type};
+use syn::{Meta, Token, punctuated::Punctuated};
+use crate::{attribute_with_name_value, compile_error2, has_attribute, has_attribute_with_name_value, is_primitive_type, struct_has_attribute_with_name_value};
 
 /// Generate encode implementation for struct fields. The struct fields are encoded in
 /// the order they are defined with the exception of property length which does not
@@ -11,12 +12,13 @@ use crate::{compile_error2, has_attribute, is_primitive_type};
 pub(crate) fn encode_field(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_name = &field.ident;
     let field_type = &field.ty;
-    let is_property = has_attribute(&field.attrs, "property");
+    let is_property = has_attribute_with_name_value(&field.attrs, "codec", "property_type").unwrap();
+    let encode_with = attribute_with_name_value(&field.attrs, "codec", "encode_with").unwrap();
     let mut property_type = None;  
     field
         .attrs
         .iter()
-        .find(|attr| attr.path().is_ident("property"))
+        .find(|attr| attr.path().is_ident("codec"))
         .and_then(|attr| {                    
             Some(attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("property_type") {
@@ -24,12 +26,10 @@ pub(crate) fn encode_field(field: &syn::Field) -> proc_macro2::TokenStream {
                     property_type = Some(value.value());
                     Ok(())
                 } else {
-                    Err(meta.error("Expected property_type argument"))
+                    Ok(())
                 }
             }))
         });
-
-
     if property_type.is_none() && is_property {
         return compile_error2("Property attribute requires a property_type argument");
     } 
@@ -53,17 +53,25 @@ pub(crate) fn encode_field(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_encode = match field_type {
         syn::Type::Path(type_path) => {
             let segment = &type_path.path.segments.last().unwrap().ident;
-            match segment.to_string().as_str() {
-                "String" => encode_for_string(&field_name, false, property_type_ident),
-                "Vec" => encode_for_vec(&field_name, &type_path, false, property_type_ident),
-                "Option" => encode_for_option(&field_name, &type_path, property_type_ident),
-                type_name => {
-                    if is_primitive_type(type_name) {
-                        encode_for_primitive(&field_name, type_name, false,  property_type_ident)
-                    } else {
-                        quote! {
-                            // Encoding logic for complex property
-                            self.#field_name.encode(dest)?;
+            if encode_with.is_some() {
+                let optional_field = match segment.to_string().as_str() {
+                    "Option" => true,
+                    _ => false,
+                };
+                encode_for_custom(&field_name, &encode_with.unwrap(), optional_field, property_type_ident)
+            } else {
+                match segment.to_string().as_str() {
+                    "String" => encode_for_string(&field_name, false, property_type_ident),
+                    "Vec" => encode_for_vec(&field_name, &type_path, false, property_type_ident),
+                    "Option" => encode_for_option(&field_name, &type_path, property_type_ident),
+                    type_name => {
+                        if is_primitive_type(type_name) {
+                            encode_for_primitive(&field_name, type_name, false,  property_type_ident)
+                        } else {
+                            quote! {
+                                // Encoding logic for complex property
+                                self.#field_name.encode(dest)?;
+                            }
                         }
                     }
                 }
@@ -292,6 +300,61 @@ pub(crate) fn encode_for_primitive(
             #encode
         }        
     }
+
+
+}
+
+fn encode_for_custom(
+    field_name: &Option<syn::Ident>,
+    attr: &syn::Attribute,
+    optional_field: bool,
+    property_type: Option<proc_macro2::TokenStream>,
+) -> proc_macro2::TokenStream {
+    let prop_ident_encode = if let Some(prop_ident) = property_type {
+         quote! {
+            // Encoding logic for String property            
+            dest.put_u8(#prop_ident as u8);
+        }
+    } else {
+        quote! {
+        }
+    };
+     match attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated) {
+        Ok(nested) => {
+            let meta = nested.iter().find_map(|m| {
+                if let Meta::NameValue(nv_pair) = m {
+                    if nv_pair.path.is_ident("encode_with") {
+                        if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
+                            if let syn::Lit::Str(lit_str) = &lit_expr.lit {
+                                let path: syn::Path = lit_str.parse().unwrap();
+                                if optional_field {
+                                    return Some(quote! {
+                                        if let Some(f) = self.#field_name.as_ref() {
+                                            #prop_ident_encode
+                                            #path(f, dest)?;
+                                        }
+                                    });
+                                } else {
+                                    return Some(quote! {
+                                        #prop_ident_encode
+                                        #path(&self.#field_name, dest)?;    
+                                    });
+
+                                }
+                            }
+                        }
+                    }
+                }
+                None
+            });
+            if let Some(tokens) = meta {
+                tokens
+            } else {
+                compile_error2("Unsupported custom encode attribute for Encode derive")
+            }
+        }
+        Err(_) => compile_error2("Unsupported custom encode attribute for Encode derive"),
+    }
 }
 
 #[cfg(test)]
@@ -374,7 +437,19 @@ mod test {
             }
         };
         assert_eq!(encode_tokens.to_string(), expected.to_string());
+    }
 
+    #[test]
+    fn test_encode_with_attr() {
+        let field_name = Some(syn::Ident::new("custom_field", proc_macro2::Span::call_site()));
+        let attr: syn::Attribute = syn::parse_quote!(#[codec(encode_with = "custom_encode_function")]);
+        let encode_tokens = encode_for_custom(&field_name, &attr, false, Some(quote! { TestProperty::PropertySix }));
+        let expected = quote! {
+            // Encoding logic for String property            
+            dest.put_u8(TestProperty::PropertySix as u8);
+            custom_encode_function(&self.custom_field, dest)?;    
+        };
+        assert_eq!(encode_tokens.to_string(), expected.to_string());
     }
 
 }

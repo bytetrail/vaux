@@ -1,7 +1,9 @@
 use bytes::{BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 use vaux_mqtt::{
-    ConnAck, Connect, Decode, Disconnect, Encode, MqttCodecError, Packet, PacketType, codec::{PingReqCtrl, PingRespCtrl}, decode_fixed_header
+    codec::{PingReq, PingResp},
+    decode_fixed_header, ConnAck, Connect, Decode, Disconnect, Encode, MqttCodecError, Packet,
+    PacketType,
 };
 
 #[derive(Debug)]

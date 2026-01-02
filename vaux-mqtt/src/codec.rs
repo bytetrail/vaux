@@ -544,6 +544,11 @@ pub fn put_bin(src: &[u8], dest: &mut BytesMut) -> Result<(), MqttCodecError> {
     Ok(())
 }
 
+pub fn encode_variable_byte_int_ref(val: &u32, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    put_var_u32(*val, dest);
+    Ok(())
+}
+
 pub fn put_var_u32(val: u32, dest: &mut BytesMut) {
     let mut encode = true;
     let mut input_val = val;

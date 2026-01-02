@@ -163,21 +163,22 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
         }
     };
     // check if any field has the property attribute
-    let has_properties = struct_has_attribute(
+    let has_properties = struct_has_attribute_with_name_value(
         match &input.fields {
             syn::Fields::Named(fields_named) => fields_named,
             _ => {
                 return compile_error("Encode can only be derived for structs with named fields");
             }
         },
-        "property",
+        "codec",
+        "property_type",
     );
     // encode the non-property fields first, then the property fields if any
     let mut encoded = fields
         .named
         .iter()
         .filter_map(|f| {
-            if !has_attribute(&f.attrs, "property") {
+            if !has_attribute_with_name_value(&f.attrs, "codec", "property_type").unwrap_or(false) {
                 Some(encode::encode_field(f))
             } else {
                 None
@@ -187,23 +188,14 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
     if has_properties {
         // encode the property length
         let property_length_encoding = quote! {
-            let property_size = self.property_size();
-            codec::put_var_u32(property_size, dest);
+            codec::put_var_u32(self.property_size(), dest);
         };
         encoded.push(property_length_encoding);
-        let mut encoded_properties = fields
-            .named
-            .iter()
-            .filter_map(|f| {
-                if has_attribute(&f.attrs, "property") {
-                    Some(encode::encode_field(f))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-        encoded.append(&mut encoded_properties);
+        fields.named.iter().for_each(|f| {
+            if has_attribute_with_name_value(&f.attrs, "codec", "property_type").unwrap_or(false) {
+                encoded.push(encode::encode_field(f));
+            }
+        });
     }
 
     let encode_impl = quote! {
@@ -265,13 +257,28 @@ pub(crate) fn compile_error2(message: &str) -> proc_macro2::TokenStream {
 /// determine if a specific custom attribute is present on a struct or field. In the Size
 /// macro, we might use this to check for attributes that specify a specific type for size
 ///  calculation.
+#[allow(dead_code)]
 fn has_attribute(attrs: &[syn::Attribute], name: &str) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident(name))
 }
 
+/// Checks if any of the named fields has the specified attribute.
+#[allow(dead_code)]
+pub(crate) fn struct_has_attribute(fields: &syn::FieldsNamed, attribute_name: &str) -> bool {
+    for field in &fields.named {
+        for attr in &field.attrs {
+            if attr.path().is_ident(attribute_name) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Checks if the given attribute with a specific name-value pair exists in the list of attributes.
 /// This is useful for attributes that have key-value pairs, allowing us to check for specific
-/// configurations within an attribute.
+/// configurations within an attribute. The codec attribute often contains such key-value pairs to
+/// customize behavior for encoding, decoding, or size calculation.
 pub(crate) fn has_attribute_with_name_value(
     attrs: &[syn::Attribute],
     name: &str,
@@ -294,33 +301,30 @@ pub(crate) fn has_attribute_with_name_value(
     Ok(false)
 }
 
+/// Retrieves the attribute with the specified name-value pair from the list of attributes.
+/// This is useful for attributes that have key-value pairs, allowing us to check for specific
+/// configurations within an attribute. The codec attribute often contains such key-value pairs to
+/// customize behavior for encoding, decoding, or size calculation.
 pub(crate) fn attribute_with_name_value<'a>(
     attrs: &'a [syn::Attribute],
     name: &str,
     key: &str,
-) -> Option<&'a syn::Attribute> {
-    for attr in attrs {
-        if attr.path().is_ident(name) {
-            if let syn::Meta::NameValue(nv_pair) = &attr.meta {
+) -> Result<Option<&'a syn::Attribute>, syn::Error> {
+    let codec_attrs = attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident(name))
+        .collect::<Vec<_>>();
+    for attr in &codec_attrs {
+        let nested = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+        for meta in nested {
+            if let Meta::NameValue(nv_pair) = meta {
                 if nv_pair.path.is_ident(key) {
-                    return Some(attr);
+                    return Ok(Some(attr));
                 }
             }
         }
     }
-    None
-}
-
-/// Checks if any of the named fields has the specified attribute.
-pub(crate) fn struct_has_attribute(fields: &syn::FieldsNamed, attribute_name: &str) -> bool {
-    for field in &fields.named {
-        for attr in &field.attrs {
-            if attr.path().is_ident(attribute_name) {
-                return true;
-            }
-        }
-    }
-    false
+    Ok(None)
 }
 
 pub(crate) fn struct_has_attribute_with_name_value(
@@ -347,25 +351,6 @@ pub(crate) fn is_primitive_type(type_name: &str) -> bool {
         type_name,
         "u8" | "i8" | "bool" | "u16" | "i16" | "u32" | "i32" | "char"
     )
-}
-
-pub(crate) fn codec_as(attrs: &[syn::Attribute]) -> Option<String> {
-    let mut codec_as_type = None;
-    attrs
-        .iter()
-        .find(|attr| attr.path().is_ident("codec_as"))
-        .and_then(|attr| {
-            Some(attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("as") {
-                    let value: syn::LitStr = meta.value()?.parse()?;
-                    codec_as_type = Some(value.value());
-                    Ok(())
-                } else {
-                    Err(meta.error("Expected property_type argument"))
-                }
-            }))
-        });
-    codec_as_type
 }
 
 /// Filters out attributes whose path matches any in the exclude list. We use this

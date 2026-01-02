@@ -196,7 +196,7 @@ impl Broker {
                                             }
                                         }
                                     }
-                                    stream.write(&Packet::Disconnect(Disconnect::new(reason))).await?;
+                                    stream.write(&mut Packet::Disconnect(Disconnect::new(reason))).await?;
                                 } else {
                                     // no active session to deactivate, shutdown the stream
                                     stream.shutdown().await?;
@@ -264,12 +264,12 @@ impl Broker {
     ) -> Result<(), BrokerError> {
         match packet {
             Packet::PingRequest(_) => {
-                let packet = PingResponse(PingRespCtrl::new_with_type(PacketType::PingResp));
-                stream.write(&packet).await?;
+                let mut packet = PingResponse(PingResp::new_with_type(PacketType::PingResp));
+                stream.write(&mut packet).await?;
                 Ok(())
             }
             Packet::Disconnect(packet) => {
-                if let Reason::Success = packet.reason {
+                if let Reason::Success = packet.reason() {
                     // discard the will message
                     {
                         let mut session = session.write().await;
@@ -315,14 +315,14 @@ impl Broker {
             Packet::Connect(packet) => Broker::handle_connect(*packet, stream, session_pool).await,
             Packet::PingRequest(_packet) => {
                 // allow clients without connected session to ping
-                let packet = PingResponse(PingRespCtrl::new_with_type(PacketType::PingResp));
-                stream.write(&packet).await?;
+                let mut packet = PingResponse(PingResp::new_with_type(PacketType::PingResp));
+                stream.write(&mut packet).await?;
                 Ok(None)
             }
             _ => {
                 let header = Disconnect::new(Reason::ProtocolErr);
-                let packet = Packet::Disconnect(header);
-                stream.write(&packet).await?;
+                let mut packet = Packet::Disconnect(header);
+                stream.write(&mut packet).await?;
                 Ok(None)
             }
         }
@@ -343,17 +343,17 @@ impl Broker {
             )
         };
         // handle keep alive request
-        let keep_alive = if connect.keep_alive < default_keep_alive_secs {
+        let keep_alive = if connect.keep_alive() < default_keep_alive_secs {
             ack.set_server_keep_alive(default_keep_alive_secs);
             Duration::from_secs((default_keep_alive_secs as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64)
-        } else if connect.keep_alive > max_keep_alive_secs {
+        } else if connect.keep_alive() > max_keep_alive_secs {
             ack.set_server_keep_alive(max_keep_alive_secs);
             Duration::from_secs((max_keep_alive_secs as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64)
         } else {
-            Duration::from_secs((connect.keep_alive as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64)
+            Duration::from_secs((connect.keep_alive() as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64)
         };
         // handle the session expiry request
-        let session_expiry = if let Some(requested_expiry) = connect.session_expiry() {
+        let session_expiry = if let Some(requested_expiry) = connect.session_expiry_interval() {
             if requested_expiry > 0 {
                 // set the ack expiry if the requested expiry is less greater than max allowed
                 let max_expiry: u32;
@@ -373,17 +373,14 @@ impl Broker {
             None
         };
         // handle the client id
-        if connect.client_id.is_empty() {
+        if connect.client_id().is_empty() {
             session_id = Uuid::new_v4().to_string();
-            ack.properties_mut()
-                .set_property(vaux_mqtt::property::Property::AssignedClientId(
-                    session_id.clone(),
-                ));
+            ack.set_assigned_client_id(Some(session_id.clone()));
         } else {
-            session_id = connect.client_id.clone();
+            session_id = connect.client_id().to_string();
         }
         let mut session_pool = session_pool.write().await;
-        let session: Arc<RwLock<Session>> = if connect.clean_start {
+        let session: Arc<RwLock<Session>> = if connect.clean_start() {
             // clean start will remove any existing session if it exists and create a new session
             // if the session is active, the session will be taken over by the new client
             if let Some(existing_session) = session_pool.remove(session_id.as_str()) {
@@ -439,7 +436,7 @@ impl Broker {
                 session.set_session_expiry(expiry);
             }
         }
-        stream.write(&Packet::ConnAck(ack)).await?;
+        stream.write(&mut Packet::ConnAck(ack)).await?;
         Ok(Some(Arc::clone(&session)))
         //Ok(None)
     }

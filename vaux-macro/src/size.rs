@@ -1,5 +1,6 @@
 use crate::compile_error2;
 use quote::quote;
+use syn::{punctuated::Punctuated, Meta, Token};
 
 pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_name = field.ident.as_ref().unwrap();
@@ -34,12 +35,14 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
                             let inner_segment =
                                 &inner_type_path.path.segments.last().unwrap().ident;
                             if codec_size_with {
-                                if let Some(attr) =
-                                    crate::attribute_with_name_value(attrs, "codec", "with_size")
+                                match crate::attribute_with_name_value(attrs, "codec", "with_size")
                                 {
-                                    size_with_path(field_name, &attr, true, is_property)
-                                } else {
-                                    compile_error2("Invalid 'with_size' attribute for Size derive")
+                                    Ok(Some(attr)) => {
+                                        size_with_path(field_name, &attr, true, is_property)
+                                    }
+                                    Ok(None) | Err(_) => compile_error2(
+                                        "Invalid 'with_size' attribute for Size derive",
+                                    ),
                                 }
                             } else {
                                 match inner_segment.to_string().as_str() {
@@ -343,31 +346,49 @@ fn size_with_path(
             total_size +=
         }
     };
-    let meta = &attr.meta;
-    if let syn::Meta::NameValue(name_value) = meta {
-        if name_value.path.is_ident("with_size") {
-            if let syn::Expr::Path(expr_path) = &name_value.value {
-                // turn the path into a function call with the field as argument
-                let path = &expr_path.path;
-                if optional_field {
-                    quote! {
-                        if let Some(field_name) = &self.#field_name {
-                            #size_prefix  #path(#field_name);
+    match attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated) {
+        Ok(nested) => {
+            let meta = nested.iter().find_map(|m| {
+                if let Meta::NameValue(nv_pair) = m {
+                    if nv_pair.path.is_ident("with_size") {
+                        if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
+                            if let syn::Lit::Str(lit_str) = &lit_expr.lit {
+                                let path: syn::Path = lit_str.parse().unwrap();
+                                if optional_field {
+                                    Some(quote! {
+                                        if let Some(#field_name) = &self.#field_name {
+                                            #size_prefix  #path(#field_name);
+                                        }
+                                    })
+                                } else {
+                                    Some(quote! {
+                                        #size_prefix #path(&self.#field_name);
+                                    })
+                                }
+                            } else {
+                                Some(compile_error2(
+                                    "Expected string literal for 'with_size' attribute",
+                                ))
+                            }
+                        } else {
+                            Some(compile_error2(
+                                "Expected literal expression for 'with_size' attribute",
+                            ))
                         }
+                    } else {
+                        None
                     }
                 } else {
-                    quote! {
-                        #size_prefix #path(&self.#field_name);
-                    }
+                    None
                 }
+            });
+            if let Some(tokens) = meta {
+                tokens
             } else {
-                compile_error2("Expected a path for 'with_size' attribute")
+                compile_error2("Expected 'with_size' attribute with a path literal")
             }
-        } else {
-            compile_error2("Expected path expression with size attribute")
         }
-    } else {
-        compile_error2("Expected name value pair in attribute arguments")
+        Err(_) => compile_error2("Failed to parse 'with_size' attribute"),
     }
 }
 
@@ -496,5 +517,16 @@ mod tests {
             }
         };
         assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_size_with_path() {
+        // let field_name = syn::Ident::new("custom_field", proc_macro2::Span::call_site());
+        // let attr: syn::Attribute = syn::parse_quote!(#[codec(with_size = "custom_size_function")]);
+        // let tokens = size_with_path(&field_name, &attr, false, false);
+        // let expected = quote! {
+        //     total_size += custom_size_function(&self.custom_field);
+        // };
+        // assert_eq!(tokens.to_string(), expected.to_string());
     }
 }

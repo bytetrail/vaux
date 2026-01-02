@@ -121,3 +121,23 @@ fn test_size_impl_struct() {
     let expected_size = 7 + 7 + 0 + 1 + 2; // size of test_string + optional_string + optianl_w_none + _a + _b
     assert_eq!(test_instance.codec_size(), expected_size);
 }
+
+fn custom_size(value: &u32) -> u32 {
+    *value + 10
+}
+
+#[test]
+fn test_size_impl_with_size() {
+    #[derive(CodecSize)]
+    struct TestStruct {
+        #[codec(with_size = "custom_size")]
+        custom_sized_field: u32,
+    }
+
+    let test_instance = TestStruct {
+        custom_sized_field: 5,
+    };
+
+    let expected_size = custom_size(&test_instance.custom_sized_field); // should be 5 + 10 = 15
+    assert_eq!(test_instance.codec_size(), expected_size);
+}

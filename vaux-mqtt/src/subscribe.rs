@@ -1,6 +1,7 @@
 use crate::packet::ControlPacket;
 use crate::{
     codec, CodecSize, Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyCodecSize,
+    PropertyType,
 };
 use crate::{property::UserProperty, MqttError, MqttVersion, QoSLevel};
 use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
@@ -109,7 +110,7 @@ impl SubscriptionFilter {
 pub struct SubscribeHeader {
     packet_id: u16,
     #[codec(property_type = "PropertyType::SubscriptionIdentifier")]
-    #[codec(encode_with = "codec::variable_byte_int")]
+    #[codec(encode_with = "codec::encode_variable_byte_int_ref")]
     pub subscription_id: Option<u32>,
     #[codec(property_type = "PropertyType::UserProperty")]
     pub props: UserProperty,
