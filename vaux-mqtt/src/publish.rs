@@ -11,26 +11,26 @@ use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
 pub struct PublishHeader {
     pub topic_name: Option<String>,
     pub packet_id: Option<u16>,
-    #[property(property_type = "PropertyType::PayloadFormat")]
+    #[codec(property_type = "PropertyType::PayloadFormat")]
     pub payload_format: Option<PayloadFormat>,
-    #[property(property_type = "PropertyType::MessageExpiry")]
+    #[codec(property_type = "PropertyType::MessageExpiry")]
     pub message_expiry: Option<u32>,
-    #[property(property_type = "PropertyType::TopicAlias")]
+    #[codec(property_type = "PropertyType::TopicAlias")]
     pub topic_alias: Option<u16>,
-    #[property(property_type = "PropertyType::ResponseTopic")]
+    #[codec(property_type = "PropertyType::ResponseTopic")]
     pub response_topic: Option<String>,
-    #[property(property_type = "PropertyType::CorrelationData")]
+    #[codec(property_type = "PropertyType::CorrelationData")]
     #[codec(skip_if(empty))]
     pub correlation_data: Vec<u8>,
-    #[property(property_type = "PropertyType::SubscriptionIdentifier")]
+    #[codec(property_type = "PropertyType::SubscriptionIdentifier")]
     #[codec(
         encode_with("codec::encode_var_u32"),
         decode_with("codec::decode_var_u32")
     )]
     pub subscription_identifiers: u32,
-    #[property(property_type = "PropertyType::ContentType")]
+    #[codec(property_type = "PropertyType::ContentType")]
     pub content_type: Option<String>,
-    #[property(property_type = "PropertyType::UserProperty")]
+    #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
 }
 

@@ -8,7 +8,8 @@ use tokio::{
 };
 use vaux_client::MqttClient;
 use vaux_mqtt::{
-    property::PayloadFormat, Packet, PropertyType, QoSLevel, Subscribe, SubscriptionFilter,
+    property::PayloadFormat, Packet, PropertyType, PubAck, PubRec, QoSLevel, Subscribe,
+    SubscriptionFilter,
 };
 
 #[derive(Parser, Debug)]
@@ -105,54 +106,38 @@ async fn subscribe(
         .await;
     let filter = vec![
         // inbound device ops messages for this shadow on this site
-        SubscriptionFilter {
-            filter: "hello-vaux".to_string(),
-            qos: args.qos,
-            no_local: false,
-            retain_as: false,
-            handling: vaux_mqtt::subscribe::RetainHandling::None,
-        },
+        SubscriptionFilter::new("hello-vaux".to_string(), args.qos),
     ];
-    let subscribe = Subscribe::new(1, filter);
+    let subscribe = Subscribe::new_subscribe_with_filter(1, filter);
     match packet_sender.send(Packet::Subscribe(subscribe)).await {
         Ok(_) => {
             println!("subscribed");
             loop {
                 select! {
-                        // check for incoming packets
-                        Some(packet) = packet_receiver.recv() => {
+                    // check for incoming packets
+                    Some(packet) = packet_receiver.recv() => {
                         if let Packet::Publish(mut p) = packet {
-                            if p.properties().has_property(PropertyType::PayloadFormat) {
-                                if let Property::PayloadFormat(indicator) = p
-                                    .properties()
-                                    .get_property(PropertyType::PayloadFormat)
-                                    .unwrap()
-                                {
-                                    match indicator {
-                                        PayloadFormat::Utf8 => {
+                            match p.payload_format() {
+                                        None | Some(PayloadFormat::Utf8) => {
                                             let message =
-                                                String::from_utf8(p.take_payload().unwrap()).unwrap();
+                                                String::from_utf8(p.payload().to_vec()).unwrap();
                                             println!("{message}");
                                         }
-                                        PayloadFormat::Bin => {
+                                        Some(PayloadFormat::Bin) => {
                                             println!("received a binary payload");
                                         }
-                                    }
                                 }
-                            }
                             if args.auto_ack {
                                 // check for QOS 1 or 2
                                 match p.qos() {
                                     QoSLevel::AtLeastOnce => {
-                                        let mut ack = PubResp::new_puback();
-                                        ack.packet_id = p.packet_id.unwrap();
+                                        let mut ack = PubAck::new_publish_acknowledge(p.packet_id().unwrap());
                                         if let Err(e) = packet_sender.send(Packet::PubAck(ack)).await {
                                             eprintln!("{e:?}");
                                         }
                                     }
                                     QoSLevel::ExactlyOnce => {
-                                        let mut ack = PubResp::new_pubrec();
-                                        ack.packet_id = p.packet_id.unwrap();
+                                        let mut ack = PubRec::new_publish_receive(p.packet_id().unwrap());
                                         if let Err(e) = packet_sender.send(Packet::PubRec(ack)).await {
                                             eprintln!("{e:?}");
                                         }

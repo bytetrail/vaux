@@ -8,39 +8,39 @@ use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
 pub struct ConnAckHeader {
     ack_flags: u8,
     reason: Reason,
-    #[property(property_type = "PropertyType::SessionExpiryInterval")]
+    #[codec(property_type = "PropertyType::SessionExpiryInterval")]
     pub session_expiry_interval: Option<u32>,
-    #[property(property_type = "PropertyType::RecvMax")]
+    #[codec(property_type = "PropertyType::RecvMax")]
     pub receive_maximum: Option<u16>,
-    #[property(property_type = "PropertyType::MaxQoS")]
+    #[codec(property_type = "PropertyType::MaxQoS")]
     pub maximum_qos: Option<QoSLevel>,
-    #[property(property_type = "PropertyType::RetainAvail")]
+    #[codec(property_type = "PropertyType::RetainAvail")]
     pub retain_available: Option<bool>,
-    #[property(property_type = "PropertyType::MaxPacketSize")]
+    #[codec(property_type = "PropertyType::MaxPacketSize")]
     pub maximum_packet_size: Option<u32>,
-    #[property(property_type = "PropertyType::AssignedClientId")]
+    #[codec(property_type = "PropertyType::AssignedClientId")]
     pub assigned_client_id: Option<String>,
-    #[property(property_type = "PropertyType::TopicAliasMax")]
+    #[codec(property_type = "PropertyType::TopicAliasMax")]
     pub topic_alias_maximum: Option<u16>,
-    #[property(property_type = "PropertyType::ReasonString")]
+    #[codec(property_type = "PropertyType::ReasonString")]
     pub reason_string: Option<String>,
-    #[property(property_type = "PropertyType::SubIdAvail")]
+    #[codec(property_type = "PropertyType::SubIdAvail")]
     pub subscription_identifier_available: Option<bool>,
-    #[property(property_type = "PropertyType::UserProperty")]
+    #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
-    #[property(property_type = "PropertyType::WildcardSubAvail")]
+    #[codec(property_type = "PropertyType::WildcardSubAvail")]
     pub wildcard_subscription_available: Option<bool>,
-    #[property(property_type = "PropertyType::ShardSubAvail")]
+    #[codec(property_type = "PropertyType::ShardSubAvail")]
     pub shared_subscription_available: Option<bool>,
-    #[property(property_type = "PropertyType::KeepAlive")]
+    #[codec(property_type = "PropertyType::KeepAlive")]
     pub server_keep_alive: Option<u16>,
-    #[property(property_type = "PropertyType::RespInfo")]
+    #[codec(property_type = "PropertyType::RespInfo")]
     pub response_information: Option<String>,
-    #[property(property_type = "PropertyType::ServerReference")]
+    #[codec(property_type = "PropertyType::ServerReference")]
     pub server_reference: Option<String>,
-    #[property(property_type = "PropertyType::AuthMethod")]
+    #[codec(property_type = "PropertyType::AuthMethod")]
     pub auth_method: Option<String>,
-    #[property(property_type = "PropertyType::AuthData")]
+    #[codec(property_type = "PropertyType::AuthData")]
     pub auth_data: Option<Vec<u8>>,
 }
 

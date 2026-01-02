@@ -187,7 +187,7 @@ impl UserProperty {
         self.0.clear();
     }
 
-    pub fn clear_property(&mut self, key: &str) {
+    pub fn clear_codec(&mut self, key: &str) {
         self.0.remove(key);
     }
 
@@ -251,7 +251,7 @@ impl CodecSize for PayloadFormat {
     }
 }
 
-pub(crate) fn encode_var_int_property(
+pub(crate) fn encode_var_int_codec(
     property_type: PropertyType,
     value: u32,
     dest: &mut BytesMut,

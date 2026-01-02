@@ -128,9 +128,9 @@ impl PropertyCodecSize for PubRelCompReason {
 pub struct PubAckRecHeader {
     pub packet_id: u16,
     reason: Option<PubAckRecReason>,
-    #[property(property_type = "PropertyType::ReasonString")]
+    #[codec(property_type = "PropertyType::ReasonString")]
     reason_desc: Option<String>,
-    #[property(property_type = "PropertyType::UserProperty")]
+    #[codec(property_type = "PropertyType::UserProperty")]
     user_properties: UserProperty,
 }
 
@@ -138,9 +138,9 @@ pub struct PubAckRecHeader {
 pub struct PubRelCompHeader {
     pub packet_id: u16,
     reason: Option<PubRelCompReason>,
-    #[property(property_type = "PropertyType::ReasonString")]
+    #[codec(property_type = "PropertyType::ReasonString")]
     reason_desc: Option<String>,
-    #[property(property_type = "PropertyType::UserProperty")]
+    #[codec(property_type = "PropertyType::UserProperty")]
     user_properties: UserProperty,
 }
 

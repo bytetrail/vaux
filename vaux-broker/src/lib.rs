@@ -17,12 +17,9 @@ use tokio::{
 };
 use uuid::Uuid;
 use vaux_async::stream::{AsyncMqttStream, MqttStream, PacketStream};
-use vaux_mqtt::codec::PingRespCtrl;
+use vaux_mqtt::codec::PingResp;
 use vaux_mqtt::Packet::PingResponse;
-use vaux_mqtt::{
-    property::PacketProperties, ConnAck, Connect, Disconnect, MqttCodecError, Packet, PacketType,
-    Reason,
-};
+use vaux_mqtt::{ConnAck, Connect, Disconnect, MqttCodecError, Packet, PacketType, Reason};
 
 const INIT_STREAM_BUFFER_SIZE: usize = 4096;
 

@@ -5,7 +5,7 @@ mod size;
 use crate::size::field_size;
 use proc_macro::{self, TokenStream};
 use quote::quote;
-use syn::{parse_macro_input, ItemStruct};
+use syn::{parse_macro_input, punctuated::Punctuated, ItemStruct, Meta, Token};
 
 #[proc_macro_attribute]
 pub fn packet_header(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -60,7 +60,7 @@ pub fn packet_header(_attr: TokenStream, item: TokenStream) -> TokenStream {
         .collect()
 }
 
-#[proc_macro_derive(PropertyCodecSize, attributes(property))]
+#[proc_macro_derive(PropertyCodecSize, attributes(codec))]
 pub fn derive_codec_property_size(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let name = &input.ident;
@@ -76,10 +76,9 @@ pub fn derive_codec_property_size(input: TokenStream) -> TokenStream {
     // Generate size calculation for each field
     let mut field_size_calculations = Vec::new();
     for field in &fields.named {
-        if has_attribute(&field.attrs, "property") {
+        if let Ok(true) = has_attribute_with_name_value(&field.attrs, "codec", "property_type") {
             let field_size_calc = field_size(field);
             field_size_calculations.push(field_size_calc);
-            continue;
         }
     }
 
@@ -110,19 +109,11 @@ pub fn derive_codec_size(input: TokenStream) -> TokenStream {
         }
     };
 
-    let has_properties = struct_has_attribute(fields, "property");
+    let has_properties = struct_has_attribute_with_name_value(fields, "codec", "property_type");
     let mut field_sizes = Vec::new();
-    let mut property_sizes = Vec::new();
-    for field in &fields.named {
-        if !has_attribute(&field.attrs, "property") {
-            let prop_size_calc = field_size(field);
-            property_sizes.push(prop_size_calc);
-            continue;
-        }
-    }
 
     for field in &fields.named {
-        if !has_attribute(&field.attrs, "property") {
+        if !has_attribute_with_name_value(&field.attrs, "codec", "property_type").unwrap_or(false) {
             let field_size_calc = field_size(field);
             field_sizes.push(field_size_calc);
             continue;
@@ -137,7 +128,6 @@ pub fn derive_codec_size(input: TokenStream) -> TokenStream {
                     let mut total_size = 0;
 
                     #(#field_sizes)*
-                    #(#property_sizes)*
 
                     let property_size = self.property_size();
                     total_size + property_size + crate::variable_byte_int_size(property_size)
@@ -161,7 +151,7 @@ pub fn derive_codec_size(input: TokenStream) -> TokenStream {
     TokenStream::from(size_wrapper)
 }
 
-#[proc_macro_derive(Encode, attributes(property, codec_as))]
+#[proc_macro_derive(Encode, attributes(property, codec))]
 pub fn derive_encode(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let struct_name = &input.ident;
@@ -279,12 +269,71 @@ fn has_attribute(attrs: &[syn::Attribute], name: &str) -> bool {
     attrs.iter().any(|attr| attr.path().is_ident(name))
 }
 
+/// Checks if the given attribute with a specific name-value pair exists in the list of attributes.
+/// This is useful for attributes that have key-value pairs, allowing us to check for specific
+/// configurations within an attribute.
+pub(crate) fn has_attribute_with_name_value(
+    attrs: &[syn::Attribute],
+    name: &str,
+    key: &str,
+) -> Result<bool, syn::Error> {
+    let codec_attrs = attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident(name))
+        .collect::<Vec<_>>();
+    for attr in &codec_attrs {
+        let nested = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
+        for meta in nested {
+            if let Meta::NameValue(nv_pair) = meta {
+                if nv_pair.path.is_ident(key) {
+                    return Ok(true);
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
+pub(crate) fn attribute_with_name_value<'a>(
+    attrs: &'a [syn::Attribute],
+    name: &str,
+    key: &str,
+) -> Option<&'a syn::Attribute> {
+    for attr in attrs {
+        if attr.path().is_ident(name) {
+            if let syn::Meta::NameValue(nv_pair) = &attr.meta {
+                if nv_pair.path.is_ident(key) {
+                    return Some(attr);
+                }
+            }
+        }
+    }
+    None
+}
+
 /// Checks if any of the named fields has the specified attribute.
 pub(crate) fn struct_has_attribute(fields: &syn::FieldsNamed, attribute_name: &str) -> bool {
     for field in &fields.named {
         for attr in &field.attrs {
             if attr.path().is_ident(attribute_name) {
                 return true;
+            }
+        }
+    }
+    false
+}
+
+pub(crate) fn struct_has_attribute_with_name_value(
+    fields: &syn::FieldsNamed,
+    attribute_name: &str,
+    key: &str,
+) -> bool {
+    for field in &fields.named {
+        for attr in &field.attrs {
+            if attr.path().is_ident(attribute_name) {
+                if let Ok(true) = has_attribute_with_name_value(&field.attrs, attribute_name, key) {
+                    return true;
+                }
             }
         }
     }

@@ -28,9 +28,9 @@ fn variable_byte_int_size(value: u32) -> u32 {
 fn test_property_size_impl_for_disconnect() {
     #[derive(PropertyCodecSize)]
     struct Disconnect {
-        #[property(property_type = "TestProperty::PropertyOne")]
+        #[codec(property_type = "TestProperty::PropertyOne")]
         reason: Option<String>,
-        #[property(property_type = "TestProperty::PropertyTwo")]
+        #[codec(property_type = "TestProperty::PropertyTwo")]
         property_one: Option<u16>,
     }
 
@@ -46,7 +46,7 @@ fn test_property_size_impl_for_disconnect() {
 fn test_vec_property_size_impl() {
     #[derive(PropertyCodecSize)]
     struct TestStruct {
-        #[property(property_type = "TestProperty::PropertyOne")]
+        #[codec(property_type = "TestProperty::PropertyOne")]
         data: Vec<u8>,
     }
 
@@ -58,7 +58,7 @@ fn test_vec_property_size_impl() {
 
     #[derive(PropertyCodecSize)]
     struct TestStructTwo {
-        #[property(property_type = "TestProperty::PropertyOne")]
+        #[codec(property_type = "TestProperty::PropertyOne")]
         data: Option<Vec<u8>>,
     }
 

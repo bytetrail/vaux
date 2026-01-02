@@ -7,13 +7,13 @@ use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
 #[derive(Clone, Debug, PartialEq, Eq, CodecSize, PropertyCodecSize, Encode, Decode)]
 pub struct DisconnectHeader {
     pub reason: Reason,
-    #[property(property_type = "PropertyType::SessionExpiryInterval")]
+    #[codec(property_type = "PropertyType::SessionExpiryInterval")]
     pub session_expiry_interval: Option<u32>,
-    #[property(property_type = "PropertyType::ReasonString")]
+    #[codec(property_type = "PropertyType::ReasonString")]
     pub reason_string: Option<String>,
-    #[property(property_type = "PropertyType::ServerReference")]
+    #[codec(property_type = "PropertyType::ServerReference")]
     pub server_reference: Option<String>,
-    #[property(property_type = "PropertyType::UserProperty")]
+    #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
 }
 

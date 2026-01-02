@@ -22,30 +22,30 @@ pub struct ConnectHeader {
     connect_flags: u8,
     pub keep_alive: u16,
 
-    #[property(property_type = "PropertyType::SessionExpiryInterval")]
+    #[codec(property_type = "PropertyType::SessionExpiryInterval")]
     pub session_expiry_interval: Option<u32>,
-    #[property(property_type = "PropertyType::RecvMax")]
+    #[codec(property_type = "PropertyType::RecvMax")]
     pub receive_maximum: Option<u16>,
-    #[property(property_type = "PropertyType::MaxPacketSize")]
+    #[codec(property_type = "PropertyType::MaxPacketSize")]
     pub max_packet_size: Option<u32>,
-    #[property(property_type = "PropertyType::TopicAliasMax")]
+    #[codec(property_type = "PropertyType::TopicAliasMax")]
     pub topic_alias_maximum: Option<u16>,
-    #[property(property_type = "PropertyType::ReqRespInfo")]
+    #[codec(property_type = "PropertyType::ReqRespInfo")]
     pub request_response_info: Option<bool>,
-    #[property(property_type = "PropertyType::ReqProblemInfo")]
+    #[codec(property_type = "PropertyType::ReqProblemInfo")]
     pub request_problem_info: Option<bool>,
-    #[property(property_type = "PropertyType::AuthMethod")]
+    #[codec(property_type = "PropertyType::AuthMethod")]
     pub auth_method: Option<String>,
-    #[property(property_type = "PropertyType::AuthData")]
+    #[codec(property_type = "PropertyType::AuthData")]
     pub auth_data: Vec<u8>,
-    #[property(property_type = "PropertyType::UserProperty")]
+    #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: property::UserProperty,
 }
 
 //pub will_message: Option<WillMessage>,
 //pub username: Option<String>,
 //    pub password: Option<Vec<u8>>,
-//#[property(property_type = "PropertyType::AuthMethod")]
+//#[codec(property_type = "PropertyType::AuthMethod")]
 //pub auth_method: Option<String>,
 
 impl ConnectHeader {
@@ -127,11 +127,11 @@ impl ConnectHeader {
 pub struct ConnectPayload {
     pub client_id: String,
     pub(crate) will_properties: Option<WillHeader>,
-    #[codec(skip_if(empty))]
+    //#[codec(skip_if(empty))]
     pub(crate) will_payload: Vec<u8>,
     pub(crate) will_topic: Option<String>,
     username: Option<String>,
-    #[codec(skip_if(empty))]
+    //#[codec(skip_if(empty))]
     password: Vec<u8>,
 }
 

@@ -1,8 +1,8 @@
-use std::num::NonZeroU16;
-
 use crate::packet::ControlPacket;
-use crate::{codec, CodecSize, Decode, Encode, MqttCodecError, PropertyCodecSize};
-use crate::{property::UserProperty, MqttError, MqttVersion, PropertyType, QoSLevel};
+use crate::{
+    codec, CodecSize, Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyCodecSize,
+};
+use crate::{property::UserProperty, MqttError, MqttVersion, QoSLevel};
 use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
 
 const MIN_SUBSCRIPTION_ID: u32 = 1;
@@ -40,9 +40,9 @@ impl TryFrom<u8> for RetainHandling {
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, CodecSize, PropertyCodecSize)]
 pub struct SubAckHeader {
     packet_id: u16,
-    #[property(property_type = "PropertyType::ReasonString")]
+    #[codec(property_type = "PropertyType::ReasonString")]
     pub reason: Option<String>,
-    #[property(property_type = "PropertyType::UserProperty")]
+    #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
 }
 
@@ -108,10 +108,10 @@ impl SubscriptionFilter {
 #[derive(Default, Debug, Clone, CodecSize, PropertyCodecSize, Encode, Decode, PartialEq, Eq)]
 pub struct SubscribeHeader {
     packet_id: u16,
-    #[property(property_type = "PropertyType::SubscriptionIdentifier")]
+    #[codec(property_type = "PropertyType::SubscriptionIdentifier")]
     #[codec(encode_with = "codec::variable_byte_int")]
     pub subscription_id: Option<u32>,
-    #[property(property_type = "PropertyType::UserProperty")]
+    #[codec(property_type = "PropertyType::UserProperty")]
     pub props: UserProperty,
 }
 
@@ -123,6 +123,30 @@ pub struct SubscribePayload {
 pub type Subscribe = ControlPacket<SubscribeHeader, SubscribePayload>;
 
 impl Subscribe {
+    pub fn new_subscribe(packet_id: u16) -> Self {
+        let fixed_header = FixedHeader::new(PacketType::Subscribe);
+        ControlPacket {
+            fixed_header,
+            variable_header: SubscribeHeader {
+                packet_id,
+                ..Default::default()
+            },
+            payload: SubscribePayload { filter: Vec::new() },
+        }
+    }
+
+    pub fn new_subscribe_with_filter(packet_id: u16, filter: Vec<SubscriptionFilter>) -> Self {
+        let fixed_header = FixedHeader::new(PacketType::Subscribe);
+        ControlPacket {
+            fixed_header,
+            variable_header: SubscribeHeader {
+                packet_id,
+                ..Default::default()
+            },
+            payload: SubscribePayload { filter },
+        }
+    }
+
     pub fn packet_id(&self) -> u16 {
         self.variable_header.packet_id
     }
@@ -219,7 +243,7 @@ impl Subscribe {
 //         if let Some(id) = sub.id {
 //             subscribe
 //                 .props
-//                 .set_property(Property::SubscriptionIdentifier(id));
+//                 .set_codec(Property::SubscriptionIdentifier(id));
 //         }
 //         for s in &sub.filter {
 //             subscribe.add_subscription(s.clone());
@@ -234,7 +258,7 @@ impl Subscribe {
 //         if let Some(id) = sub.id {
 //             subscribe
 //                 .props
-//                 .set_property(Property::SubscriptionIdentifier(id));
+//                 .set_codec(Property::SubscriptionIdentifier(id));
 //         }
 //         for s in sub.filter {
 //             subscribe.add_subscription(s);
@@ -246,9 +270,9 @@ impl Subscribe {
 // #[derive(Default, Debug, Clone, PartialEq, Eq, CodecSize, PropertyCodecSize, Encode, Decode)]
 // pub struct SubscribeHeader {
 //     packet_id: u16,
-//     #[property(property_type = "PropertyType::SubscriptionIdentifier")]
+//     #[codec(property_type = "PropertyType::SubscriptionIdentifier")]
 //     pub subscription_id: Option<u32>,
-//     #[property(property_type = "PropertyType::UserProperty")]
+//     #[codec(property_type = "PropertyType::UserProperty")]
 //     pub props: UserProperty,
 //     //    payload: Vec<SubscriptionFilter>,
 // }

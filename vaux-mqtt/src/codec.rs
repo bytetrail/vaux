@@ -15,7 +15,7 @@ use crate::{
     packet::{ControlPacket, Empty},
     publish::Publish,
     pubresp::{PubAck, PubComp, PubRec, PubRel},
-    CodecSize, ConnAck, Decode, Disconnect, Encode, PropertyCodecSize,
+    CodecSize, ConnAck, Decode, Disconnect, Encode, PropertyCodecSize, Subscribe,
 };
 
 pub(crate) const SIZE_UTF8_STRING: u32 = 2;
@@ -277,7 +277,7 @@ pub enum Packet {
     PubRec(PubRec),
     PubRel(PubRel),
     Disconnect(Disconnect),
-    // Subscribe(Subscribe),
+    Subscribe(Subscribe),
     // SubAck(SubAck),
     // Unsubscribe(Unsubscribe),
     // UnsubAck(UnsubAck),
@@ -296,7 +296,7 @@ impl Encode for Packet {
             Packet::PubRec(pubrec) => pubrec.encode(dest),
             Packet::PubRel(pubrel) => pubrel.encode(dest),
             Packet::Disconnect(disconnect) => disconnect.encode(dest),
-            //         // Packet::Subscribe(subscribe) => subscribe.encode(dest),
+            Packet::Subscribe(subscribe) => subscribe.encode(dest),
             //         // Packet::SubAck(suback) => suback.encode(dest),
             //         // Packet::Unsubscribe(unsubscribe) => unsubscribe.encode(dest),
             //         // Packet::UnsubAck(unsuback) => unsuback.encode(dest),
@@ -318,7 +318,7 @@ impl From<&Packet> for PacketType {
             Packet::PubRec(_) => PacketType::PubRec,
             Packet::PubRel(_) => PacketType::PubRel,
             Packet::Disconnect(_) => PacketType::Disconnect,
-            //             Packet::Subscribe(_) => PacketType::Subscribe,
+            Packet::Subscribe(_) => PacketType::Subscribe,
             //             Packet::SubAck(_) => PacketType::SubAck,
             //             Packet::Unsubscribe(_) => PacketType::Unsubscribe,
             //             Packet::UnsubAck(_) => PacketType::UnsubAck,

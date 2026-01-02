@@ -8,18 +8,6 @@ use crate::{
 };
 use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
 
-// static WILL_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
-//     let mut set = HashSet::new();
-//     set.insert(PropertyType::WillDelay);
-//     set.insert(PropertyType::PayloadFormat);
-//     set.insert(PropertyType::MessageExpiry);
-//     set.insert(PropertyType::ContentType);
-//     set.insert(PropertyType::ResponseTopic);
-//     set.insert(PropertyType::CorrelationData);
-//     set.insert(PropertyType::UserProperty);
-//     set
-// });
-
 #[derive(Debug, Default, Clone, Eq, PartialEq, Encode, Decode, PropertyCodecSize, CodecSize)]
 /// MQTT Will message. The Will message name comes from last will and
 /// testament. The will message is typically sent under the following
@@ -32,19 +20,19 @@ use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
 /// For more information please see
 /// <https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc479576982>
 pub struct WillHeader {
-    #[property(property_type = "PropertyType::WillDelay")]
+    #[codec(property_type = "PropertyType::WillDelay")]
     pub will_delay: Option<u32>,
-    #[property(property_type = "PropertyType::PayloadFormat")]
+    #[codec(property_type = "PropertyType::PayloadFormat")]
     pub payload_format: Option<PayloadFormat>,
-    #[property(property_type = "PropertyType::MessageExpiry")]
+    #[codec(property_type = "PropertyType::MessageExpiry")]
     pub message_expiry: Option<u32>,
-    #[property(property_type = "PropertyType::ContentType")]
+    #[codec(property_type = "PropertyType::ContentType")]
     pub content_type: Option<String>,
-    #[property(property_type = "PropertyType::ResponseTopic")]
+    #[codec(property_type = "PropertyType::ResponseTopic")]
     pub response_topic: Option<String>,
-    //#[property(property_type = "PropertyType::CorrelationData")]
+    //#[codec(property_type = "PropertyType::CorrelationData")]
     //pub correlation_data: Option<Vec<u8>>,
-    #[property(property_type = "PropertyType::UserProperty")]
+    #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
 }
 
