@@ -11,7 +11,7 @@ pub mod subscribe;
 pub mod test;
 pub mod will;
 
-use crate::codec::{put_bin, variable_byte_int_size};
+use crate::codec::put_bin;
 
 use bytes::{Buf, BytesMut};
 pub use codec::{MqttCodecError, Packet, PacketType, QoSLevel, Reason};
@@ -112,15 +112,6 @@ impl std::fmt::Display for MqttError {
 impl Encode for Vec<u8> {
     fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         put_bin(self, dest)?;
-        Ok(())
-    }
-}
-
-impl Decode for Vec<u8> {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
-        let idx = src.len() - src.remaining();
-        self.extend(&src[idx..]);
-        src.advance(src.len());
         Ok(())
     }
 }

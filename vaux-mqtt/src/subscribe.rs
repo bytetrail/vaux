@@ -1,7 +1,6 @@
 use crate::packet::ControlPacket;
 use crate::{
-    codec, CodecSize, Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyCodecSize,
-    PropertyType,
+    codec, Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyCodecSize, PropertyType,
 };
 use crate::{property::UserProperty, MqttError, MqttVersion, QoSLevel};
 use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};

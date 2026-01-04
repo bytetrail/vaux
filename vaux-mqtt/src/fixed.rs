@@ -1,8 +1,11 @@
 use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
-    codec::{get_var_u32, put_var_u32, ErrorKind, PACKET_RESERVED_BIT1, PACKET_RESERVED_NONE},
-    Decode, Encode, MqttCodecError, PacketType, QoSLevel,
+    codec::{
+        encode_variable_byte_int, get_var_u32, ErrorKind, PACKET_RESERVED_BIT1,
+        PACKET_RESERVED_NONE,
+    },
+    Decode, MqttCodecError, PacketType, QoSLevel,
 };
 
 const QOS_MASK: u8 = 0b_0000_0110;
@@ -38,7 +41,7 @@ impl FixedHeader {
 
     pub(crate) fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         dest.put_u8(self.packet_type as u8 | self.flags);
-        put_var_u32(self.remaining, dest);
+        encode_variable_byte_int(self.remaining, dest)?;
         Ok(())
     }
 

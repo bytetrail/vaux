@@ -107,23 +107,23 @@ fn size_for_codec_size(
 ) -> proc_macro2::TokenStream {
     let prefix = if is_property {
         quote! {
-            property_size += 1
+            property_size +=
         }
     } else {
         quote! {
-            total_size += 0
+            total_size +=
         }
     };
 
     if optional {
         quote! {
             if let Some(field) = &self.#field_name {
-                #prefix + field.codec_size();
+                #prefix field.codec_size();
             }
         }
     } else {
         quote! {
-            #prefix + self.#field_name.codec_size();
+            #prefix  self.#field_name.codec_size();
         }
     }
 }

@@ -1,7 +1,4 @@
-use crate::{
-    codec::{put_utf8, put_var_u32},
-    CodecSize, Decode, Encode, MqttCodecError,
-};
+use crate::{codec::put_utf8, CodecSize, Decode, Encode, MqttCodecError};
 use bytes::{Buf, BufMut, BytesMut};
 use std::{
     collections::HashMap,
@@ -249,13 +246,4 @@ impl CodecSize for PayloadFormat {
     fn codec_size(&self) -> u32 {
         1
     }
-}
-
-pub(crate) fn encode_var_int_codec(
-    property_type: PropertyType,
-    value: u32,
-    dest: &mut BytesMut,
-) {
-    dest.put_u8(property_type as u8);
-    put_var_u32(value, dest);
 }

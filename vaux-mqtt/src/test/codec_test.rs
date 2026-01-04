@@ -117,12 +117,12 @@ fn test_control_packet_type_from() {
 fn test_encode_var_int() {
     let test = 128_u32;
     let mut encoded: BytesMut = BytesMut::with_capacity(6);
-    put_var_u32(test, &mut encoded);
+    encode_variable_byte_int(test, &mut encoded).unwrap();
     assert_eq!(0x80, encoded[0]);
     assert_eq!(0x01, encoded[1]);
     let test = 777;
     let mut encoded: BytesMut = BytesMut::with_capacity(6);
-    put_var_u32(test, &mut encoded);
+    encode_variable_byte_int(test, &mut encoded).unwrap();
     assert_eq!(0x89, encoded[0]);
     assert_eq!(0x06, encoded[1]);
 }

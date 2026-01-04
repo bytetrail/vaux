@@ -1,6 +1,6 @@
 use quote::quote;
 use syn::{Meta, Token, punctuated::Punctuated};
-use crate::{attribute_with_name_value, compile_error2, has_attribute_with_name_value, is_primitive_type, };
+use crate::{CODEC_ATTR, CODEC_ATTR_ENCODE_WITH_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, attribute_with_name_value, compile_error2, has_attribute_with_name_value, is_primitive_type };
 
 /// Generate encode implementation for struct fields. The struct fields are encoded in
 /// the order they are defined with the exception of property length which does not
@@ -12,37 +12,9 @@ use crate::{attribute_with_name_value, compile_error2, has_attribute_with_name_v
 pub(crate) fn encode_field(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_name = &field.ident;
     let field_type = &field.ty;
-    let is_property = has_attribute_with_name_value(&field.attrs, "codec", "property_type").unwrap();
-    let encode_with = attribute_with_name_value(&field.attrs, "codec", "encode_with").unwrap();
-    let property_type: Option<syn::Path> = field
-        .attrs
-        .iter()
-        .find_map(|attr| {
-            if attr.path().is_ident("codec") {
-                let nested = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated);
-                nested.unwrap().iter().find_map(|meta| {
-                    if meta.path().is_ident("property_type") {
-                        if let Meta::NameValue(nv_pair) = meta {
-                            if let syn::Expr::Lit(lit_str) = &nv_pair.value {
-                                if let syn::Lit::Str(lit_str) = &lit_str.lit {
-                                    Some(lit_str.parse().unwrap())                                    
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        }else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                })
-            } else {
-                None
-            }
-        }); //.collect::<Vec<syn::Path>>();
+    let is_property = has_attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG).unwrap();
+    let encode_with = attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_ENCODE_WITH_ARG).unwrap();
+    let property_type: Option<syn::Path> = crate::property_type(&field.attrs);
     if property_type.is_none() && is_property {
         return compile_error2("Property attribute requires a property_type argument");
     } 
@@ -56,20 +28,20 @@ pub(crate) fn encode_field(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_encode = match field_type {
         syn::Type::Path(type_path) => {
             let segment = &type_path.path.segments.last().unwrap().ident;
-            if encode_with.is_some() {
-                let optional_field = match segment.to_string().as_str() {
+            let optional_field = match segment.to_string().as_str() {
                     "Option" => true,
                     _ => false,
                 };
-                encode_for_custom(&field_name, &encode_with.unwrap(), optional_field, property_type_ident)
+            if encode_with.is_some() {
+                encode_for_encode_with(&field_name, &encode_with.unwrap(), optional_field, property_type_ident)
             } else {
                 match segment.to_string().as_str() {
-                    "String" => encode_for_string(&field_name, false, property_type_ident),
-                    "Vec" => encode_for_vec(&field_name, &type_path, false, property_type_ident),
+                    "String" => encode_for_string(&field_name, optional_field, property_type_ident),
+                    "Vec" => encode_for_vec(&field_name, &type_path, optional_field, property_type_ident),
                     "Option" => encode_for_option(&field_name, &type_path, property_type_ident),
                     type_name => {
                         if is_primitive_type(type_name) {
-                            encode_for_primitive(&field_name, type_name, false,  property_type_ident)
+                            encode_for_primitive(&field_name, type_name, optional_field,  property_type_ident)
                         } else {
                             quote! {
                                 // Encoding logic for complex property
@@ -146,17 +118,15 @@ pub(crate) fn encode_for_vec(
                         codec::put_bin(&self.#field, dest)?;
                     } } ,
                     
-                    "u16" | "i16" | "i32" | "u32" | "i8" => {
+                    "i8" | "u16" | "i16" | "i32" | "u32" | "u64" | "i64" | "f32" | "f64" | "bool" => {
                         return compile_error2("Unsupported Vec inner type for Encode derive");
                     }
                     field_type=> if is_optional {
                         quote! {
-                        println!("{}", #field_type);
-                        // Encoding logic for Vec<ComplexType> property
-                        for item in #field {
-                            #prop_ident_encode
-                            item.encode(dest)?;
-                        }}
+                            for item in #field {
+                                #prop_ident_encode
+                                item.encode(dest)?;
+                            }}
                     } else {
                         quote! {
                         // Encoding logic for Vec<ComplexType> property
@@ -214,17 +184,17 @@ pub(crate) fn encode_for_option(
                     else {
                         if property_type.is_some() {
                             return quote! {
-                                if let Some(v) = self.#field_name.as_mut() {
+                                if let Some(#field_name) = self.#field_name.as_mut() {
                                     // Encoding logic for complex property
                                     dest.put_u8(#property_type as u8);
-                                    v.encode(dest)?;
+                                    #field_name.encode(dest)?;
                                 }
                             };
                         } else {
                             return quote! {
-                                if let Some(v) = self.#field_name.as_mut() {
+                                if let Some(#field_name) = self.#field_name.as_mut() {
                                     // Encoding logic for complex property
-                                    v.encode(dest)?;
+                                    #field_name.encode(dest)?;
                                 }
                             };
                         }
@@ -307,7 +277,7 @@ pub(crate) fn encode_for_primitive(
 
 }
 
-fn encode_for_custom(
+fn encode_for_encode_with(
     field_name: &Option<syn::Ident>,
     attr: &syn::Attribute,
     optional_field: bool,
@@ -326,7 +296,7 @@ fn encode_for_custom(
         Ok(nested) => {
             let meta = nested.iter().find_map(|m| {
                 if let Meta::NameValue(nv_pair) = m {
-                    if nv_pair.path.is_ident("encode_with") {
+                    if nv_pair.path.is_ident(CODEC_ATTR_ENCODE_WITH_ARG) {
                         if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
                             if let syn::Lit::Str(lit_str) = &lit_expr.lit {
                                 let path: syn::Path = lit_str.parse().unwrap();
@@ -446,7 +416,7 @@ mod test {
     fn test_encode_with_attr() {
         let field_name = Some(syn::Ident::new("custom_field", proc_macro2::Span::call_site()));
         let attr: syn::Attribute = syn::parse_quote!(#[codec(encode_with = "custom_encode_function")]);
-        let encode_tokens = encode_for_custom(&field_name, &attr, false, Some(quote! { TestProperty::PropertySix }));
+        let encode_tokens = encode_for_encode_with(&field_name, &attr, false, Some(quote! { TestProperty::PropertySix }));
         let expected = quote! {
             // Encoding logic for String property            
             dest.put_u8(TestProperty::PropertySix as u8);

@@ -15,7 +15,7 @@ pub(crate) const CONNECT_FLAG_CLEAN_START: u8 = 0b_0000_0010;
 const MQTT_PROTOCOL_NAME: &str = "MQTT";
 const MQTT_PROTOCOL_VERSION: u8 = 0x05;
 
-#[derive(Default, Debug, Clone, PropertyCodecSize, CodecSize, Encode, Decode, PartialEq, Eq)]
+#[derive(Debug, Clone, PropertyCodecSize, CodecSize, Encode, Decode, PartialEq, Eq)]
 pub struct ConnectHeader {
     protocol_name: String,
     protocol_version: u8,
@@ -36,17 +36,17 @@ pub struct ConnectHeader {
     pub request_problem_info: Option<bool>,
     #[codec(property_type = "PropertyType::AuthMethod")]
     pub auth_method: Option<String>,
-    #[codec(property_type = "PropertyType::AuthData")]
+    #[codec(skip_if = "Vec::is_empty", property_type = "PropertyType::AuthData")]
     pub auth_data: Vec<u8>,
     #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: property::UserProperty,
 }
 
-//pub will_message: Option<WillMessage>,
-//pub username: Option<String>,
-//    pub password: Option<Vec<u8>>,
-//#[codec(property_type = "PropertyType::AuthMethod")]
-//pub auth_method: Option<String>,
+impl Default for ConnectHeader {
+    fn default() -> Self {
+        ConnectHeader::new()
+    }
+}
 
 impl ConnectHeader {
     /// Creates a new ConnectHeader with default values. The protocol name is set to "MQTT"
@@ -127,11 +127,11 @@ impl ConnectHeader {
 pub struct ConnectPayload {
     pub client_id: String,
     pub(crate) will_properties: Option<WillHeader>,
-    //#[codec(skip_if(empty))]
+    #[codec(skip_if = "Vec::is_empty")]
     pub(crate) will_payload: Vec<u8>,
     pub(crate) will_topic: Option<String>,
     username: Option<String>,
-    //#[codec(skip_if(empty))]
+    #[codec(skip_if = "Vec::is_empty")]
     password: Vec<u8>,
 }
 

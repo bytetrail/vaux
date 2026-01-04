@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use crate::connect::{self, Connect, ConnectHeader, ConnectPayload};
+use crate::connect::{Connect, ConnectHeader, ConnectPayload};
 use crate::property::{PayloadFormat, UserProperty};
 use crate::{
     codec, CodecSize, Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyCodecSize,

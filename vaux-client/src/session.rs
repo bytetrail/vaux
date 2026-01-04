@@ -3,7 +3,7 @@ use std::mem;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
 use vaux_mqtt::publish::Publish;
-use vaux_mqtt::{ConnAck, Connect, Packet, QoSLevel, Reason};
+use vaux_mqtt::{CodecSize, ConnAck, Connect, Encode, Packet, PropertyCodecSize, QoSLevel, Reason};
 use vaux_mqtt::{PubAck, PubComp, PubRec, PubRel, WillMessage};
 
 const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
@@ -183,7 +183,7 @@ impl ClientSession {
             ));
         }
         let mut connect = Connect::default();
-        connect.set_keep_alive(self.state.keep_alive.read().await.as_secs() as u16);
+        connect.set_keep_alive(100); //self.state.keep_alive.read().await.as_secs() as u16);
         connect.set_clean_start(clean_start);
         {
             let set_id = self.state.client_id.lock().await;
@@ -201,6 +201,20 @@ impl ClientSession {
             connect.set_will_message(will);
         }
         let mut connect_packet = Packet::Connect(Box::new(connect));
+        println!("Connect packet created, sending to broker");
+        if let Packet::Connect(ref mut boxed_connect) = connect_packet {
+            println!("connect codec size {}", boxed_connect.codec_size());
+            println!("connect property size {}", boxed_connect.property_size());
+            println!("sending connect: {:?}", boxed_connect);
+
+            let mut dest = bytes::BytesMut::with_capacity(boxed_connect.codec_size() as usize);
+            boxed_connect.encode(&mut dest).unwrap();
+            println!("encoded connect packet ({} bytes)", dest.len());
+            for byte in dest.iter() {
+                print!("{:02X} ", byte);
+            }
+            println!();
+        }
 
         match self.packet_stream.write(&mut connect_packet).await {
             Ok(_) => {

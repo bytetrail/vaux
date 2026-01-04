@@ -367,8 +367,10 @@ impl MqttClient {
         if self.connection.is_none() {
             return Err(MqttError::new("connection not set", ErrorKind::Connection));
         }
+        println!("connection set, starting client");
         let max_connect_wait = self.max_connect_wait;
         let will_message = self.will_message.clone();
+        println!("will message cloned {:?}, starting client", will_message);
         let mut packet_in_receiver = self.packet_in.1.take().ok_or(MqttError::new(
             "packet_in channel closed",
             ErrorKind::Transport,
@@ -388,6 +390,7 @@ impl MqttClient {
                 }
             };
         }
+        println!("socket connected, creating client session");
         let mut session = match ClientSession::new_from_client(self).await {
             Ok(s) => s,
             Err(e) => {
@@ -397,9 +400,11 @@ impl MqttClient {
                 ));
             }
         };
+        println!("client session created, starting client task");
         let _keep_alive = self.keep_alive.clone();
         let _session_expiry = self.session_expiry.clone();
         Ok(tokio::spawn(async move {
+            println!("client task started, connecting session");
             match session
                 .connect(max_connect_wait, credentials, clean_start, will_message)
                 .await

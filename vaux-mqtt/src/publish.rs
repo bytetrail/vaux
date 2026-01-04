@@ -19,15 +19,18 @@ pub struct PublishHeader {
     pub topic_alias: Option<u16>,
     #[codec(property_type = "PropertyType::ResponseTopic")]
     pub response_topic: Option<String>,
-    #[codec(property_type = "PropertyType::CorrelationData")]
-    #[codec(skip_if(empty))]
+    #[codec(
+        property_type = "PropertyType::CorrelationData",
+        skip_if = "Vec::is_empty"
+    )]
     pub correlation_data: Vec<u8>,
     #[codec(property_type = "PropertyType::SubscriptionIdentifier")]
     #[codec(
-        encode_with("codec::encode_var_u32"),
-        decode_with("codec::decode_var_u32")
+        size_with = "codec::variable_byte_int_size_ref",
+        encode_with = "codec::encode_variable_byte_int_ref",
+        decode_with = "codec::decode_variable_byte_int"
     )]
-    pub subscription_identifiers: u32,
+    pub subscription_identifiers: Option<u32>,
     #[codec(property_type = "PropertyType::ContentType")]
     pub content_type: Option<String>,
     #[codec(property_type = "PropertyType::UserProperty")]

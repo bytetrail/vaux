@@ -5,7 +5,7 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::CertificateDer;
 use tokio::{select, task::JoinHandle};
 use vaux_client::PacketChannel;
-use vaux_mqtt::{publish::Publish, Packet, QoSLevel};
+use vaux_mqtt::{publish::Publish, CodecSize, Packet, PropertyCodecSize, QoSLevel};
 
 #[derive(Parser, Clone, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -144,6 +144,11 @@ async fn publish(
         publish.set_payload(Vec::from(message.as_bytes()));
         publish.set_qos(args.qos);
         publish.set_packet_id(Some((i + 1) as u16)).unwrap();
+
+        println!("publish property size {}", publish.property_size());
+        println!("sending publish: {:?}", publish);
+        println!("publish codec size {}", publish.codec_size());
+        
         if packet_out
             .send(vaux_mqtt::Packet::Publish(publish.clone()))
             .await

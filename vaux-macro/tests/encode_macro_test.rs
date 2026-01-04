@@ -6,10 +6,6 @@ mod codec {
     use bytes::BufMut;
     pub use bytes::BytesMut;
 
-    pub fn variable_byte_int_size_ref(value: &u32) -> u32 {
-        variable_byte_int_size(*value)
-    }
-
     pub fn variable_byte_int_size(value: u32) -> u32 {
         if value < 128 {
             1
@@ -35,7 +31,10 @@ mod codec {
         Ok(())
     }
 
-    pub fn put_var_u32(mut val: u32, dest: &mut BytesMut) {
+    pub fn encode_variable_byte_int(
+        mut val: u32,
+        dest: &mut BytesMut,
+    ) -> Result<(), MqttCodecError> {
         loop {
             let mut byte = (val % 128) as u8;
             val /= 128;
@@ -47,6 +46,7 @@ mod codec {
                 break;
             }
         }
+        Ok(())
     }
 
     pub fn put_u8(val: u8, dest: &mut BytesMut) {

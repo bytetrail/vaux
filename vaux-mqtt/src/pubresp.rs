@@ -1,6 +1,6 @@
 use crate::{
     codec,
-    packet::{self, ControlPacket, Empty},
+    packet::{ControlPacket, Empty},
     property::UserProperty,
     CodecSize, Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyCodecSize,
     PropertyType,
