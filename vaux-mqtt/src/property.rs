@@ -1,11 +1,12 @@
-use crate::{codec::put_utf8, CodecSize, Decode, Encode, MqttCodecError};
+use crate::{
+    codec::{self, put_utf8},
+    CodecSize, Decode, Encode, MqttCodecError,
+};
 use bytes::{Buf, BufMut, BytesMut};
 use std::{
     collections::HashMap,
     fmt::{Display, Formatter},
 };
-
-pub type UserPropertyMap = HashMap<String, Vec<String>>;
 
 /// MQTT property type. For more information on the specific property types,
 /// please see the
@@ -175,6 +176,16 @@ impl Encode for UserProperty {
     }
 }
 
+impl Decode for UserProperty {
+    /// Decode a single user property key-value pair and add it to the map.
+    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+        let key = codec::decode_string(src)?;
+        let value = codec::decode_string(src)?;
+        self.0.entry(key).or_insert_with(Vec::new).push(value);
+        Ok(())
+    }
+}
+
 impl UserProperty {
     pub fn new() -> Self {
         UserProperty(HashMap::new())
@@ -209,9 +220,10 @@ impl UserProperty {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum PayloadFormat {
+    #[default]
     Bin = 0x00,
     Utf8 = 0x01,
 }

@@ -19,13 +19,6 @@ pub(crate) fn decode_field(field: &syn::Field) -> proc_macro2::TokenStream {
         return compile_error2("Property attribute requires a property_type argument");
     }
     // Generate the match arm prefix if this is a property
-    let match_arm_prefix = if is_property {
-        quote! {
-            PropertyType::#property_type =>
-        }
-    } else {
-        quote! {}
-    };
 
     let stmt_separator = if is_property { "," } else { ";" };
 
@@ -46,14 +39,14 @@ pub(crate) fn decode_field(field: &syn::Field) -> proc_macro2::TokenStream {
             //     )
             // } else {
             match segment.to_string().as_str() {
-                "String" => decode_for_string(field_name, optional_field, property_type),
-                "Option" => decode_for_option(&field_name, &type_path, property_type),
-                "Vec" => decode_for_vec(&field_name, &type_path, optional_field, property_type),
+                "String" => decode_for_string(field_name, optional_field, &property_type),
+                "Option" => decode_for_option(&field_name, &type_path, &property_type),
+                "Vec" => decode_for_vec(&field_name, &type_path, optional_field, &property_type),
                 type_name => {
                     if is_primitive_type(type_name) {
-                        decode_for_primitive(field_name, field_type, optional_field, property_type)
+                        decode_for_primitive(field_name, field_type, optional_field, &property_type)
                     } else {
-                        decode_for_type(field_name, field_type, is_property, property_type)
+                        decode_for_type(field_name, field_type, optional_field, &property_type)
                     }
                 }
             }
@@ -64,15 +57,21 @@ pub(crate) fn decode_field(field: &syn::Field) -> proc_macro2::TokenStream {
         }
     };
 
-    quote! {
-        #match_arm_prefix #field_decode
-    }
+    let match_arm_wrapper = if is_property {
+        quote! {
+            #property_type => { #field_decode }
+        }
+    } else {
+        quote! { #field_decode}
+    };
+
+    match_arm_wrapper
 }
 
 fn decode_for_string(
     field_name: &syn::Ident,
     optional_field: bool,
-    property_type: Option<syn::Path>,
+    property_type: &Option<syn::Path>,
 ) -> proc_macro2::TokenStream {
     if optional_field {
         quote! {
@@ -90,7 +89,7 @@ fn decode_for_string(
 fn decode_for_option(
     field_name: &syn::Ident,
     type_path: &syn::TypePath,
-    property_type: Option<syn::Path>,
+    property_type: &Option<syn::Path>,
 ) -> proc_macro2::TokenStream {
     let decode_stmt = match &type_path.path.segments.last().unwrap().arguments {
         syn::PathArguments::AngleBracketed(args) => match args.args.first().unwrap() {
@@ -144,7 +143,7 @@ fn decode_for_primitive(
     field_name: &syn::Ident,
     field_type: &syn::Type,
     optional_field: bool,
-    property_type: Option<syn::Path>,
+    property_type: &Option<syn::Path>,
 ) -> proc_macro2::TokenStream {
     if optional_field {
         quote! {
@@ -161,13 +160,14 @@ fn decode_for_primitive(
 fn decode_for_type(
     field_name: &syn::Ident,
     field_type: &syn::Type,
-    is_property: bool,
-    property_type: Option<syn::Path>,
+    optional_field: bool,
+    property_type: &Option<syn::Path>,
 ) -> proc_macro2::TokenStream {
-    if is_property {
+    if optional_field {
         quote! {
             let mut value = #field_type::default();
-            self.#field_name = Some(value.decode(src)?);
+            value.decode(src)?;
+            self.#field_name = Some(value);
         }
     } else {
         quote! {
@@ -180,7 +180,7 @@ fn decode_for_vec(
     field_name: &syn::Ident,
     type_path: &syn::TypePath,
     optional_field: bool,
-    property_type: Option<syn::Path>,
+    property_type: &Option<syn::Path>,
 ) -> proc_macro2::TokenStream {
     // if optional_field {
     //     quote! {

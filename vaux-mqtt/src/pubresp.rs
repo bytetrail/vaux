@@ -38,7 +38,7 @@ impl TryFrom<u8> for PubAckRecReason {
             0x99 => Ok(PubAckRecReason::PayloadFormatErr),
             _ => Err(MqttCodecError::new_with_kind(
                 "Unsupported reason code",
-                codec::ErrorKind::UnsupportedReason,
+                codec::ErrorKind::UnsupportedReason(value),
             )),
         }
     }
@@ -89,7 +89,7 @@ impl TryFrom<u8> for PubRelCompReason {
             0x91 => Ok(PubRelCompReason::PacketIdInUse),
             _ => Err(MqttCodecError::new_with_kind(
                 "Unsupported reason code",
-                codec::ErrorKind::UnsupportedReason,
+                codec::ErrorKind::UnsupportedReason(value),
             )),
         }
     }

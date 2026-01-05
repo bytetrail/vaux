@@ -9,10 +9,10 @@ use syn::{parse_macro_input, punctuated::Punctuated, ItemStruct, Meta, Token};
 
 pub(crate) const CODEC_ATTR: &str = "codec";
 pub(crate) const CODEC_ATTR_PROPERTY_TYPE_ARG: &str = "property_type";
-pub(crate) const CODEC_ATTRDECODE_WITH_ARG: &str = "decode_with";
+pub(crate) const CODEC_ATTR_DECODE_WITH_ARG: &str = "decode_with";
 pub(crate) const CODEC_ATTR_ENCODE_WITH_ARG: &str = "encode_with";
 pub(crate) const CODEC_ATTR_SKIP_IF_ARG: &str = "skip_if";
-pub(crate) const CODEC_ATTR_PAYLOAD_ARG: &str = "payload";
+pub(crate) const CODEC_ATTR_PAYLOAD_ARG: &str = "payload_type";
 pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_REMAINING: &str = "remaining";
 pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_FIELD: &str = "field";
 
@@ -240,7 +240,7 @@ pub fn derive_decode(input: TokenStream) -> TokenStream {
         struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG);
 
     // decode the non-property, non-payload fields first, then the property fields if any
-    let mut header_field_decoded = fields
+    let header_field_decoded = fields
         .named
         .iter()
         .filter_map(|f| {
@@ -255,10 +255,38 @@ pub fn derive_decode(input: TokenStream) -> TokenStream {
             }
         })
         .collect::<Vec<_>>();
+
+    let property_field_decoded = fields
+        .named
+        .iter()
+        .filter_map(|f| {
+            if has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
+                .unwrap_or(false)
+            {
+                Some(decode_field(f))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
     let decode_prop_len = if has_properties {
         quote! {
             let property_length = codec::decode_variable_byte_int(src)?;
             let mut property_bytes_read = 0;
+            while property_bytes_read < property_length {
+                let property_type = src.get_u8().try_into()?;
+                property_bytes_read += 1;
+                match property_type {
+                    #(#property_field_decoded)*
+                    _ => {
+                        return Err(codec::MqttCodecError::new_with_kind(format!(
+                            "MQTT v5 property type {:?} is not supported",
+                            property_type
+                        ).as_str(), codec::ErrorKind::UnsupportedProperty(property_type as u8)));
+                    }
+                }
+            }
         }
     } else {
         quote! {}
@@ -282,7 +310,7 @@ pub fn derive_decode(input: TokenStream) -> TokenStream {
         impl Decode for #struct_name {
 
             fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
-                use bytes::{BufMut, BytesMut};
+                use bytes::{BufMut, Buf, BytesMut};
 
                 #(#header_field_decoded)*
                 #decode_prop_len

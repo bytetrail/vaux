@@ -40,8 +40,8 @@ pub struct ConnAckHeader {
     pub server_reference: Option<String>,
     #[codec(property_type = "PropertyType::AuthMethod")]
     pub auth_method: Option<String>,
-    #[codec(property_type = "PropertyType::AuthData")]
-    pub auth_data: Option<Vec<u8>>,
+    #[codec(skip_if = "Vec::is_empty", property_type = "PropertyType::AuthData")]
+    pub auth_data: Vec<u8>,
 }
 
 pub type ConnAck = ControlPacket<ConnAckHeader, Empty>;

@@ -4,7 +4,7 @@ use crate::{
     packet::{ControlPacket, Empty},
     publish::Publish,
     pubresp::{PubAck, PubComp, PubRec, PubRel},
-    CodecSize, ConnAck, Decode, Disconnect, Encode, PropertyCodecSize, Subscribe,
+    CodecSize, ConnAck, Decode, Disconnect, Encode, PropertyCodecSize, PropertyType, Subscribe,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::{
@@ -177,7 +177,9 @@ impl TryFrom<u8> for Reason {
             0xa0 => Ok(Reason::MaxConnectTime),
             0xa1 => Ok(Reason::SubIdUnsupported),
             0xa2 => Ok(Reason::WildcardSubUnsupported),
-            value => Err(MqttCodecError::new(&format!("Invalid reason: {value}"))),
+            value => Err(MqttCodecError::new(&format!(
+                " Unsupported reason code: {value}"
+            ))),
         }
     }
 }
@@ -326,8 +328,8 @@ pub enum ErrorKind {
     MalformedPacket,
     UnsupportedQosLevel,
     UnsupportedResponseType,
-    UnsupportedReason,
-    //UnsupportedProperty(PropertyType),
+    UnsupportedReason(u8),
+    UnsupportedProperty(u8),
     InvalidUTF8,
 }
 
@@ -571,6 +573,12 @@ pub fn put_utf8(src: &str, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
     dest.put_u16(src.len() as u16);
     dest.put(src.as_bytes());
     Ok(())
+}
+
+pub fn decode_string(src: &mut BytesMut) -> Result<String, MqttCodecError> {
+    let mut string = String::new();
+    string.decode(src)?;
+    Ok(string)
 }
 
 pub fn encode_array_field(src: &[u8], dest: &mut BytesMut) -> Result<(), MqttCodecError> {
