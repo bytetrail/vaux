@@ -52,10 +52,10 @@ impl Encode for PubAckRecReason {
 }
 
 impl Decode for PubAckRecReason {
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
         let byte = src.get_u8();
         *self = PubAckRecReason::try_from(byte)?;
-        Ok(())
+        Ok(1)
     }
 }
 
@@ -103,10 +103,10 @@ impl Encode for PubRelCompReason {
 }
 
 impl Decode for PubRelCompReason {
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
         let byte = src.get_u8();
         *self = PubRelCompReason::try_from(byte)?;
-        Ok(())
+        Ok(1)
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::{
-    codec, property, will::WillHeader, CodecSize, Decode, Encode, MqttCodecError,
-    PropertyCodecSize, PropertyType, QoSLevel, WillMessage,
+    codec, property, will::WillHeader, Decode, Encode, MqttCodecError, PropertyCodecSize,
+    PropertyType, QoSLevel, WillMessage,
 };
 // use bytes::BytesMut;
 use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};

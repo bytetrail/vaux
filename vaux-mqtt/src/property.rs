@@ -1,5 +1,5 @@
 use crate::{
-    codec::{self, put_utf8},
+    codec::{self, encode_string},
     CodecSize, Decode, Encode, MqttCodecError,
 };
 use bytes::{Buf, BufMut, BytesMut};
@@ -168,8 +168,8 @@ impl Encode for UserProperty {
         for (key, values) in &self.0 {
             for value in values {
                 dest.put_u8(PropertyType::UserProperty as u8);
-                put_utf8(key, dest)?;
-                put_utf8(value, dest)?;
+                encode_string(key, dest)?;
+                encode_string(value, dest)?;
             }
         }
         Ok(())
@@ -178,11 +178,12 @@ impl Encode for UserProperty {
 
 impl Decode for UserProperty {
     /// Decode a single user property key-value pair and add it to the map.
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         let key = codec::decode_string(src)?;
         let value = codec::decode_string(src)?;
-        self.0.entry(key).or_insert_with(Vec::new).push(value);
-        Ok(())
+        let bytes_read = 2 + key.0 + 2 + value.0;
+        self.0.entry(key.1).or_insert_with(Vec::new).push(value.1);
+        Ok(bytes_read)
     }
 }
 
@@ -248,9 +249,9 @@ impl Encode for PayloadFormat {
 }
 
 impl Decode for PayloadFormat {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         *self = PayloadFormat::try_from(src.get_u8())?;
-        Ok(())
+        Ok(1)
     }
 }
 

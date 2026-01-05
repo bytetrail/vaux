@@ -256,7 +256,7 @@ pub fn derive_decode(input: TokenStream) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
-    let property_field_decoded = fields
+    let property_field_decode = fields
         .named
         .iter()
         .filter_map(|f| {
@@ -270,15 +270,16 @@ pub fn derive_decode(input: TokenStream) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
-    let decode_prop_len = if has_properties {
+    let decode_properties = if has_properties {
         quote! {
-            let property_length = codec::decode_variable_byte_int(src)?;
+            let (property_length, var_bytes_read) = codec::decode_variable_byte_int(src)?;
+            bytes_read += var_bytes_read;
             let mut property_bytes_read = 0;
             while property_bytes_read < property_length {
                 let property_type = src.get_u8().try_into()?;
                 property_bytes_read += 1;
                 match property_type {
-                    #(#property_field_decoded)*
+                    #(#property_field_decode)*
                     _ => {
                         return Err(codec::MqttCodecError::new_with_kind(format!(
                             "MQTT v5 property type {:?} is not supported",
@@ -287,44 +288,20 @@ pub fn derive_decode(input: TokenStream) -> TokenStream {
                     }
                 }
             }
+            bytes_read += property_bytes_read;
         }
     } else {
         quote! {}
     };
 
-    let property_match_arms = fields
-        .named
-        .iter()
-        .filter_map(|f| {
-            if has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
-                .unwrap_or(false)
-            {
-                Some(decode_field(f))
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-
     let decode_impl = quote! {
         impl Decode for #struct_name {
-
-            fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
+            fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
                 use bytes::{BufMut, Buf, BytesMut};
-
+                let mut bytes_read = 0;
                 #(#header_field_decoded)*
-                #decode_prop_len
-
-                // if property_length > 0 {
-                //     while property_bytes_read < property_length {
-                //         let property_type = codec::decode_u8(src)?;
-                //         property_bytes_read += 1;
-                //         match property_type {
-                //             #(#property_match_arms)*
-                //         }
-                //     }
-                // }
-                Ok(())
+                #decode_properties
+                Ok(bytes_read)
             }
         }
     };

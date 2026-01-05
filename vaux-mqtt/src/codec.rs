@@ -4,13 +4,10 @@ use crate::{
     packet::{ControlPacket, Empty},
     publish::Publish,
     pubresp::{PubAck, PubComp, PubRec, PubRel},
-    CodecSize, ConnAck, Decode, Disconnect, Encode, PropertyCodecSize, PropertyType, Subscribe,
+    CodecSize, ConnAck, Decode, Disconnect, Encode, PropertyCodecSize, Subscribe,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use std::{
-    fmt::{Display, Formatter},
-    slice,
-};
+use std::fmt::{Display, Formatter};
 
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
 pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
@@ -198,10 +195,10 @@ impl Encode for Reason {
 }
 
 impl Decode for Reason {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         let val = src.get_u8();
         *self = val.try_into()?;
-        Ok(())
+        Ok(1)
     }
 }
 
@@ -238,10 +235,10 @@ impl Encode for QoSLevel {
 }
 
 impl Decode for QoSLevel {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         let val = src.get_u8();
         *self = val.try_into()?;
-        Ok(())
+        Ok(1)
     }
 }
 
@@ -487,19 +484,10 @@ pub fn get_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {
 }
 
 #[cfg(feature = "pedantic")]
-pub fn get_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {
-    match src.get_u8() {
-        0 => Ok(false),
-        1 => Ok(true),
-        v => Err(MqttCodecError::new(&format!(
-            "invalid value {} for boolean property",
-            v
-        ))),
-    }
-}
+pub fn get_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {}
 
 impl Decode for String {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         if src.len() < 2 {
             return Err(MqttCodecError::new("malformed Mqtt packet: string length"));
         }
@@ -514,12 +502,18 @@ impl Decode for String {
             )
         })?;
         *self = String::from_utf8(dest_vec).map_err(|e| MqttCodecError::new(&format!("{e:?}")))?;
-        Ok(())
+        Ok(len as u32 + 2)
+    }
+}
+
+impl Encode for Vec<u8> {
+    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+        encode_array_field(self, dest)
     }
 }
 
 impl Decode for Vec<u8> {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         if src.remaining() < 2 {
             return Err(MqttCodecError::new("Insufficient data for binary length"));
         }
@@ -533,59 +527,62 @@ impl Decode for Vec<u8> {
             )
         })?;
 
-        Ok(())
+        Ok(len as u32 + 2)
     }
 }
 
 impl Decode for bool {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
-        *self = get_bool(src)?;
-        Ok(())
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        *self = match src.get_u8() {
+            0 => Ok(false),
+            1 => Ok(true),
+            v => Err(MqttCodecError::new(&format!(
+                "invalid value {} for boolean property",
+                v
+            ))),
+        }?;
+        Ok(1)
     }
 }
 
 impl Decode for u8 {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         *self = src.get_u8();
-        Ok(())
+        Ok(1)
     }
 }
 
 impl Decode for u16 {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         *self = src.get_u16();
-        Ok(())
+        Ok(2)
     }
 }
 
 impl Decode for u32 {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         *self = src.get_u32();
-        Ok(())
+        Ok(4)
     }
 }
 
-pub fn put_utf8(src: &str, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+pub fn encode_string(src: &str, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
     let len = src.len();
     if len > u16::MAX as usize {
         return Err(MqttCodecError::new("string exceeds max length"));
     }
-    dest.put_u16(src.len() as u16);
+    dest.put_u16(len as u16);
     dest.put(src.as_bytes());
     Ok(())
 }
 
-pub fn decode_string(src: &mut BytesMut) -> Result<String, MqttCodecError> {
+pub fn decode_string(src: &mut BytesMut) -> Result<(u32, String), MqttCodecError> {
     let mut string = String::new();
-    string.decode(src)?;
-    Ok(string)
+    let bytes_read = string.decode(src)?;
+    Ok((bytes_read, string))
 }
 
 pub fn encode_array_field(src: &[u8], dest: &mut BytesMut) -> Result<(), MqttCodecError> {
-    put_bin(src, dest)
-}
-
-pub fn put_bin(src: &[u8], dest: &mut BytesMut) -> Result<(), MqttCodecError> {
     let len = src.len();
     if len > u16::MAX as usize {
         return Err(MqttCodecError::new("binary data exceeds max length"));
@@ -595,8 +592,32 @@ pub fn put_bin(src: &[u8], dest: &mut BytesMut) -> Result<(), MqttCodecError> {
     Ok(())
 }
 
-pub fn decode_variable_byte_int(src: &mut BytesMut) -> Result<u32, MqttCodecError> {
-    get_var_u32(src)
+pub fn decode_array_field(src: &mut BytesMut) -> Result<(Vec<u8>, u32), MqttCodecError> {
+    let mut data = Vec::new();
+    let bytes_read = data.decode(src)?;
+    Ok((data, bytes_read))
+}
+
+pub fn decode_variable_byte_int(src: &mut BytesMut) -> Result<(u32, u32), MqttCodecError> {
+    let mut result = 0_u32;
+    let mut shift = 0;
+    let mut next_byte = src.get_u8();
+    let mut decode = true;
+    while decode {
+        result += ((next_byte & 0x7f) as u32) << shift;
+        shift += 7;
+        if next_byte & 0x80 == 0 {
+            decode = false;
+        } else {
+            next_byte = src.get_u8();
+        }
+        if shift > 21 {
+            return Err(MqttCodecError::new(
+                "malformed packet: variable byte integer",
+            ));
+        }
+    }
+    Ok((result, shift / 7))
 }
 
 pub fn encode_variable_byte_int(val: u32, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
@@ -619,28 +640,6 @@ pub fn encode_variable_byte_int_ref(val: &u32, dest: &mut BytesMut) -> Result<()
     encode_variable_byte_int(*val, dest)
 }
 
-pub fn get_var_u32(src: &mut BytesMut) -> Result<u32, MqttCodecError> {
-    let mut result = 0_u32;
-    let mut shift = 0;
-    let mut next_byte = src.get_u8();
-    let mut decode = true;
-    while decode {
-        result += ((next_byte & 0x7f) as u32) << shift;
-        shift += 7;
-        if next_byte & 0x80 == 0 {
-            decode = false;
-        } else {
-            next_byte = src.get_u8();
-        }
-        if shift > 21 {
-            return Err(MqttCodecError::new(
-                "malformed packet: variable byte integer",
-            ));
-        }
-    }
-    Ok(result)
-}
-
 pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MqttCodecError> {
     if src.remaining() < 2 {
         return Ok(None);
@@ -658,7 +657,7 @@ pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, Mq
     let first_byte = src.get_u8();
     let packet_type = PacketType::from(first_byte);
     let flags = first_byte & 0x0f;
-    let packet_remaining = get_var_u32(src)?;
+    let (_bytes_read, packet_remaining) = decode_variable_byte_int(src)?;
     match src.remaining() {
         val if val < packet_remaining as usize => {
             return Err(MqttCodecError {

@@ -2,7 +2,7 @@ use bytes::{Buf, BufMut, BytesMut};
 
 use crate::{
     codec::{
-        encode_variable_byte_int, get_var_u32, ErrorKind, PACKET_RESERVED_BIT1,
+        decode_variable_byte_int, encode_variable_byte_int, ErrorKind, PACKET_RESERVED_BIT1,
         PACKET_RESERVED_NONE,
     },
     Decode, MqttCodecError, PacketType, QoSLevel,
@@ -112,7 +112,7 @@ impl FixedHeader {
 // }
 
 impl Decode for FixedHeader {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         if src.remaining() < 2 {
             return Err(MqttCodecError {
                 reason: "insufficient data to decode fixed header".to_string(),
@@ -134,7 +134,7 @@ impl Decode for FixedHeader {
         }
         let first_byte = src.get_u8();
         let flags = first_byte & 0x0f;
-        let packet_remaining = get_var_u32(src)?;
+        let (_bytes_read, packet_remaining) = decode_variable_byte_int(src)?;
         match src.remaining() {
             val if val < packet_remaining as usize => {
                 return Err(MqttCodecError {
@@ -161,7 +161,7 @@ impl Decode for FixedHeader {
             }
         };
         self.flags = first_byte & 0x0F;
-        self.remaining = crate::codec::get_var_u32(src)?;
+        let (_bytes_read, packet_remaining) = crate::codec::decode_variable_byte_int(src)?;
         match self.packet_type {
             PacketType::Connect
             | PacketType::PubRel
@@ -187,6 +187,6 @@ impl Decode for FixedHeader {
         }
         self.remaining = packet_remaining;
         self.flags = flags;
-        Ok(())
+        Ok(2)
     }
 }

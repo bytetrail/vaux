@@ -76,13 +76,13 @@ pub(crate) fn encode_for_string(field_name: &Option<syn::Ident>,
         quote ! {
             if let Some(v) = self.#field_name.as_ref() {
                 #prop_ident_encode
-                codec::put_utf8(v, dest)?;
+                codec::encode_string(v, dest)?;
             }
         }
     } else  {
         quote ! {
             #prop_ident_encode
-            codec::put_utf8(&self.#field_name, dest)?;
+            codec::encode_string(&self.#field_name, dest)?;
         }        
     }
 
@@ -111,11 +111,11 @@ pub(crate) fn encode_for_vec(
                     "u8" => if is_optional {
                         quote! {
                         #prop_ident_encode
-                        codec::put_bin(#field, dest)?;
+                        codec::encode_array_field(#field, dest)?;
                     }} else {
                         quote! {
                         #prop_ident_encode
-                        codec::put_bin(&self.#field, dest)?;
+                        codec::encode_array_field(&self.#field, dest)?;
                     } } ,
                     
                     "i8" | "u16" | "i16" | "i32" | "u32" | "u64" | "i64" | "f32" | "f64" | "bool" => {
@@ -369,7 +369,7 @@ mod test {
         let expected = quote! {
             // Encoding logic for String property            
             dest.put_u8(TestProperty::PropertyThree as u8);
-            codec::put_utf8(&self.test_string, dest)?;      
+            codec::encode_string(&self.test_string, dest)?;      
         };
         assert_eq!(encode_tokens.to_string(), expected.to_string());
     }   
@@ -382,7 +382,7 @@ mod test {
         let expected = quote! {
             // Encoding logic for String property            
             dest.put_u8(TestProperty::PropertyFour as u8);
-            codec::put_bin(&self.data, dest)?;      
+            codec::encode_array_field(&self.data, dest)?;      
         };
         assert_eq!(encode_tokens.to_string(), expected.to_string());
     }

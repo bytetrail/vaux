@@ -133,12 +133,12 @@ fn test_decode_var_int() {
     // 0x80
     encoded.put_u8(0x80);
     encoded.put_u8(0x01);
-    let val = get_var_u32(&mut encoded).unwrap();
+    let val = decode_variable_byte_int(&mut encoded).unwrap().1;
     assert_eq!(128, val);
     // 777 --- 0x309
     encoded.clear();
     encoded.put_u8(0x89);
     encoded.put_u8(0x06);
-    let val = get_var_u32(&mut encoded).unwrap();
+    let val = decode_variable_byte_int(&mut encoded).unwrap().1;
     assert_eq!(777, val);
 }

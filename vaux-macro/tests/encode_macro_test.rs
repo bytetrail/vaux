@@ -18,7 +18,7 @@ mod codec {
         }
     }
 
-    pub fn put_utf8(val: &str, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    pub fn encode_string(val: &str, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         let len = val.len();
         if len > u16::MAX as usize {
             return Err(MqttCodecError {

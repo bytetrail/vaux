@@ -18,8 +18,8 @@ impl PropertyCodecSize for Empty {
 }
 
 impl Decode for Empty {
-    fn decode(&mut self, _src: &mut BytesMut) -> Result<(), MqttCodecError> {
-        Ok(())
+    fn decode(&mut self, _src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        Ok(0)
     }
 }
 impl Encode for Empty {
@@ -44,10 +44,10 @@ where
     H: Decode + Encode + Clone + PartialEq + Eq + CodecSize,
     P: Decode + Encode + Clone + PartialEq + Eq + CodecSize,
 {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         self.variable_header.decode(src)?;
         self.payload.decode(src)?;
-        Ok(())
+        Ok(0)
     }
 }
 
