@@ -1,16 +1,22 @@
 mod decode;
 mod encode;
 mod size;
+mod util;
 
+use crate::util::{
+    compile_error, get_skip_if_path, has_attribute_with_name_value, is_payload_field,
+    is_property_field, skip_field, struct_has_attribute_with_name_value,
+};
 use crate::{decode::decode_field, size::field_size};
 use proc_macro::{self, TokenStream};
 use quote::quote;
-use syn::{parse_macro_input, punctuated::Punctuated, ItemStruct, Meta, Token};
+use syn::{parse_macro_input, ItemStruct};
 
 pub(crate) const CODEC_ATTR: &str = "codec";
 pub(crate) const CODEC_ATTR_PROPERTY_TYPE_ARG: &str = "property_type";
 pub(crate) const CODEC_ATTR_DECODE_WITH_ARG: &str = "decode_with";
 pub(crate) const CODEC_ATTR_ENCODE_WITH_ARG: &str = "encode_with";
+pub(crate) const CODEC_ATTR_SKIP_ARG: &str = "skip";
 pub(crate) const CODEC_ATTR_SKIP_IF_ARG: &str = "skip_if";
 pub(crate) const CODEC_ATTR_PAYLOAD_ARG: &str = "payload_type";
 pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_REMAINING: &str = "remaining";
@@ -20,7 +26,6 @@ pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_FIELD: &str = "field";
 pub fn derive_codec_property_size(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let name = &input.ident;
-
     // ensure that the struct has named fields
     let fields = match &input.fields {
         syn::Fields::Named(fields_named) => fields_named,
@@ -162,13 +167,15 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
     // check if any field has the property attribute
     let has_properties =
         struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG);
+    let has_payload =
+        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG);
     // encode the non-property fields first, then the property fields if any
     let mut encoded = fields
         .named
         .iter()
         .filter_map(|f| {
-            if !has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
-                .unwrap_or(false)
+            if !(is_property_field(&f.attrs).unwrap_or(false)
+                || is_payload_field(&f.attrs).unwrap_or(false))
             {
                 if let Some(skip_path) = get_skip_if_path(&f.attrs) {
                     let field_name = f.ident.as_ref().unwrap();
@@ -193,9 +200,24 @@ pub fn derive_encode(input: TokenStream) -> TokenStream {
         };
         encoded.push(property_length_encoding);
         fields.named.iter().for_each(|f| {
-            if has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
-                .unwrap_or(false)
-            {
+            if is_property_field(&f.attrs).unwrap_or(false) {
+                let inner_expr = encode::encode_field(f);
+                if let Some(skip_path) = get_skip_if_path(&f.attrs) {
+                    let field_name = f.ident.as_ref().unwrap();
+                    encoded.push(quote! {
+                        if !#skip_path(&self.#field_name) {
+                            #inner_expr
+                        }
+                    })
+                } else {
+                    encoded.push(inner_expr);
+                }
+            }
+        });
+    }
+    if has_payload {
+        fields.named.iter().for_each(|f| {
+            if is_payload_field(&f.attrs).unwrap_or(false) {
                 let inner_expr = encode::encode_field(f);
                 if let Some(skip_path) = get_skip_if_path(&f.attrs) {
                     let field_name = f.ident.as_ref().unwrap();
@@ -307,192 +329,4 @@ pub fn derive_decode(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(decode_impl)
-}
-
-/// Generates a compile-time error with the given message.
-pub(crate) fn compile_error(message: &str) -> TokenStream {
-    let error_message = format!("Compile-time error in vaux-macro: {}", message);
-    TokenStream::from(quote! {
-        compile_error!(#error_message);
-    })
-}
-
-pub(crate) fn compile_error2(message: &str) -> proc_macro2::TokenStream {
-    let error_message = format!("Compile-time error in vaux-macro: {}", message);
-    quote! {
-        compile_error!(#error_message);
-    }
-}
-
-/// Returns the skip_if path if there is a ```skip_if``` in the attributes for the field.
-/// The skip_if attribute is used to conditionally skip encoding/decoding/size calculation
-/// of a field based on a specific condition. This function extracts the condition specified
-/// in the skip_if attribute.
-///
-/// The path must resolve to  function that is called with &self and returns a bool indicating
-/// whether to skip the field or not.
-///
-pub(crate) fn get_skip_if_path(attrs: &[syn::Attribute]) -> Option<syn::Path> {
-    let codec_attrs = attrs
-        .iter()
-        .filter(|attr| attr.path().is_ident(CODEC_ATTR))
-        .collect::<Vec<_>>();
-    for attr in &codec_attrs {
-        let nested = attr
-            .parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
-            .ok()?;
-        for meta in nested {
-            if let Meta::NameValue(nv_pair) = meta {
-                if nv_pair.path.is_ident(CODEC_ATTR_SKIP_IF_ARG) {
-                    if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
-                        if let syn::Lit::Str(lit_str) = &lit_expr.lit {
-                            let path: syn::Path = lit_str.parse().unwrap();
-                            return Some(path);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Checks if the given attribute name exists in the list of attributes. This is used to
-/// determine if a specific custom attribute is present on a struct or field. In the Size
-/// macro, we might use this to check for attributes that specify a specific type for size
-///  calculation.
-#[allow(dead_code)]
-fn has_attribute(attrs: &[syn::Attribute], name: &str) -> bool {
-    attrs.iter().any(|attr| attr.path().is_ident(name))
-}
-
-/// Checks if any of the named fields has the specified attribute.
-#[allow(dead_code)]
-pub(crate) fn struct_has_attribute(fields: &syn::FieldsNamed, attribute_name: &str) -> bool {
-    for field in &fields.named {
-        for attr in &field.attrs {
-            if attr.path().is_ident(attribute_name) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Checks if the given attribute with a specific name-value pair exists in the list of attributes.
-/// This is useful for attributes that have key-value pairs, allowing us to check for specific
-/// configurations within an attribute. The codec attribute often contains such key-value pairs to
-/// customize behavior for encoding, decoding, or size calculation.
-pub(crate) fn has_attribute_with_name_value(
-    attrs: &[syn::Attribute],
-    name: &str,
-    key: &str,
-) -> Result<bool, syn::Error> {
-    let codec_attrs = attrs
-        .iter()
-        .filter(|attr| attr.path().is_ident(name))
-        .collect::<Vec<_>>();
-    for attr in &codec_attrs {
-        let nested = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
-        for meta in nested {
-            if let Meta::NameValue(nv_pair) = meta {
-                if nv_pair.path.is_ident(key) {
-                    return Ok(true);
-                }
-            }
-        }
-    }
-    Ok(false)
-}
-
-/// Retrieves the attribute with the specified name-value pair from the list of attributes.
-/// This is useful for attributes that have key-value pairs, allowing us to check for specific
-/// configurations within an attribute. The codec attribute often contains such key-value pairs to
-/// customize behavior for encoding, decoding, or size calculation.
-pub(crate) fn attribute_with_name_value<'a>(
-    attrs: &'a [syn::Attribute],
-    name: &str,
-    key: &str,
-) -> Result<Option<&'a syn::Attribute>, syn::Error> {
-    let codec_attrs = attrs
-        .iter()
-        .filter(|attr| attr.path().is_ident(name))
-        .collect::<Vec<_>>();
-    for attr in &codec_attrs {
-        let nested = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)?;
-        for meta in nested {
-            if let Meta::NameValue(nv_pair) = meta {
-                if nv_pair.path.is_ident(key) {
-                    return Ok(Some(attr));
-                }
-            }
-        }
-    }
-    Ok(None)
-}
-
-pub(crate) fn struct_has_attribute_with_name_value(
-    fields: &syn::FieldsNamed,
-    attribute_name: &str,
-    key: &str,
-) -> bool {
-    for field in &fields.named {
-        for attr in &field.attrs {
-            if attr.path().is_ident(attribute_name) {
-                if let Ok(true) = has_attribute_with_name_value(&field.attrs, attribute_name, key) {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-/// Checks if the given type name is a supported primitive type for size calculation.
-/// Currently supports u8, i8, bool, u16, i16, u32, i32, and char.
-pub(crate) fn is_primitive_type(type_name: &str) -> bool {
-    matches!(
-        type_name,
-        "u8" | "i8"
-            | "u16"
-            | "i16"
-            | "u32"
-            | "i32"
-            | "bool"
-            | "u64"
-            | "i64"
-            | "f32"
-            | "f64"
-            | "char"
-    )
-}
-
-/// Retrieves the property type path from the attributes if it exists.
-pub(crate) fn property_type(attrs: &[syn::Attribute]) -> Option<syn::Path> {
-    attrs.iter().find_map(|attr| {
-        if attr.path().is_ident(CODEC_ATTR) {
-            let nested = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated);
-            nested.unwrap().iter().find_map(|meta| {
-                if meta.path().is_ident(CODEC_ATTR_PROPERTY_TYPE_ARG) {
-                    if let Meta::NameValue(nv_pair) = meta {
-                        if let syn::Expr::Lit(lit_str) = &nv_pair.value {
-                            if let syn::Lit::Str(lit_str) = &lit_str.lit {
-                                Some(lit_str.parse().unwrap())
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            })
-        } else {
-            None
-        }
-    })
 }

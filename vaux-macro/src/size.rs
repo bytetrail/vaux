@@ -1,4 +1,7 @@
-use crate::compile_error2;
+use crate::{
+    skip_field,
+    util::{attribute_with_name_value, compile_error2, has_attribute_with_name_value},
+};
 use quote::quote;
 use syn::{punctuated::Punctuated, Meta, Token};
 
@@ -6,15 +9,16 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_name = field.ident.as_ref().unwrap();
     let field_type = &field.ty;
     let attrs = &field.attrs;
-    let is_property: bool =
-        crate::has_attribute_with_name_value(attrs, "codec", "property_type").unwrap();
-    let codec_size_with =
-        crate::has_attribute_with_name_value(attrs, "codec", "size_with").unwrap();
+    if skip_field(attrs).unwrap_or(false) {
+        return quote! {};
+    }
+    let is_property: bool = has_attribute_with_name_value(attrs, "codec", "property_type").unwrap();
+    let codec_size_with = has_attribute_with_name_value(attrs, "codec", "size_with").unwrap();
     let field_calc = match field_type {
         syn::Type::Path(type_path) => {
             let segment = &type_path.path.segments.last().unwrap().ident;
             if codec_size_with {
-                match crate::attribute_with_name_value(attrs, "codec", "size_with") {
+                match attribute_with_name_value(attrs, "codec", "size_with") {
                     Ok(Some(attr)) => {
                         if matches!(segment.to_string().as_str(), "Option") {
                             size_with_path(field_name, &attr, true, is_property)

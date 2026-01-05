@@ -1,22 +1,25 @@
 use crate::{
-    attribute_with_name_value, compile_error2, is_primitive_type, CODEC_ATTR,
-    CODEC_ATTR_DECODE_WITH_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG,
+    skip_field,
+    util::{
+        attribute_with_name_value, compile_error2, has_attribute_with_name_value,
+        is_primitive_type, property_type,
+    },
+    CODEC_ATTR, CODEC_ATTR_DECODE_WITH_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG,
 };
 use quote::quote;
 use syn::{punctuated::Punctuated, Meta, Token};
 
 pub(crate) fn decode_field(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_name = field.ident.as_ref().unwrap();
-    let mut field_type = field.ty.clone();
-    let is_property = crate::has_attribute_with_name_value(
-        &field.attrs,
-        CODEC_ATTR,
-        CODEC_ATTR_PROPERTY_TYPE_ARG,
-    )
-    .unwrap();
-    let decode_with =
-        crate::attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_DECODE_WITH_ARG)
+    let field_type = field.ty.clone();
+    if skip_field(&field.attrs).unwrap_or(false) {
+        return quote! {};
+    }
+    let is_property =
+        has_attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
             .unwrap();
+    let decode_with =
+        attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_DECODE_WITH_ARG).unwrap();
     let payload_type_attr =
         attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG).unwrap();
     let payload_type = if let Some(payload_attr) = payload_type_attr {
@@ -41,7 +44,7 @@ pub(crate) fn decode_field(field: &syn::Field) -> proc_macro2::TokenStream {
     } else {
         None
     };
-    let property_type: Option<syn::Path> = crate::property_type(&field.attrs);
+    let property_type: Option<syn::Path> = property_type(&field.attrs);
     if property_type.is_none() && is_property {
         return compile_error2("Property attribute requires a property_type argument");
     }

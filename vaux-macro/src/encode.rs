@@ -1,6 +1,7 @@
 use quote::quote;
 use syn::{Meta, Token, punctuated::Punctuated};
-use crate::{CODEC_ATTR, CODEC_ATTR_ENCODE_WITH_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, attribute_with_name_value, compile_error2, has_attribute_with_name_value, is_primitive_type };
+use crate::{CODEC_ATTR, CODEC_ATTR_ENCODE_WITH_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, 
+    util::{attribute_with_name_value, compile_error2, has_attribute_with_name_value, is_primitive_type, payload_type, property_type, skip_field} };
 
 /// Generate encode implementation for struct fields. The struct fields are encoded in
 /// the order they are defined with the exception of property length which does not
@@ -12,12 +13,16 @@ use crate::{CODEC_ATTR, CODEC_ATTR_ENCODE_WITH_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG
 pub(crate) fn encode_field(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_name = &field.ident;
     let field_type = &field.ty;
+    if skip_field(&field.attrs).unwrap() {
+        return quote! {};
+    }
     let is_property = has_attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG).unwrap();
     let encode_with = attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_ENCODE_WITH_ARG).unwrap();
-    let property_type: Option<syn::Path> = crate::property_type(&field.attrs);
+    let property_type: Option<syn::Path> = property_type(&field.attrs);
     if property_type.is_none() && is_property {
         return compile_error2("Property attribute requires a property_type argument");
     } 
+    let payload_type = payload_type(&field.attrs);
 
     // convert the property_type str to an enumeration path
     let property_type_ident = if is_property && property_type.is_some() { 
