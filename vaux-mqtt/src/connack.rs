@@ -1,13 +1,14 @@
 use crate::codec::{self, Reason};
-use crate::packet::{ControlPacket, Empty};
 use crate::property::{PropertyType, UserProperty};
 use crate::{CodecSize, Decode, Encode, MqttCodecError, PropertyCodecSize, QoSLevel};
 use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
 
+const CONNACK_SESSION_PRESENT_MASK: u8 = 0x01;
+
 #[derive(Debug, Default, Clone, PartialEq, Eq, Decode, Encode, CodecSize, PropertyCodecSize)]
-pub struct ConnAckHeader {
+pub struct ConnAck {
     ack_flags: u8,
-    reason: Reason,
+    pub reason: Reason,
     #[codec(property_type = "PropertyType::SessionExpiryInterval")]
     pub session_expiry_interval: Option<u32>,
     #[codec(property_type = "PropertyType::RecvMax")]
@@ -44,63 +45,36 @@ pub struct ConnAckHeader {
     pub auth_data: Vec<u8>,
 }
 
-pub type ConnAck = ControlPacket<ConnAckHeader, Empty>;
-
 impl ConnAck {
-    pub fn reason(&self) -> Reason {
-        self.variable_header.reason
+    /// Returns true if the session is present flag is set in the CONNACK packet.
+    ///
+    pub fn session_present(&self) -> bool {
+        (self.ack_flags & CONNACK_SESSION_PRESENT_MASK) != 0
     }
 
-    pub fn set_reason(&mut self, reason: Reason) {
-        self.variable_header.reason = reason;
-    }
-
-    pub fn session_expiry(&self) -> Option<u32> {
-        self.variable_header.session_expiry_interval
+    /// Sets the session present flag in the CONNACK packet.
+    pub fn set_session_present(&mut self, present: bool) {
+        if present {
+            self.ack_flags |= CONNACK_SESSION_PRESENT_MASK;
+        } else {
+            self.ack_flags &= !CONNACK_SESSION_PRESENT_MASK;
+        }
     }
 
     pub fn set_session_expiry(&mut self, interval: u32) {
         if interval == 0 {
-            self.variable_header.session_expiry_interval = None;
+            self.session_expiry_interval = None;
             return;
         }
-        self.variable_header.session_expiry_interval = Some(interval);
-    }
-
-    pub fn assigned_client_id(&self) -> Option<String> {
-        self.variable_header.assigned_client_id.clone()
-    }
-
-    pub fn set_assigned_client_id(&mut self, client_id: Option<String>) {
-        self.variable_header.assigned_client_id = client_id;
-    }
-
-    pub fn maximum_qos(&self) -> Option<QoSLevel> {
-        self.variable_header.maximum_qos
-    }
-
-    pub fn set_maximum_qos(&mut self, qos: QoSLevel) {
-        self.variable_header.maximum_qos = Some(qos);
-    }
-
-    pub fn retain_available(&self) -> Option<bool> {
-        self.variable_header.retain_available
-    }
-
-    pub fn set_retain_available(&mut self, available: bool) {
-        self.variable_header.retain_available = Some(available);
-    }
-
-    pub fn server_keep_alive(&self) -> Option<u16> {
-        self.variable_header.server_keep_alive
+        self.session_expiry_interval = Some(interval);
     }
 
     pub fn set_server_keep_alive(&mut self, keep_alive: u16) {
         if keep_alive == 0 {
-            self.variable_header.server_keep_alive = None;
+            self.server_keep_alive = None;
             return;
         }
-        self.variable_header.server_keep_alive = Some(keep_alive);
+        self.server_keep_alive = Some(keep_alive);
     }
 
     /// Gets the maximum number of QoS 1 and QoS 2 messages the session is willing to process.
@@ -108,7 +82,7 @@ impl ConnAck {
     /// [Receive Maximum](https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901049)
     /// property. The property is optional.
     pub fn receive_max(&self) -> Option<u16> {
-        self.variable_header.receive_maximum
+        self.receive_maximum
     }
 
     /// Sets the maximum number of QoS 1 and QoS 2 messages the session is willing to process.
@@ -120,9 +94,9 @@ impl ConnAck {
     /// max - The maximum number of QoS 1 and QoS 2 messages the session is willing to process.
     pub fn set_receive_max(&mut self, max: u16) {
         if max == 0 {
-            self.variable_header.receive_maximum = None;
+            self.receive_maximum = None;
             return;
         }
-        self.variable_header.receive_maximum = Some(max);
+        self.receive_maximum = Some(max);
     }
 }

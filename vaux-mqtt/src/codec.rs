@@ -1,9 +1,9 @@
 use crate::{
     connect::Connect,
     fixed::FixedHeader,
-    packet::{ControlPacket, Empty},
     publish::Publish,
     pubresp::{PubAck, PubComp, PubRec, PubRel},
+    subscribe::SubAck,
     CodecSize, ConnAck, Decode, Disconnect, Encode, PropertyCodecSize, Subscribe,
 };
 use bytes::{Buf, BufMut, BytesMut};
@@ -11,6 +11,38 @@ use std::fmt::{Display, Formatter};
 
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
 pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
+
+pub const MIN_VARIABLE_BYTE_INT: u32 = 0;
+pub const MAX_VARIABLE_BYTE_INT: u32 = 268_435_455; // 256 MB
+
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
+pub struct PingReq;
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
+pub struct PingResp;
+
+impl Encode for PingReq {
+    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+        Ok(())
+    }
+}
+
+impl Decode for PingReq {
+    fn decode(&mut self, _src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        Ok(0)
+    }
+}
+
+impl Encode for PingResp {
+    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+        Ok(())
+    }
+}
+
+impl Decode for PingResp {
+    fn decode(&mut self, _src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        Ok(0)
+    }
+}
 
 /// MQTT Control Packet Type
 /// #[repr(u8)]
@@ -254,9 +286,6 @@ impl PropertyCodecSize for &QoSLevel {
     }
 }
 
-pub type PingReq = ControlPacket<Empty, Empty>;
-pub type PingResp = ControlPacket<Empty, Empty>;
-
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Packet {
     PingRequest(PingReq),
@@ -270,7 +299,7 @@ pub enum Packet {
     PubRel(PubRel),
     Disconnect(Disconnect),
     Subscribe(Subscribe),
-    // SubAck(SubAck),
+    SubAck(SubAck),
     // Unsubscribe(Unsubscribe),
     // UnsubAck(UnsubAck),
 }
@@ -289,7 +318,7 @@ impl Encode for Packet {
             Packet::PubRel(pubrel) => pubrel.encode(dest),
             Packet::Disconnect(disconnect) => disconnect.encode(dest),
             Packet::Subscribe(subscribe) => subscribe.encode(dest),
-            //         // Packet::SubAck(suback) => suback.encode(dest),
+            Packet::SubAck(suback) => suback.encode(dest),
             //         // Packet::Unsubscribe(unsubscribe) => unsubscribe.encode(dest),
             //         // Packet::UnsubAck(unsuback) => unsuback.encode(dest),
             //     }
@@ -311,7 +340,7 @@ impl From<&Packet> for PacketType {
             Packet::PubRel(_) => PacketType::PubRel,
             Packet::Disconnect(_) => PacketType::Disconnect,
             Packet::Subscribe(_) => PacketType::Subscribe,
-            //             Packet::SubAck(_) => PacketType::SubAck,
+            Packet::SubAck(_) => PacketType::SubAck,
             //             Packet::Unsubscribe(_) => PacketType::Unsubscribe,
             //             Packet::UnsubAck(_) => PacketType::UnsubAck,
         }
@@ -370,121 +399,78 @@ impl MqttCodecError {
 }
 
 pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecError> {
-    match decode_fixed_header(src) {
-        Ok(packet_header) => match packet_header {
-            Some(packet_header) => {
-                let decode_len =
-                    packet_header.remaining + 1 + variable_byte_int_size(packet_header.remaining);
-                match packet_header.packet_type() {
-                    PacketType::PingReq => Ok(Some((
-                        Packet::PingRequest(PingReq::new(packet_header)),
-                        decode_len,
-                    ))),
-                    PacketType::PingResp => Ok(Some((
-                        Packet::PingResponse(PingResp::new(packet_header)),
-                        decode_len,
-                    ))),
-                    PacketType::Connect => {
-                        let mut connect = Connect::new(packet_header);
-                        connect.decode(src)?;
-                        Ok(Some((Packet::Connect(Box::new(connect)), decode_len)))
-                    }
-                    PacketType::Publish => {
-                        let mut publish = Publish::new_from_header(packet_header)?;
-                        publish.decode(src)?;
-                        Ok(Some((Packet::Publish(publish), decode_len)))
-                    }
-                    PacketType::PubAck => {
-                        let mut puback = PubAck::new(packet_header);
-                        puback.decode(src)?;
-                        Ok(Some((Packet::PubAck(puback), decode_len)))
-                    }
-                    PacketType::PubComp => {
-                        let mut pubcomp = PubComp::new(packet_header);
-                        pubcomp.decode(src)?;
-                        Ok(Some((Packet::PubComp(pubcomp), decode_len)))
-                    }
-                    PacketType::PubRec => {
-                        let mut pubrec = PubRec::new(packet_header);
-                        pubrec.decode(src)?;
-                        Ok(Some((Packet::PubRec(pubrec), decode_len)))
-                    }
-                    PacketType::PubRel => {
-                        let mut pubrel = PubRel::new(packet_header);
-                        pubrel.decode(src)?;
-                        Ok(Some((Packet::PubRel(pubrel), decode_len)))
-                    }
-                    PacketType::Disconnect => {
-                        let mut disconnect = Disconnect::default();
-                        disconnect.decode(src)?;
-                        Ok(Some((Packet::Disconnect(disconnect), decode_len)))
-                    }
-                    PacketType::ConnAck => {
-                        let mut connack = ConnAck::default();
-                        connack.decode(src)?;
-                        Ok(Some((Packet::ConnAck(connack), decode_len)))
-                    }
-                    // PacketType::Subscribe => {
-                    //     let mut subscribe = Subscribe::default();
-                    //     subscribe.decode(src)?;
-                    //     Ok(Some((Packet::Subscribe(subscribe), decode_len)))
-                    // }
-                    // PacketType::SubAck => {
-                    //     let mut suback = SubAck::default();
-                    //     suback.decode(src)?;
-                    //     Ok(Some((Packet::SubAck(suback), decode_len)))
-                    // }
-                    // PacketType::Unsubscribe => {
-                    //     let mut unsubscribe = Unsubscribe::default();
-                    //     unsubscribe.decode(src)?;
-                    //     Ok(Some((Packet::Unsubscribe(unsubscribe), decode_len)))
-                    // }
-                    // PacketType::UnsubAck => {
-                    //     let mut unsuback = UnsubAck::default();
-                    //     unsuback.decode(src)?;
-                    //     Ok(Some((Packet::UnsubAck(unsuback), decode_len)))
-                    // }
-                    _ => Err(MqttCodecError::new("unsupported packet type")),
-                }
-            }
-            None => Ok(None),
-        },
-        Err(e) => Err(e),
+    let mut fixed_header = FixedHeader::default();
+    let mut decode_len = fixed_header.decode(src)?;
+    decode_len += fixed_header.remaining;
+    match fixed_header.packet_type {
+        PacketType::PingReq => Ok(Some((Packet::PingRequest(PingReq::default()), decode_len))),
+        PacketType::PingResp => Ok(Some((
+            Packet::PingResponse(PingResp::default()),
+            decode_len,
+        ))),
+        PacketType::Connect => {
+            let mut connect = Connect::new();
+            connect.decode(src)?;
+            Ok(Some((Packet::Connect(Box::new(connect)), decode_len)))
+        }
+        PacketType::Publish => {
+            let mut publish = Publish::new_from_header(fixed_header)?;
+            publish.decode(src)?;
+            Ok(Some((Packet::Publish(publish), decode_len)))
+        }
+        PacketType::PubAck => {
+            let mut puback = PubAck::default();
+            puback.decode(src)?;
+            Ok(Some((Packet::PubAck(puback), decode_len)))
+        }
+        PacketType::PubComp => {
+            let mut pubcomp = PubComp::default();
+            pubcomp.decode(src)?;
+            Ok(Some((Packet::PubComp(pubcomp), decode_len)))
+        }
+        PacketType::PubRec => {
+            let mut pubrec = PubRec::default();
+            pubrec.decode(src)?;
+            Ok(Some((Packet::PubRec(pubrec), decode_len)))
+        }
+        PacketType::PubRel => {
+            let mut pubrel = PubRel::default();
+            pubrel.decode(src)?;
+            Ok(Some((Packet::PubRel(pubrel), decode_len)))
+        }
+        PacketType::Disconnect => {
+            let mut disconnect = Disconnect::default();
+            disconnect.decode(src)?;
+            Ok(Some((Packet::Disconnect(disconnect), decode_len)))
+        }
+        PacketType::ConnAck => {
+            let mut connack = ConnAck::default();
+            connack.decode(src)?;
+            Ok(Some((Packet::ConnAck(connack), decode_len)))
+        }
+        PacketType::Subscribe => {
+            let mut subscribe = Subscribe::default();
+            subscribe.decode(src)?;
+            Ok(Some((Packet::Subscribe(subscribe), decode_len)))
+        }
+        PacketType::SubAck => {
+            let mut suback = SubAck::default();
+            suback.decode(src)?;
+            Ok(Some((Packet::SubAck(suback), decode_len)))
+        }
+        // PacketType::Unsubscribe => {
+        //     let mut unsubscribe = Unsubscribe::default();
+        //     unsubscribe.decode(src)?;
+        //     Ok(Some((Packet::Unsubscribe(unsubscribe), decode_len)))
+        // }
+        // PacketType::UnsubAck => {
+        //     let mut unsuback = UnsubAck::default();
+        //     unsuback.decode(src)?;
+        //     Ok(Some((Packet::UnsubAck(unsuback), decode_len)))
+        // }
+        _ => Err(MqttCodecError::new("unsupported packet type")),
     }
 }
-
-// pub fn encode<H, P>(
-//     packet: &mut ControlPacket<H, P>,
-//     dest: &mut BytesMut,
-// ) -> Result<(), MqttCodecError>
-// where
-//     H: Decode + Encode + Clone + PartialEq + Eq + Size + PacketProperties,
-//     P: Decode + Encode + Clone + PartialEq + Eq + Size,
-// {
-//     packet.encode(dest)
-// }
-
-/// Returns the length of an encoded MQTT variable length unsigned int
-pub fn variable_byte_int_size(value: u32) -> u32 {
-    match value {
-        0..=127 => 1,
-        128..=16383 => 2,
-        16384..=2097151 => 3,
-        _ => 4,
-    }
-}
-
-pub fn variable_byte_int_size_ref(value: &u32) -> u32 {
-    variable_byte_int_size(*value)
-}
-
-#[cfg(not(feature = "pedantic"))]
-pub fn get_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {
-    Ok(src.get_u8() != 0)
-}
-
-#[cfg(feature = "pedantic")]
-pub fn get_bool(src: &mut BytesMut) -> Result<bool, MqttCodecError> {}
 
 impl Decode for String {
     fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
@@ -598,6 +584,34 @@ pub fn decode_array_field(src: &mut BytesMut) -> Result<(Vec<u8>, u32), MqttCode
     Ok((data, bytes_read))
 }
 
+/// Returns the length of an encoded MQTT variable length unsigned int
+pub fn variable_byte_int_size(value: u32) -> u32 {
+    match value {
+        0..=127 => 1,
+        128..=16383 => 2,
+        16384..=2097151 => 3,
+        _ => 4,
+    }
+}
+
+pub fn variable_byte_int_size_ref(value: &u32) -> u32 {
+    variable_byte_int_size(*value)
+}
+
+pub fn codec_size_opt_variable_byte_int_ref(src: &Option<u32>) -> u32 {
+    match src {
+        Some(val) => variable_byte_int_size(*val),
+        None => 0,
+    }
+}
+
+pub fn decode_opt_variable_byte_int(
+    src: &mut BytesMut,
+) -> Result<(Option<u32>, u32), MqttCodecError> {
+    let (val, bytes_read) = decode_variable_byte_int(src)?;
+    Ok((Some(val), bytes_read))
+}
+
 pub fn decode_variable_byte_int(src: &mut BytesMut) -> Result<(u32, u32), MqttCodecError> {
     let mut result = 0_u32;
     let mut shift = 0;
@@ -636,8 +650,75 @@ pub fn encode_variable_byte_int(val: u32, dest: &mut BytesMut) -> Result<(), Mqt
     Ok(())
 }
 
+pub fn encode_opt_variable_byte_int_ref(
+    val: &Option<u32>,
+    dest: &mut BytesMut,
+) -> Result<(), MqttCodecError> {
+    if let Some(v) = val {
+        encode_variable_byte_int(*v, dest)
+    } else {
+        Ok(())
+    }
+}
+
 pub fn encode_variable_byte_int_ref(val: &u32, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
     encode_variable_byte_int(*val, dest)
+}
+
+pub fn codec_size_vec_u8_raw(src: &Vec<u8>) -> u32 {
+    src.len() as u32
+}
+
+pub fn encode_vec_u8_raw(src: &Vec<u8>, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    dest.put_slice(src);
+    Ok(())
+}
+
+pub fn decode_vec_u8_raw(src: &mut BytesMut) -> Result<(Option<Vec<u8>>, u32), MqttCodecError> {
+    let len = src.remaining();
+    let mut dest = Vec::with_capacity(len);
+    dest.resize(len, 0);
+    let dest_buf: &mut [u8] = &mut dest[0..len];
+    src.try_copy_to_slice(dest_buf).map_err(|e| {
+        MqttCodecError::new_with_kind(
+            format!("{e:?}").as_str(),
+            ErrorKind::InsufficientData(len, src.remaining()),
+        )
+    })?;
+    Ok((Some(dest), len as u32))
+}
+
+pub fn codec_size_opt_vec_u8_raw(src: &Option<Vec<u8>>) -> u32 {
+    match src {
+        Some(vec) => vec.len() as u32,
+        None => 0,
+    }
+}
+
+pub fn encode_opt_vec_u8_raw(
+    src: &Option<Vec<u8>>,
+    dest: &mut BytesMut,
+) -> Result<(), MqttCodecError> {
+    if let Some(vec) = src {
+        dest.put_slice(vec);
+    }
+    Ok(())
+}
+
+pub fn decode_opt_vec_u8_raw(
+    src: &mut BytesMut,
+    len: usize,
+) -> Result<(Option<Vec<u8>>, u32), MqttCodecError> {
+    let mut vec = Vec::new();
+    vec.resize(len, 0);
+    let dest_buf: &mut [u8] = &mut vec[0..len];
+    src.try_copy_to_slice(dest_buf).map_err(|e| {
+        MqttCodecError::new_with_kind(
+            format!("{e:?}").as_str(),
+            ErrorKind::InsufficientData(len, src.remaining()),
+        )
+    })?;
+    Ok((Some(vec), len as u32))
 }
 
 pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MqttCodecError> {

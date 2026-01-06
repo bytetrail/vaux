@@ -7,7 +7,7 @@ use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     RwLock,
 };
-use vaux_mqtt::{subscribe::Subscription, Reason, WillMessage};
+use vaux_mqtt::{Reason, Subscribe, Subscription, WillMessage};
 
 #[derive(Debug, Default)]
 pub struct SessionPool {

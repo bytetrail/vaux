@@ -2,7 +2,7 @@ use crate::{
     codec::{self, encode_string},
     CodecSize, Decode, Encode, MqttCodecError,
 };
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{BufMut, BytesMut};
 use std::{
     collections::HashMap,
     fmt::{Display, Formatter},
@@ -218,45 +218,5 @@ impl UserProperty {
 
     pub fn len(&self) -> usize {
         self.0.len()
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u8)]
-pub enum PayloadFormat {
-    #[default]
-    Bin = 0x00,
-    Utf8 = 0x01,
-}
-
-impl TryFrom<u8> for PayloadFormat {
-    type Error = MqttCodecError;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0x00 => Ok(PayloadFormat::Bin),
-            0x01 => Ok(PayloadFormat::Utf8),
-            _ => Err(MqttCodecError::new("invalid payload format")),
-        }
-    }
-}
-
-impl Encode for PayloadFormat {
-    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
-        dest.put_u8(*self as u8);
-        Ok(())
-    }
-}
-
-impl Decode for PayloadFormat {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
-        *self = PayloadFormat::try_from(src.get_u8())?;
-        Ok(1)
-    }
-}
-
-impl CodecSize for PayloadFormat {
-    fn codec_size(&self) -> u32 {
-        1
     }
 }

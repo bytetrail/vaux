@@ -305,20 +305,20 @@ fn encode_for_encode_with(
                         if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
                             if let syn::Lit::Str(lit_str) = &lit_expr.lit {
                                 let path: syn::Path = lit_str.parse().unwrap();
-                                if optional_field {
-                                    return Some(quote! {
-                                        if let Some(f) = self.#field_name.as_ref() {
-                                            #prop_ident_encode
-                                            #path(f, dest)?;
-                                        }
-                                    });
-                                } else {
+                                // if optional_field {
+                                //     return Some(quote! {
+                                //         if let Some(f) = self.#field_name.as_ref() {
+                                //             #prop_ident_encode
+                                //             #path(f, dest)?;
+                                //         }
+                                //     });
+                                // } else {
                                     return Some(quote! {
                                         #prop_ident_encode
                                         #path(&self.#field_name, dest)?;    
                                     });
 
-                                }
+//                                }
                             }
                         }
                     }

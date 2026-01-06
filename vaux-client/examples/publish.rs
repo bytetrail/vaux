@@ -136,19 +136,19 @@ async fn publish(
     let start = std::time::Instant::now();
     for i in 0..iterations {
         let mut publish = Publish::default();
-        publish.set_payload_format(vaux_mqtt::property::PayloadFormat::Utf8);
-        publish.set_message_expiry(1000);
+        publish.set_payload_format(vaux_mqtt::PayloadFormat::Utf8);
+        publish.message_expiry = Some(1000);
 
         let message = arg_message.clone();
-        publish.set_topic_name(topic.clone());
-        publish.set_payload(Vec::from(message.as_bytes()));
+        publish.topic_name = topic.clone();
+        publish.payload = Some(Vec::from(message.as_bytes()));
         publish.set_qos(args.qos);
         publish.set_packet_id(Some((i + 1) as u16)).unwrap();
 
         println!("publish property size {}", publish.property_size());
         println!("sending publish: {:?}", publish);
         println!("publish codec size {}", publish.codec_size());
-        
+
         if packet_out
             .send(vaux_mqtt::Packet::Publish(publish.clone()))
             .await

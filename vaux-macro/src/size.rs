@@ -361,17 +361,17 @@ fn size_with_path(
                         if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
                             if let syn::Lit::Str(lit_str) = &lit_expr.lit {
                                 let path: syn::Path = lit_str.parse().unwrap();
-                                if optional_field {
-                                    Some(quote! {
-                                        if let Some(#field_name) = &self.#field_name {
-                                            #size_prefix  #path(#field_name);
-                                        }
-                                    })
-                                } else {
-                                    Some(quote! {
-                                        #size_prefix #path(&self.#field_name);
-                                    })
-                                }
+                                // if optional_field {
+                                //     Some(quote! {
+                                //         if let Some(#field_name) = &self.#field_name {
+                                //             #size_prefix  #path(#field_name);
+                                //         }
+                                //     })
+                                // } else {
+                                Some(quote! {
+                                    #size_prefix #path(&self.#field_name);
+                                })
+                                // }
                             } else {
                                 Some(compile_error2(
                                     "Expected string literal for 'size_with' attribute",

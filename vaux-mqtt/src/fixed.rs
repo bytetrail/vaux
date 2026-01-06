@@ -161,7 +161,7 @@ impl Decode for FixedHeader {
             }
         };
         self.flags = first_byte & 0x0F;
-        let (_bytes_read, packet_remaining) = crate::codec::decode_variable_byte_int(src)?;
+        let (bytes_read, packet_remaining) = crate::codec::decode_variable_byte_int(src)?;
         match self.packet_type {
             PacketType::Connect
             | PacketType::PubRel
@@ -187,6 +187,6 @@ impl Decode for FixedHeader {
         }
         self.remaining = packet_remaining;
         self.flags = flags;
-        Ok(2)
+        Ok(1 + bytes_read)
     }
 }

@@ -1,9 +1,7 @@
-use crate::connect::{Connect, ConnectHeader, ConnectPayload};
-use crate::property::{PayloadFormat, UserProperty};
-use crate::{
-    codec, CodecSize, Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyCodecSize,
-    PropertyType, QoSLevel,
-};
+use crate::connect::Connect;
+use crate::property::UserProperty;
+use crate::publish::PayloadFormat;
+use crate::{codec, Decode, Encode, MqttCodecError, PropertyCodecSize, PropertyType, QoSLevel};
 use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
 
 #[derive(Debug, Default, Clone, Eq, PartialEq, Encode, Decode, PropertyCodecSize, CodecSize)]
@@ -28,8 +26,11 @@ pub struct WillHeader {
     pub content_type: Option<String>,
     #[codec(property_type = "PropertyType::ResponseTopic")]
     pub response_topic: Option<String>,
-    //#[codec(property_type = "PropertyType::CorrelationData")]
-    //pub correlation_data: Option<Vec<u8>>,
+    #[codec(
+        skip_if = "Vec::is_empty",
+        property_type = "PropertyType::CorrelationData"
+    )]
+    pub correlation_data: Vec<u8>,
     #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
 }
@@ -45,22 +46,9 @@ pub struct WillMessage {
 
 impl From<WillMessage> for Connect {
     fn from(will: WillMessage) -> Self {
-        let mut connect_header = ConnectHeader::new();
-        let mut connect_payload = ConnectPayload::default();
-
-        connect_payload.will_topic = Some(will.topic);
-        connect_payload.will_payload = will.payload;
-        connect_payload.will_properties = Some(will.header);
-
-        connect_header.set_will(true);
-        connect_header.set_will_qos(will.qos);
-        connect_header.set_will_retain(will.retain);
-
-        Connect {
-            fixed_header: FixedHeader::new(PacketType::Connect),
-            variable_header: connect_header,
-            payload: connect_payload,
-        }
+        let mut connect = Connect::default();
+        connect.set_will_message(will);
+        connect
     }
 }
 

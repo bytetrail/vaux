@@ -183,12 +183,12 @@ impl ClientSession {
             ));
         }
         let mut connect = Connect::default();
-        connect.set_keep_alive(100); //self.state.keep_alive.read().await.as_secs() as u16);
+        connect.keep_alive = 100; //self.state.keep_alive.read().await.as_secs() as u16);
         connect.set_clean_start(clean_start);
         {
             let set_id = self.state.client_id.lock().await;
             if set_id.is_some() {
-                connect.set_client_id(set_id.as_ref().unwrap());
+                connect.client_id = set_id.as_ref().unwrap().clone();
             }
         }
         connect
@@ -227,8 +227,8 @@ impl ClientSession {
                             }
                             Packet::Disconnect(disconnect) => {
                                 return Err(MqttError::new(
-                                    &format!("disconnect received: {}", disconnect.reason()),
-                                    ErrorKind::Protocol(disconnect.reason()),
+                                    &format!("disconnect received: {}", disconnect.reason),
+                                    ErrorKind::Protocol(disconnect.reason),
                                 ))
                             }
                             _ => {
@@ -366,17 +366,17 @@ impl ClientSession {
                 //self.pending_qos1.append(&mut self.pending_publish);
                 return Err(MqttError::new(
                     &format!("disconnect received: {d:?}"),
-                    ErrorKind::Protocol(d.reason()),
+                    ErrorKind::Protocol(d.reason),
                 ));
             }
             Packet::Publish(publish) => {
                 self.handle_recv_publish(publish.clone()).await?;
             }
             Packet::PubAck(puback) => {
-                if let Some(p) = self.state.pending_qos_send.get(&puback.packet_id()) {
+                if let Some(p) = self.state.pending_qos_send.get(&puback.packet_id) {
                     match p.next {
                         QoSPacket::PubAck => {
-                            self.state.pending_qos_send.remove(&puback.packet_id());
+                            self.state.pending_qos_send.remove(&puback.packet_id);
                             self.state.qos_send_remaining += 1;
                         }
                         _ => {
@@ -396,7 +396,7 @@ impl ClientSession {
                 }
             }
             Packet::PubRec(pubrec) => {
-                let packet_id = pubrec.packet_id();
+                let packet_id = pubrec.packet_id;
                 if let Some(p) = self.state.pending_qos_send.remove(&packet_id) {
                     match p.next {
                         QoSPacket::PubRec => {
@@ -408,7 +408,7 @@ impl ClientSession {
                                 ))?;
                                 self.state.pending_qos_send.insert(packet_id, pubrec_state);
                                 // create the PUBREL packet
-                                let pubrel = PubRel::new_publish_release(pubrec.packet_id());
+                                let pubrel = PubRel::new_with_packet_id(packet_id);
                                 match self.send_packet(Packet::PubRel(pubrel)).await {
                                     Ok(_) => {
                                         // remove from pending qos
@@ -471,12 +471,12 @@ impl ClientSession {
                 }
             }
             Packet::PubRel(pubrel) => {
-                let packet_id = pubrel.packet_id();
+                let packet_id = pubrel.packet_id;
                 if let Some(p) = self.state.pending_qos_recv.remove(&packet_id) {
                     match p.next {
                         QoSPacket::PubRel => {
                             if self.state.auto_ack {
-                                let pubcomp = PubComp::new_publish_complete(pubrel.packet_id());
+                                let pubcomp = PubComp::new_with_packet_id(packet_id);
                                 match self.send_packet(Packet::PubComp(pubcomp)).await {
                                     Ok(_) => {
                                         // remove from pending qos
@@ -514,7 +514,7 @@ impl ClientSession {
                 }
             }
             Packet::PubComp(pubcomp) => {
-                let packet_id = pubcomp.packet_id();
+                let packet_id = pubcomp.packet_id;
                 if let Some(p) = self.state.pending_qos_send.remove(&packet_id) {
                     match p.next {
                         QoSPacket::PubComp => {
@@ -552,13 +552,13 @@ impl ClientSession {
     async fn handle_connack(&mut self, connack: ConnAck) -> crate::Result<ConnAck> {
         let set_id = self.state.client_id.lock().await;
         let client_id_set = set_id.is_some();
-        if connack.reason() != Reason::Success {
+        if connack.reason != Reason::Success {
             // TODO return the connack reason as MQTT error with reason code
             let mut connected = self.connected.write().await;
             *connected = false;
             return Err(MqttError::new(
                 "connection refused",
-                ErrorKind::Protocol(connack.reason()),
+                ErrorKind::Protocol(connack.reason),
             ));
         } else {
             let mut connected = self.connected.write().await;
@@ -566,8 +566,8 @@ impl ClientSession {
         }
         // if the client ID was not set, set it from the assigned client ID
         if !client_id_set {
-            match connack.assigned_client_id() {
-                Some(client_id) => {
+            match connack.assigned_client_id {
+                Some(ref client_id) => {
                     let mut set_id = self.state.client_id.lock().await;
                     *set_id = Some(client_id.clone());
                 }
@@ -581,17 +581,17 @@ impl ClientSession {
             }
         }
         // set session keep alive from the server
-        if let Some(server_keep_alive) = connack.server_keep_alive() {
+        if let Some(server_keep_alive) = connack.server_keep_alive {
             let mut keep_alive = self.state.keep_alive.write().await;
             *keep_alive = Duration::from_secs(u64::from(server_keep_alive));
         }
         // set the server assigned session expiry if present
-        if let Some(server_session_expiry) = connack.session_expiry() {
+        if let Some(server_session_expiry) = connack.session_expiry_interval {
             let mut session_expiry = self.state.session_expiry.write().await;
             *session_expiry = Duration::from_secs(u64::from(server_session_expiry));
         }
         // set the server assigned receive maximum
-        if let Some(receive_max) = connack.receive_max() {
+        if let Some(receive_max) = connack.receive_maximum {
             self.state.qos_send_remaining = receive_max as usize;
         }
         Ok(connack)
@@ -616,7 +616,7 @@ impl ClientSession {
                 );
                 if self.state.auto_ack {
                     let puback = if let Some(packet_id) = publish.packet_id() {
-                        PubAck::new_publish_acknowledge(packet_id)
+                        PubAck::new_with_packet_id(packet_id)
                     } else {
                         // TODO send disconnect with reason cod
                         let _ = self.packet_stream.shutdown().await;
@@ -658,7 +658,7 @@ impl ClientSession {
                 self.state.qos_recv_remaining -= 1;
                 if self.state.auto_ack {
                     let pubrec = if let Some(packet_id) = publish.packet_id() {
-                        PubRec::new_publish_receive(packet_id)
+                        PubRec::new_with_packet_id(packet_id)
                     } else {
                         // protocol error, packet ID required with QoS > 0
                         let _ = self.packet_stream.shutdown().await;

@@ -8,8 +8,7 @@ use tokio::{
 };
 use vaux_client::MqttClient;
 use vaux_mqtt::{
-    property::PayloadFormat, Packet, PropertyType, PubAck, PubRec, QoSLevel, Subscribe,
-    SubscriptionFilter,
+    Packet, PayloadFormat, PropertyType, PubAck, PubRec, QoSLevel, Subscribe, SubscriptionFilter,
 };
 
 #[derive(Parser, Debug)]
@@ -108,7 +107,7 @@ async fn subscribe(
         // inbound device ops messages for this shadow on this site
         SubscriptionFilter::new("hello-vaux".to_string(), args.qos),
     ];
-    let subscribe = Subscribe::new_subscribe_with_filter(1, filter);
+    let subscribe = Subscribe::new_with_filter(1, filter);
     match packet_sender.send(Packet::Subscribe(subscribe)).await {
         Ok(_) => {
             println!("subscribed");
@@ -117,10 +116,10 @@ async fn subscribe(
                     // check for incoming packets
                     Some(packet) = packet_receiver.recv() => {
                         if let Packet::Publish(mut p) = packet {
-                            match p.payload_format() {
+                            match p.payload_format {
                                         None | Some(PayloadFormat::Utf8) => {
                                             let message =
-                                                String::from_utf8(p.payload().to_vec()).unwrap();
+                                                String::from_utf8(p.payload.take().unwrap()).unwrap();
                                             println!("{message}");
                                         }
                                         Some(PayloadFormat::Bin) => {
@@ -131,13 +130,13 @@ async fn subscribe(
                                 // check for QOS 1 or 2
                                 match p.qos() {
                                     QoSLevel::AtLeastOnce => {
-                                        let mut ack = PubAck::new_publish_acknowledge(p.packet_id().unwrap());
+                                        let ack = PubAck::new_with_packet_id(p.packet_id().unwrap());
                                         if let Err(e) = packet_sender.send(Packet::PubAck(ack)).await {
                                             eprintln!("{e:?}");
                                         }
                                     }
                                     QoSLevel::ExactlyOnce => {
-                                        let mut ack = PubRec::new_publish_receive(p.packet_id().unwrap());
+                                        let ack = PubRec::new_with_packet_id(p.packet_id().unwrap());
                                         if let Err(e) = packet_sender.send(Packet::PubRec(ack)).await {
                                             eprintln!("{e:?}");
                                         }

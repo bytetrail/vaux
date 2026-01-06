@@ -1,8 +1,5 @@
 use crate::{
-    codec,
-    packet::{ControlPacket, Empty},
-    property::UserProperty,
-    CodecSize, Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyCodecSize,
+    codec, property::UserProperty, CodecSize, Decode, Encode, MqttCodecError, PropertyCodecSize,
     PropertyType,
 };
 use bytes::{Buf, BufMut};
@@ -125,7 +122,7 @@ impl PropertyCodecSize for PubRelCompReason {
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, Encode, Decode, PropertyCodecSize, CodecSize)]
-pub struct PubAckRecHeader {
+pub struct PubAckRec {
     pub packet_id: u16,
     reason: Option<PubAckRecReason>,
     #[codec(property_type = "PropertyType::ReasonString")]
@@ -134,8 +131,11 @@ pub struct PubAckRecHeader {
     user_properties: UserProperty,
 }
 
+pub type PubAck = PubAckRec;
+pub type PubRec = PubAckRec;
+
 #[derive(Default, Debug, Clone, PartialEq, Eq, Encode, Decode, PropertyCodecSize, CodecSize)]
-pub struct PubRelCompHeader {
+pub struct PubRelComp {
     pub packet_id: u16,
     reason: Option<PubRelCompReason>,
     #[codec(property_type = "PropertyType::ReasonString")]
@@ -144,42 +144,17 @@ pub struct PubRelCompHeader {
     user_properties: UserProperty,
 }
 
-impl ControlPacket<PubAckRecHeader, Empty> {
-    pub fn new_publish_acknowledge(packet_id: u16) -> Self {
-        let fixed_header = FixedHeader::new(PacketType::PubAck);
-        ControlPacket {
-            fixed_header,
-            variable_header: PubAckRecHeader {
-                packet_id,
-                ..Default::default()
-            },
-            payload: Empty {},
+pub type PubRel = PubRelComp;
+pub type PubComp = PubRelComp;
+
+impl PubAckRec {
+    pub fn new_with_packet_id(packet_id: u16) -> Self {
+        PubAckRec {
+            packet_id,
+            ..Default::default()
         }
-    }
-
-    pub fn new_publish_receive(packet_id: u16) -> Self {
-        let fixed_header = FixedHeader::new(PacketType::PubRec);
-        ControlPacket {
-            fixed_header,
-            variable_header: PubAckRecHeader {
-                packet_id,
-                ..Default::default()
-            },
-            payload: Empty {},
-        }
-    }
-
-    pub fn packet_id(&self) -> u16 {
-        self.variable_header.packet_id
-    }
-
-    pub fn reason(&self) -> Option<PubAckRecReason> {
-        self.variable_header.reason
     }
 }
-
-pub type PubAck = ControlPacket<PubAckRecHeader, Empty>;
-pub type PubRec = ControlPacket<PubAckRecHeader, Empty>;
 
 pub enum PublishResponse {
     PubAck,
@@ -188,39 +163,11 @@ pub enum PublishResponse {
     PubRel,
 }
 
-impl ControlPacket<PubRelCompHeader, Empty> {
-    pub fn new_publish_release(packet_id: u16) -> Self {
-        let fixed_header = FixedHeader::new(PacketType::PubRel);
-        ControlPacket {
-            fixed_header,
-            variable_header: PubRelCompHeader {
-                packet_id,
-                ..Default::default()
-            },
-            payload: Empty {},
+impl PubRelComp {
+    pub fn new_with_packet_id(packet_id: u16) -> Self {
+        PubRelComp {
+            packet_id,
+            ..Default::default()
         }
-    }
-
-    pub fn new_publish_complete(packet_id: u16) -> Self {
-        let fixed_header = FixedHeader::new(PacketType::PubComp);
-        ControlPacket {
-            fixed_header,
-            variable_header: PubRelCompHeader {
-                packet_id,
-                ..Default::default()
-            },
-            payload: Empty {},
-        }
-    }
-
-    pub fn packet_id(&self) -> u16 {
-        self.variable_header.packet_id
-    }
-
-    pub fn reason(&self) -> Option<PubRelCompReason> {
-        self.variable_header.reason
     }
 }
-
-pub type PubComp = ControlPacket<PubRelCompHeader, Empty>;
-pub type PubRel = ControlPacket<PubRelCompHeader, Empty>;

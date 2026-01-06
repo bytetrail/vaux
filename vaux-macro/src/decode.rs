@@ -330,32 +330,32 @@ fn decode_for_decode_with(
     let decode_with = decode_path.unwrap();
 
     if property_type.is_some() {
-        if optional_field {
-            quote! {
-                let( value, decode_bytes_read) = #decode_with(src)?;
-                property_bytes_read += decode_bytes_read;
-                self.#field_name = Some(value);
-            }
-        } else {
-            quote! {
-                let  (value, decode_bytes_read) = #decode_with(src)?;
-                property_bytes_read += decode_bytes_read;
-                self.#field_name = value;
-            }
+        //      if optional_field {
+        // quote! {
+        //         let( value, decode_bytes_read) = #decode_with(src)?;
+        //         property_bytes_read += decode_bytes_read;
+        //         self.#field_name = Some(value);
+        //     }
+        // } else {
+        quote! {
+            let  (value, decode_bytes_read) = #decode_with(src)?;
+            property_bytes_read += decode_bytes_read;
+            self.#field_name = value;
         }
+        // }
     } else {
-        if optional_field {
-            quote! {
-                let (value, decode_bytes_read) = #decode_with(src)?;
-                bytes_read += decode_bytes_read;
-                self.#field_name = Some(value);
-            }
-        } else {
-            quote! {
-                let (value, decode_bytes_read) = #decode_with(src)?;
-                bytes_read += decode_bytes_read;
-                self.#field_name = value;
-            }
+        // if optional_field {
+        //     quote! {
+        //         let (value, decode_bytes_read) = #decode_with(src)?;
+        //         bytes_read += decode_bytes_read;
+        //         self.#field_name = Some(value);
+        //     }
+        // } else {
+        quote! {
+            let (value, decode_bytes_read) = #decode_with(src)?;
+            bytes_read += decode_bytes_read;
+            self.#field_name = value;
         }
+        //        }
     }
 }

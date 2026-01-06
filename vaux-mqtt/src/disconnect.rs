@@ -1,11 +1,11 @@
 use crate::{
-    codec, property::UserProperty, Decode, Encode, FixedHeader, MqttCodecError, PacketType,
-    PropertyCodecSize, PropertyType, Reason,
+    codec, property::UserProperty, Decode, Encode, MqttCodecError, PropertyCodecSize, PropertyType,
+    Reason,
 };
 use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
 
 #[derive(Clone, Debug, PartialEq, Eq, CodecSize, PropertyCodecSize, Encode, Decode)]
-pub struct DisconnectHeader {
+pub struct Disconnect {
     pub reason: Reason,
     #[codec(property_type = "PropertyType::SessionExpiryInterval")]
     pub session_expiry_interval: Option<u32>,
@@ -17,9 +17,9 @@ pub struct DisconnectHeader {
     pub user_properties: UserProperty,
 }
 
-impl Default for DisconnectHeader {
+impl Default for Disconnect {
     fn default() -> Self {
-        DisconnectHeader {
+        Disconnect {
             reason: Reason::Success,
             session_expiry_interval: None,
             reason_string: None,
@@ -29,32 +29,11 @@ impl Default for DisconnectHeader {
     }
 }
 
-impl DisconnectHeader {
+impl Disconnect {
     pub fn new(reason: Reason) -> Self {
         Self {
             reason,
             ..Default::default()
         }
-    }
-}
-
-pub type Disconnect = crate::packet::ControlPacket<DisconnectHeader, crate::packet::Empty>;
-
-impl Disconnect {
-    pub fn new_disconnect(reason: Reason) -> Self {
-        let fixed_header = FixedHeader::new(PacketType::Disconnect);
-        Disconnect {
-            fixed_header,
-            variable_header: DisconnectHeader::new(reason),
-            payload: crate::packet::Empty {},
-        }
-    }
-
-    pub fn reason(&self) -> Reason {
-        self.variable_header.reason.clone()
-    }
-
-    pub fn set_reason(&mut self, reason: Reason) {
-        self.variable_header.reason = reason;
     }
 }

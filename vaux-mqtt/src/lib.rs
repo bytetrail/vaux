@@ -3,7 +3,6 @@ pub mod connack;
 pub mod connect;
 pub mod disconnect;
 pub mod fixed;
-pub mod packet;
 pub mod property;
 pub mod publish;
 pub mod pubresp;
@@ -11,7 +10,7 @@ pub mod subscribe;
 pub mod test;
 pub mod will;
 
-use bytes::{Buf, BytesMut};
+use bytes::BytesMut;
 pub use codec::{MqttCodecError, Packet, PacketType, QoSLevel, Reason};
 pub use {
     connack::ConnAck,
@@ -19,7 +18,7 @@ pub use {
     disconnect::Disconnect,
     fixed::FixedHeader,
     property::PropertyType,
-    publish::Publish,
+    publish::{PayloadFormat, Publish},
     pubresp::{PubAck, PubAckRecReason, PubComp, PubRec, PubRel, PubRelCompReason},
     subscribe::{Subscribe, SubscriptionFilter},
     will::{WillHeader, WillMessage},
@@ -27,20 +26,6 @@ pub use {
 
 pub trait PropertyCodecSize {
     fn property_size(&self) -> u32;
-}
-
-pub trait HeaderCodecSize: PropertyCodecSize {
-    fn header_size(&self) -> u32;
-}
-
-pub trait PayloadCodecSize {
-    fn payload_size(&self) -> u32;
-}
-
-pub trait PacketCodecSize: HeaderCodecSize + PayloadCodecSize {
-    fn packet_size(&self) -> u32 {
-        self.header_size() + self.payload_size()
-    }
 }
 
 pub trait CodecSize {
@@ -102,13 +87,5 @@ impl std::fmt::Display for MqttError {
             write!(f, " {section}: ")?;
         }
         write!(f, "{}", self.message)
-    }
-}
-
-//pub type Result<T> = std::result::Result<T, MqttError>;
-
-impl CodecSize for Vec<u8> {
-    fn codec_size(&self) -> u32 {
-        self.len() as u32
     }
 }

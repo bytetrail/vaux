@@ -1,12 +1,8 @@
-use crate::packet::ControlPacket;
-use crate::{
-    codec, Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyCodecSize, PropertyType,
-};
+use crate::codec::{MAX_VARIABLE_BYTE_INT, MIN_VARIABLE_BYTE_INT};
+use crate::{codec, Decode, Encode, MqttCodecError, PropertyCodecSize, PropertyType};
 use crate::{property::UserProperty, MqttError, MqttVersion, QoSLevel};
+use bytes::{Buf, BufMut};
 use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
-
-const MIN_SUBSCRIPTION_ID: u32 = 1;
-const MAX_SUBSCRIPTION_ID: u32 = 268_435_455;
 
 /// MQTT v5 3.8.3.1 Subscription Options
 /// bits 4 and 5 of the subscription options hold the retain handling flag.
@@ -38,20 +34,46 @@ impl TryFrom<u8> for RetainHandling {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, CodecSize, PropertyCodecSize)]
-pub struct SubAckHeader {
+pub struct SubAck {
     packet_id: u16,
     #[codec(property_type = "PropertyType::ReasonString")]
     pub reason: Option<String>,
     #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
+    #[codec(
+        payload_type = "remaining",
+        encode_with = "encode_suback_reason_vec",
+        decode_with = "decode_suback_reason_vec"
+       // size_with = "codec::codec_size_vec_u8",
+    )]
+    pub reason_codes: Vec<u8>,
 }
 
-impl Default for SubAckHeader {
+pub fn encode_suback_reason_vec(
+    reasons: &Vec<u8>,
+    dest: &mut bytes::BytesMut,
+) -> Result<(), MqttCodecError> {
+    dest.put_slice(reasons);
+    Ok(())
+}
+
+pub fn decode_suback_reason_vec(
+    reasons: &mut Vec<u8>,
+    src: &mut bytes::BytesMut,
+) -> Result<u32, MqttCodecError> {
+    let len = src.remaining();
+    reasons.extend_from_slice(&src[..]);
+    src.advance(len);
+    Ok(len as u32)
+}
+
+impl Default for SubAck {
     fn default() -> Self {
         Self {
             packet_id: 1,
             reason: None,
             user_properties: UserProperty::new(),
+            reason_codes: Vec::new(),
         }
     }
 }
@@ -106,93 +128,70 @@ impl SubscriptionFilter {
 }
 
 #[derive(Default, Debug, Clone, CodecSize, PropertyCodecSize, Encode, Decode, PartialEq, Eq)]
-pub struct SubscribeHeader {
+pub struct Subscribe {
     packet_id: u16,
     #[codec(property_type = "PropertyType::SubscriptionIdentifier")]
     #[codec(
-        size_with = "codec::variable_byte_int_size_ref",
-        encode_with = "codec::encode_variable_byte_int_ref"
+        size_with = "codec::codec_size_opt_variable_byte_int_ref",
+        encode_with = "codec::encode_opt_variable_byte_int_ref",
+        decode_with = "codec::decode_opt_variable_byte_int"
     )]
     pub subscription_id: Option<u32>,
     #[codec(property_type = "PropertyType::UserProperty")]
     pub props: UserProperty,
-}
-
-#[derive(Default, Debug, Clone, CodecSize, Encode, Decode, PartialEq, Eq)]
-pub struct SubscribePayload {
+    #[codec(payload_type = "remaining")]
     pub filter: Vec<SubscriptionFilter>,
 }
 
-pub type Subscribe = ControlPacket<SubscribeHeader, SubscribePayload>;
-
 impl Subscribe {
-    pub fn new_subscribe(packet_id: u16) -> Self {
-        let fixed_header = FixedHeader::new(PacketType::Subscribe);
-        ControlPacket {
-            fixed_header,
-            variable_header: SubscribeHeader {
-                packet_id,
-                ..Default::default()
-            },
-            payload: SubscribePayload { filter: Vec::new() },
+    pub fn new_with_packet_id(packet_id: u16) -> Self {
+        Self {
+            packet_id,
+            ..Default::default()
         }
     }
 
-    pub fn new_subscribe_with_filter(packet_id: u16, filter: Vec<SubscriptionFilter>) -> Self {
-        let fixed_header = FixedHeader::new(PacketType::Subscribe);
-        ControlPacket {
-            fixed_header,
-            variable_header: SubscribeHeader {
-                packet_id,
-                ..Default::default()
-            },
-            payload: SubscribePayload { filter },
+    pub fn new_with_filter(packet_id: u16, filter: Vec<SubscriptionFilter>) -> Self {
+        Self {
+            packet_id,
+            filter,
+            ..Default::default()
         }
-    }
-
-    pub fn packet_id(&self) -> u16 {
-        self.variable_header.packet_id
-    }
-
-    pub fn set_packet_id(&mut self, packet_id: u16) {
-        // TODO replace with codec error
-        assert!(packet_id != 0);
-        self.variable_header.packet_id = packet_id;
     }
 
     pub fn set_subscription_id(&mut self, id: u32) -> Result<(), MqttError> {
-        if !(MIN_SUBSCRIPTION_ID..=MAX_SUBSCRIPTION_ID).contains(&id) {
+        if !(MIN_VARIABLE_BYTE_INT..=MAX_VARIABLE_BYTE_INT).contains(&id) {
             return Err(MqttError::new_from_spec(
                 MqttVersion::V5,
                 "3.8.3",
                 "subscription ID must be between 1 and 268,435,455",
             ));
         }
-        self.variable_header.subscription_id = Some(id);
+        self.subscription_id = Some(id);
         Ok(())
     }
 
     pub fn add_filter(&mut self, filter: SubscriptionFilter) {
-        self.payload.filter.push(filter);
+        self.filter.push(filter);
     }
 
     pub fn remove_filter_at(&mut self, index: usize) -> Option<SubscriptionFilter> {
-        if index < self.payload.filter.len() {
-            Some(self.payload.filter.remove(index))
+        if index < self.filter.len() {
+            Some(self.filter.remove(index))
         } else {
             None
         }
     }
 
     pub fn remove_filter_with_topic(&mut self, topic: &str) -> Option<SubscriptionFilter> {
-        if let Some(pos) = self.payload.filter.iter().position(|f| f.filter == topic) {
-            Some(self.payload.filter.remove(pos))
+        if let Some(pos) = self.filter.iter().position(|f| f.filter == topic) {
+            Some(self.filter.remove(pos))
         } else {
             None
         }
     }
 
     pub fn clear_filters(&mut self) {
-        self.payload.filter.clear();
+        self.filter.clear();
     }
 }
