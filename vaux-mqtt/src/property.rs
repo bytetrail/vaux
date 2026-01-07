@@ -179,10 +179,10 @@ impl codec::Encode for UserProperty {
 impl codec::Decode for UserProperty {
     /// Decode a single user property key-value pair and add it to the map.
     fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
-        let key = codec::decode_string(src)?;
-        let value = codec::decode_string(src)?;
-        let bytes_read = 2 + key.0 + 2 + value.0;
-        self.0.entry(key.1).or_insert_with(Vec::new).push(value.1);
+        let (key_value, key_len) = codec::decode_string(src)?;
+        let (value, len) = codec::decode_string(src)?;
+        let bytes_read = 2 + key_len + 2 + len;
+        self.0.entry(key_value).or_insert_with(Vec::new).push(value);
         Ok(bytes_read)
     }
 }

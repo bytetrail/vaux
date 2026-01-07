@@ -371,6 +371,7 @@ pub enum ErrorKind {
     InsufficientData(usize, usize),
     #[default]
     MalformedPacket,
+    InvalidPacket,
     UnsupportedQosLevel,
     UnsupportedResponseType,
     UnsupportedReason(u8),
@@ -424,10 +425,30 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecErro
         "Fixed header decoded: {:?}, bytes read: {}",
         fixed_header, decode_len
     );
+    for idx in 1..=3 {
+        if src[idx] & 0x80 != 0x00 {
+            // insufficient bytes left to read remaining
+            if src.remaining() < 1 {
+                return Err(MqttCodecError::new_with_kind(
+                    "Insufficient data",
+                    ErrorKind::InsufficientData(1, src.remaining()),
+                ));
+            }
+        } else {
+            break;
+        }
+    }
     let (packet_remaining, bytes_read) = decode_variable_byte_int(src)?;
+    if src.remaining() < bytes_read as usize {
+        return Err(MqttCodecError::new_with_kind(
+            "Insufficient data",
+            ErrorKind::InsufficientData(bytes_read as usize, src.remaining()),
+        ));
+    }
     println!(
-        "Remaining length decoded: {}, bytes read: {}",
-        packet_remaining, bytes_read
+        "Remaining length decoded: {}, src remaining: {}",
+        packet_remaining,
+        src.remaining()
     );
     decode_len += bytes_read;
     match src.remaining() {
@@ -606,10 +627,10 @@ pub fn encode_string(src: &str, dest: &mut BytesMut) -> Result<(), MqttCodecErro
     Ok(())
 }
 
-pub fn decode_string(src: &mut BytesMut) -> Result<(u32, String), MqttCodecError> {
+pub fn decode_string(src: &mut BytesMut) -> Result<(String, u32), MqttCodecError> {
     let mut string = String::new();
     let bytes_read = string.decode(src)?;
-    Ok((bytes_read, string))
+    Ok((string, bytes_read))
 }
 
 pub fn encode_array_field(src: &[u8], dest: &mut BytesMut) -> Result<(), MqttCodecError> {

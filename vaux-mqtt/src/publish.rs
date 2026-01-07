@@ -43,7 +43,7 @@ impl codec::CodecSize for PayloadFormat {
 }
 
 #[packet(packet_type = "codec::PacketType::Publish")]
-#[derive(Default, Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Publish {
     pub topic_name: String,
     packet_id: Option<u16>,
@@ -78,6 +78,25 @@ pub struct Publish {
         size_with = "codec::codec_size_opt_vec_u8_raw"
     )]
     pub payload: Option<Vec<u8>>,
+}
+
+impl Default for Publish {
+    fn default() -> Self {
+        Publish {
+            fixed_header: codec::FixedHeader::new(PacketType::Publish),
+            topic_name: String::new(),
+            packet_id: None,
+            payload_format: None,
+            message_expiry: None,
+            topic_alias: None,
+            response_topic: None,
+            correlation_data: Vec::new(),
+            subscription_identifiers: None,
+            content_type: None,
+            user_properties: UserProperty::default(),
+            payload: None,
+        }
+    }
 }
 
 impl Publish {

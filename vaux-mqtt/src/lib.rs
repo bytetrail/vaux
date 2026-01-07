@@ -9,7 +9,6 @@ pub mod subscribe;
 pub mod test;
 pub mod will;
 
-use bytes::BytesMut;
 pub use codec::{MqttCodecError, Packet, PacketType, QoSLevel, Reason};
 pub use {
     connack::ConnAck,
@@ -17,7 +16,7 @@ pub use {
     disconnect::Disconnect,
     property::PropertyType,
     publish::{PayloadFormat, Publish},
-    pubresp::{PubAck, PubAckRecReason, PubComp, PubRec, PubRel, PubRelCompReason},
+    pubresp::{PubAck, PubComp, PubRec, PubRel},
     subscribe::{Subscribe, SubscriptionFilter},
     will::{WillHeader, WillMessage},
 };

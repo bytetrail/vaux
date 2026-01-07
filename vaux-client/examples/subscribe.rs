@@ -130,13 +130,13 @@ async fn subscribe(
                                 // check for QOS 1 or 2
                                 match p.qos() {
                                     QoSLevel::AtLeastOnce => {
-                                        let ack = PubAck::new_with_packet_id(p.packet_id().unwrap());
+                                        let ack = PubAck::new_puback_with_packet_id(p.packet_id().unwrap());
                                         if let Err(e) = packet_sender.send(Packet::PubAck(ack)).await {
                                             eprintln!("{e:?}");
                                         }
                                     }
                                     QoSLevel::ExactlyOnce => {
-                                        let ack = PubRec::new_with_packet_id(p.packet_id().unwrap());
+                                        let ack = PubRec::new_pubrec_with_packet_id(p.packet_id().unwrap());
                                         if let Err(e) = packet_sender.send(Packet::PubRec(ack)).await {
                                             eprintln!("{e:?}");
                                         }

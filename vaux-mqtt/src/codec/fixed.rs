@@ -87,6 +87,13 @@ impl Encode for FixedHeader {
 
 impl Decode for FixedHeader {
     fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        if src.remaining() < 2 {
+            return Err(MqttCodecError::new_with_kind(
+                "Insufficient data",
+                ErrorKind::InsufficientData(2, src.remaining()),
+            ));
+        }
+
         let first_byte = src.get_u8();
         let flags = first_byte & 0x0f;
         self.packet_type = match PacketType::try_from(first_byte & 0xF0) {

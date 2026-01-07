@@ -1,5 +1,6 @@
 use vaux_macro::PropertyCodecSize;
 
+#[allow(dead_code)]
 enum TestProperty {
     PropertyOne,
 }
@@ -13,6 +14,7 @@ pub mod codec {
         fn property_size(&self) -> u32;
     }
 
+    #[allow(dead_code)]
     fn variable_byte_int_size(value: u32) -> u32 {
         if value < 128 {
             1
