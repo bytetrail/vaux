@@ -1,9 +1,6 @@
-use crate::{
-    codec, fixed::FixedHeader, property::UserProperty, CodecSize, Decode, Encode, MqttCodecError,
-    PacketType, PropertyCodecSize, PropertyType, QoSLevel,
-};
+use crate::{codec, property::UserProperty, MqttCodecError, PacketType, PropertyType, QoSLevel};
 use bytes::{Buf, BufMut, BytesMut};
-use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
+use vaux_macro::packet;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -25,30 +22,29 @@ impl TryFrom<u8> for PayloadFormat {
     }
 }
 
-impl Encode for PayloadFormat {
+impl codec::Encode for PayloadFormat {
     fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         dest.put_u8(*self as u8);
         Ok(())
     }
 }
 
-impl Decode for PayloadFormat {
+impl codec::Decode for PayloadFormat {
     fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         *self = PayloadFormat::try_from(src.get_u8())?;
         Ok(1)
     }
 }
 
-impl CodecSize for PayloadFormat {
+impl codec::CodecSize for PayloadFormat {
     fn codec_size(&self) -> u32 {
         1
     }
 }
 
-#[derive(Default, Debug, Clone, Eq, PartialEq, Encode, Decode, PropertyCodecSize, CodecSize)]
+#[packet(packet_type = "codec::PacketType::Publish")]
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
 pub struct Publish {
-    #[codec(skip)]
-    pub fixed_header: FixedHeader,
     pub topic_name: String,
     packet_id: Option<u16>,
     #[codec(property_type = "PropertyType::PayloadFormat")]
@@ -83,8 +79,6 @@ pub struct Publish {
     )]
     pub payload: Option<Vec<u8>>,
 }
-
-//pub type Publish = crate::packet::ControlPacket<PublishHeader, Vec<u8>>;
 
 impl Publish {
     /// Create a new Publish packet with the given topic name and QoS level and message
@@ -144,7 +138,7 @@ impl Publish {
         }
 
         Publish {
-            fixed_header: FixedHeader::new(PacketType::Publish),
+            fixed_header: codec::FixedHeader::new(PacketType::Publish),
             topic_name: topic,
             packet_id,
             payload: Some(payload),
@@ -155,7 +149,7 @@ impl Publish {
         .with_dup(false)
     }
 
-    pub fn new_from_header(fixed_header: FixedHeader) -> Result<Self, MqttCodecError> {
+    pub fn new_from_header(fixed_header: codec::FixedHeader) -> Result<Self, MqttCodecError> {
         match fixed_header.packet_type {
             PacketType::Publish => Ok(Publish {
                 fixed_header,

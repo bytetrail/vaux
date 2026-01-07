@@ -1,10 +1,13 @@
+pub mod fixed;
+
+pub use fixed::FixedHeader;
+
 use crate::{
     connect::Connect,
-    fixed::FixedHeader,
     publish::Publish,
     pubresp::{PubAck, PubComp, PubRec, PubRel},
     subscribe::SubAck,
-    CodecSize, ConnAck, Decode, Disconnect, Encode, PropertyCodecSize, Subscribe,
+    ConnAck, Disconnect, Subscribe,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::fmt::{Display, Formatter};
@@ -15,13 +18,29 @@ pub(crate) const PACKET_RESERVED_BIT1: u8 = 0x02;
 pub const MIN_VARIABLE_BYTE_INT: u32 = 0;
 pub const MAX_VARIABLE_BYTE_INT: u32 = 268_435_455; // 256 MB
 
+pub trait PropertyCodecSize {
+    fn property_size(&self) -> u32;
+}
+
+pub trait CodecSize {
+    fn codec_size(&self) -> u32;
+}
+
+pub trait Encode {
+    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError>;
+}
+
+pub trait Decode {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError>;
+}
+
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
 pub struct PingReq;
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
 pub struct PingResp;
 
 impl Encode for PingReq {
-    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn encode(&mut self, _dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         Ok(())
     }
 }
@@ -33,7 +52,7 @@ impl Decode for PingReq {
 }
 
 impl Encode for PingResp {
-    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn encode(&mut self, _dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         Ok(())
     }
 }
@@ -401,7 +420,32 @@ impl MqttCodecError {
 pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecError> {
     let mut fixed_header = FixedHeader::default();
     let mut decode_len = fixed_header.decode(src)?;
-    decode_len += fixed_header.remaining;
+    println!(
+        "Fixed header decoded: {:?}, bytes read: {}",
+        fixed_header, decode_len
+    );
+    let (packet_remaining, bytes_read) = decode_variable_byte_int(src)?;
+    println!(
+        "Remaining length decoded: {}, bytes read: {}",
+        packet_remaining, bytes_read
+    );
+    decode_len += bytes_read;
+    match src.remaining() {
+        val if val < packet_remaining as usize => {
+            return Err(MqttCodecError {
+                reason: format!(
+                    "malformed packet: remaining length actual: {val} expected: {packet_remaining}",
+                ),
+                kind: ErrorKind::InsufficientData(packet_remaining as usize, val),
+            })
+        }
+        val if val > packet_remaining as usize => {
+            let total = src.remaining();
+            let index = total - (total - packet_remaining as usize);
+            _ = src.split_off(index);
+        }
+        _ => {}
+    }
     match fixed_header.packet_type {
         PacketType::PingReq => Ok(Some((Packet::PingRequest(PingReq::default()), decode_len))),
         PacketType::PingResp => Ok(Some((
@@ -410,27 +454,27 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecErro
         ))),
         PacketType::Connect => {
             let mut connect = Connect::new();
-            connect.decode(src)?;
+            decode_len += connect.decode(src)?;
             Ok(Some((Packet::Connect(Box::new(connect)), decode_len)))
         }
         PacketType::Publish => {
             let mut publish = Publish::new_from_header(fixed_header)?;
-            publish.decode(src)?;
+            decode_len += publish.decode(src)?;
             Ok(Some((Packet::Publish(publish), decode_len)))
         }
         PacketType::PubAck => {
             let mut puback = PubAck::default();
-            puback.decode(src)?;
+            decode_len += puback.decode(src)?;
             Ok(Some((Packet::PubAck(puback), decode_len)))
         }
         PacketType::PubComp => {
             let mut pubcomp = PubComp::default();
-            pubcomp.decode(src)?;
+            decode_len += pubcomp.decode(src)?;
             Ok(Some((Packet::PubComp(pubcomp), decode_len)))
         }
         PacketType::PubRec => {
             let mut pubrec = PubRec::default();
-            pubrec.decode(src)?;
+            decode_len += pubrec.decode(src)?;
             Ok(Some((Packet::PubRec(pubrec), decode_len)))
         }
         PacketType::PubRel => {
@@ -440,22 +484,22 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecErro
         }
         PacketType::Disconnect => {
             let mut disconnect = Disconnect::default();
-            disconnect.decode(src)?;
+            decode_len += disconnect.decode(src)?;
             Ok(Some((Packet::Disconnect(disconnect), decode_len)))
         }
         PacketType::ConnAck => {
             let mut connack = ConnAck::default();
-            connack.decode(src)?;
+            decode_len += connack.decode(src)?;
             Ok(Some((Packet::ConnAck(connack), decode_len)))
         }
         PacketType::Subscribe => {
             let mut subscribe = Subscribe::default();
-            subscribe.decode(src)?;
+            decode_len += subscribe.decode(src)?;
             Ok(Some((Packet::Subscribe(subscribe), decode_len)))
         }
         PacketType::SubAck => {
             let mut suback = SubAck::default();
-            suback.decode(src)?;
+            decode_len += suback.decode(src)?;
             Ok(Some((Packet::SubAck(suback), decode_len)))
         }
         // PacketType::Unsubscribe => {
@@ -719,69 +763,4 @@ pub fn decode_opt_vec_u8_raw(
         )
     })?;
     Ok((Some(vec), len as u32))
-}
-
-pub fn decode_fixed_header(src: &mut BytesMut) -> Result<Option<FixedHeader>, MqttCodecError> {
-    if src.remaining() < 2 {
-        return Ok(None);
-    }
-    for idx in 1..=3 {
-        if src[idx] & 0x80 != 0x00 {
-            // insufficient bytes left to read remaining
-            if src.remaining() < 1 {
-                return Ok(None);
-            }
-        } else {
-            break;
-        }
-    }
-    let first_byte = src.get_u8();
-    let packet_type = PacketType::from(first_byte);
-    let flags = first_byte & 0x0f;
-    let (_bytes_read, packet_remaining) = decode_variable_byte_int(src)?;
-    match src.remaining() {
-        val if val < packet_remaining as usize => {
-            return Err(MqttCodecError {
-                reason: format!(
-                    "malformed packet: remaining length actual: {val} expected: {packet_remaining}",
-                ),
-                kind: ErrorKind::InsufficientData(packet_remaining as usize, val),
-            })
-        }
-        val if val > packet_remaining as usize => {
-            let total = src.remaining();
-            let index = total - (total - packet_remaining as usize);
-            _ = src.split_off(index);
-        }
-        _ => {}
-    }
-    match packet_type {
-        PacketType::Connect
-        | PacketType::PubRel
-        | PacketType::PubAck
-        | PacketType::Subscribe
-        | PacketType::Unsubscribe
-        | PacketType::ConnAck
-        | PacketType::PubRec
-        | PacketType::PubComp
-        | PacketType::SubAck
-        | PacketType::UnsubAck
-        | PacketType::PingReq
-        | PacketType::PingResp
-        | PacketType::Disconnect
-        | PacketType::Auth => {
-            if flags != PACKET_RESERVED_NONE {
-                MqttCodecError::new(format!("invalid flags for {packet_type}: {flags}").as_str());
-            }
-            Ok(Some(FixedHeader::new_with_remaining(
-                packet_type,
-                packet_remaining,
-            )))
-        }
-        PacketType::Publish => {
-            let mut header = FixedHeader::new_with_remaining(packet_type, packet_remaining);
-            header.set_flags(flags)?;
-            Ok(Some(header))
-        }
-    }
 }

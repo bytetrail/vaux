@@ -1,11 +1,12 @@
-use crate::codec::{self, Reason};
+use crate::codec::{self, CodecSize, PropertyCodecSize, Reason};
 use crate::property::{PropertyType, UserProperty};
-use crate::{CodecSize, Decode, Encode, MqttCodecError, PropertyCodecSize, QoSLevel};
-use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
+use crate::{MqttCodecError, QoSLevel};
+use vaux_macro::packet;
 
 const CONNACK_SESSION_PRESENT_MASK: u8 = 0x01;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Decode, Encode, CodecSize, PropertyCodecSize)]
+#[packet(packet_type = "codec::PacketType::ConnAck")]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ConnAck {
     ack_flags: u8,
     pub reason: Reason,

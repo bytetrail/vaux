@@ -1,11 +1,13 @@
 use vaux_macro::{CodecSize, PropertyCodecSize};
 
-trait CodecSize {
-    fn codec_size(&self) -> u32;
-}
+pub mod codec {
+    pub trait CodecSize {
+        fn codec_size(&self) -> u32;
+    }
 
-trait PropertyCodecSize {
-    fn property_size(&self) -> u32;
+    pub trait PropertyCodecSize {
+        fn property_size(&self) -> u32;
+    }
 }
 
 fn variable_byte_int_size(value: u32) -> u32 {
@@ -22,6 +24,8 @@ fn variable_byte_int_size(value: u32) -> u32 {
 
 #[test]
 fn test_size_impl_for_string() {
+    use crate::codec::CodecSize;
+
     #[derive(CodecSize)]
     struct TestStruct {
         test_string: String,
@@ -34,6 +38,9 @@ fn test_size_impl_for_string() {
 
 #[test]
 fn test_size_impl_for_option_string() {
+    use crate::codec::CodecSize;
+    use crate::codec::PropertyCodecSize;
+
     #[derive(CodecSize, PropertyCodecSize)]
     struct TestStruct {
         optional_string: Option<String>,
@@ -50,6 +57,7 @@ fn test_size_impl_for_option_string() {
 
 #[test]
 pub fn test_size_impl_for_primitive_types() {
+    use crate::codec::CodecSize;
     #[derive(CodecSize)]
     struct TestStruct {
         _a: u8,
@@ -75,6 +83,7 @@ pub fn test_size_impl_for_primitive_types() {
 
 #[test]
 fn test_size_impl_for_option_primitive_types() {
+    use crate::codec::CodecSize;
     #[derive(CodecSize)]
     struct TestStruct {
         _a: Option<u8>,
@@ -101,6 +110,7 @@ fn test_size_impl_for_option_primitive_types() {
 
 #[test]
 fn test_size_impl_struct() {
+    use crate::codec::CodecSize;
     #[derive(CodecSize)]
     struct TestStruct {
         test_string: String,
@@ -128,6 +138,7 @@ fn custom_size(value: &u32) -> u32 {
 
 #[test]
 fn test_size_impl_size_with() {
+    use crate::codec::CodecSize;
     #[derive(CodecSize)]
     struct TestStruct {
         #[codec(size_with = "custom_size")]
@@ -144,6 +155,8 @@ fn test_size_impl_size_with() {
 
 #[test]
 fn test_skip_if_impl() {
+    use crate::codec::CodecSize;
+
     fn is_zero(s: &u32) -> bool {
         *s == 0
     }

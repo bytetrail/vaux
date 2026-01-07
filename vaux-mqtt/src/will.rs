@@ -1,7 +1,10 @@
 use crate::connect::Connect;
 use crate::property::UserProperty;
 use crate::publish::PayloadFormat;
-use crate::{codec, Decode, Encode, MqttCodecError, PropertyCodecSize, PropertyType, QoSLevel};
+use crate::{
+    codec::{self, PropertyCodecSize},
+    MqttCodecError, PropertyType, QoSLevel,
+};
 use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
 
 #[derive(Debug, Default, Clone, Eq, PartialEq, Encode, Decode, PropertyCodecSize, CodecSize)]

@@ -6,6 +6,18 @@ mod codec {
     use bytes::BufMut;
     pub use bytes::BytesMut;
 
+    pub trait CodecSize {
+        fn codec_size(&self) -> u32;
+    }
+
+    pub trait PropertyCodecSize {
+        fn property_size(&self) -> u32;
+    }
+
+    pub trait Encode {
+        fn encode(&mut self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError>;
+    }
+
     pub fn variable_byte_int_size(value: u32) -> u32 {
         if value < 128 {
             1
@@ -88,20 +100,10 @@ pub struct MqttCodecError {
     pub kind: ErrorKind,
 }
 
-trait CodecSize {
-    fn codec_size(&self) -> u32;
-}
-
-trait PropertyCodecSize {
-    fn property_size(&self) -> u32;
-}
-
-trait Encode {
-    fn encode(&mut self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError>;
-}
-
 #[test]
 fn test_primitive_encode_impl() {
+    use crate::codec::Encode;
+
     #[derive(CodecSize, Encode)]
     struct TestStruct {
         _a: u8,
@@ -130,6 +132,8 @@ fn test_primitive_encode_impl() {
 
 #[test]
 fn test_string_encode_impl() {
+    use crate::codec::Encode;
+
     #[derive(CodecSize, Encode)]
     struct TestStruct {
         test_string: String,
@@ -149,6 +153,8 @@ fn test_string_encode_impl() {
 
 #[test]
 fn test_option_string_encode_impl() {
+    use crate::codec::Encode;
+
     #[derive(CodecSize, Encode)]
     struct TestStruct {
         optional_string: Option<String>,
@@ -175,6 +181,8 @@ fn test_option_string_encode_impl() {
 
 #[test]
 fn test_custom_encode_with() {
+    use crate::codec::Encode;
+
     fn custom_size(value: &u64) -> u32 {
         4 // Custom size logic: for example, always 4 bytes
     }
@@ -214,6 +222,8 @@ fn is_zero(s: &u32) -> bool {
 
 #[test]
 fn test_skip_if_impl() {
+    use crate::codec::CodecSize;
+
     #[derive(CodecSize)]
     struct TestStruct {
         #[codec(skip_if = "is_zero")]
@@ -240,6 +250,8 @@ fn test_skip_if_impl() {
 
 #[test]
 fn test_property_skip_if_impl() {
+    use crate::codec::{CodecSize, PropertyCodecSize};
+
     fn is_zero(s: &u32) -> bool {
         *s == 0
     }

@@ -1,6 +1,6 @@
 use crate::{
     codec::{self, encode_string},
-    CodecSize, Decode, Encode, MqttCodecError,
+    MqttCodecError,
 };
 use bytes::{BufMut, BytesMut};
 use std::{
@@ -149,7 +149,7 @@ impl TryFrom<u8> for PropertyType {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct UserProperty(HashMap<String, Vec<String>>);
 
-impl CodecSize for UserProperty {
+impl codec::CodecSize for UserProperty {
     fn codec_size(&self) -> u32 {
         let mut size = 0;
         for (key, values) in &self.0 {
@@ -163,7 +163,7 @@ impl CodecSize for UserProperty {
     }
 }
 
-impl Encode for UserProperty {
+impl codec::Encode for UserProperty {
     fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         for (key, values) in &self.0 {
             for value in values {
@@ -176,7 +176,7 @@ impl Encode for UserProperty {
     }
 }
 
-impl Decode for UserProperty {
+impl codec::Decode for UserProperty {
     /// Decode a single user property key-value pair and add it to the map.
     fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
         let key = codec::decode_string(src)?;

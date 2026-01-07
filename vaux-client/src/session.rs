@@ -3,7 +3,10 @@ use std::mem;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
 use vaux_mqtt::publish::Publish;
-use vaux_mqtt::{CodecSize, ConnAck, Connect, Encode, Packet, PropertyCodecSize, QoSLevel, Reason};
+use vaux_mqtt::{
+    codec::{CodecSize, Encode, PropertyCodecSize},
+    ConnAck, Connect, Packet, QoSLevel, Reason,
+};
 use vaux_mqtt::{PubAck, PubComp, PubRec, PubRel, WillMessage};
 
 const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;

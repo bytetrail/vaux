@@ -4,28 +4,32 @@ enum TestProperty {
     PropertyOne,
 }
 
-trait CodecSize {
-    fn codec_size(&self) -> u32;
-}
+pub mod codec {
+    pub trait CodecSize {
+        fn codec_size(&self) -> u32;
+    }
 
-trait PropertyCodecSize {
-    fn property_size(&self) -> u32;
-}
+    pub trait PropertyCodecSize {
+        fn property_size(&self) -> u32;
+    }
 
-fn variable_byte_int_size(value: u32) -> u32 {
-    if value < 128 {
-        1
-    } else if value < 16384 {
-        2
-    } else if value < 2097152 {
-        3
-    } else {
-        4
+    fn variable_byte_int_size(value: u32) -> u32 {
+        if value < 128 {
+            1
+        } else if value < 16384 {
+            2
+        } else if value < 2097152 {
+            3
+        } else {
+            4
+        }
     }
 }
 
 #[test]
 fn test_property_size_impl_for_disconnect() {
+    use crate::codec::PropertyCodecSize;
+
     #[derive(PropertyCodecSize)]
     struct Disconnect {
         #[codec(property_type = "TestProperty::PropertyOne")]
@@ -44,6 +48,8 @@ fn test_property_size_impl_for_disconnect() {
 
 #[test]
 fn test_vec_property_size_impl() {
+    use crate::codec::PropertyCodecSize;
+
     #[derive(PropertyCodecSize)]
     struct TestStruct {
         #[codec(property_type = "TestProperty::PropertyOne")]
@@ -70,9 +76,10 @@ fn test_vec_property_size_impl() {
     assert_eq!(test_instance_some.property_size(), 6); // 1 byte for property identifier + 2 bytes for length + 3 bytes for data
 }
 
-
 #[test]
 fn test_skip_if_impl() {
+    use crate::codec::PropertyCodecSize;
+
     #[derive(PropertyCodecSize)]
     struct TestStruct {
         #[codec(property_type = "TestProperty::PropertyOne")]

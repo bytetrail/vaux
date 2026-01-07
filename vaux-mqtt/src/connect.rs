@@ -1,9 +1,10 @@
 use crate::{
-    codec, property, will::WillHeader, Decode, Encode, MqttCodecError, PropertyCodecSize,
-    PropertyType, QoSLevel, WillMessage,
+    codec::{self, CodecSize, PropertyCodecSize},
+    property,
+    will::WillHeader,
+    MqttCodecError, PropertyType, QoSLevel, WillMessage,
 };
-// use bytes::BytesMut;
-use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
+use vaux_macro::packet;
 
 pub(crate) const CONNECT_FLAG_USERNAME: u8 = 0b_1000_0000;
 pub(crate) const CONNECT_FLAG_PASSWORD: u8 = 0b_0100_0000;
@@ -15,7 +16,8 @@ pub(crate) const CONNECT_FLAG_CLEAN_START: u8 = 0b_0000_0010;
 const MQTT_PROTOCOL_NAME: &str = "MQTT";
 const MQTT_PROTOCOL_VERSION: u8 = 0x05;
 
-#[derive(Debug, Clone, PropertyCodecSize, CodecSize, Encode, Decode, PartialEq, Eq)]
+#[packet(packet_type = "codec::PacketType::Connect")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Connect {
     protocol_name: String,
     protocol_version: u8,
@@ -41,6 +43,7 @@ pub struct Connect {
     #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: property::UserProperty,
 
+    // payload fields
     #[codec(payload_type = "field")]
     pub client_id: String,
     #[codec(payload_type = "field")]
@@ -57,7 +60,7 @@ pub struct Connect {
 
 impl Default for Connect {
     fn default() -> Self {
-        Connect::new()
+        Self::new()
     }
 }
 
@@ -69,10 +72,11 @@ impl Connect {
     /// |
     pub fn new() -> Self {
         Connect {
+            fixed_header: codec::FixedHeader::new(codec::PacketType::Connect),
             protocol_name: MQTT_PROTOCOL_NAME.to_string(),
             protocol_version: MQTT_PROTOCOL_VERSION,
             connect_flags: 0,
-            keep_alive: 0,
+            keep_alive: 60,
             session_expiry_interval: None,
             receive_maximum: None,
             max_packet_size: None,
@@ -86,7 +90,7 @@ impl Connect {
             will_properties: None,
             will_payload: Vec::new(),
             will_topic: None,
-            username: "".to_string(),
+            username: String::new(),
             password: Vec::new(),
         }
     }

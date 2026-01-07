@@ -1,13 +1,98 @@
 use crate::{
     skip_field,
     util::{
-        attribute_with_name_value, compile_error2, has_attribute_with_name_value,
-        is_primitive_type, property_type,
+        attribute_with_name_value, compile_error, compile_error2, has_attribute_with_name_value,
+        is_primitive_type, property_type, struct_has_attribute_with_name_value,
     },
     CODEC_ATTR, CODEC_ATTR_DECODE_WITH_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG,
 };
+use proc_macro::TokenStream;
 use quote::quote;
-use syn::{punctuated::Punctuated, Meta, Token};
+use syn::{parse_macro_input, punctuated::Punctuated, Meta, Token};
+
+pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as syn::ItemStruct);
+    let struct_name = &input.ident;
+    // ensure that the struct has named fields
+    let fields = match &input.fields {
+        syn::Fields::Named(fields_named) => fields_named,
+        _ => {
+            return compile_error("Decode can only be derived for structs with named fields");
+        }
+    };
+    // check if any field has the property attribute
+    let has_properties =
+        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG);
+
+    // decode the non-property, non-payload fields first, then the property fields if any
+    let header_field_decoded = fields
+        .named
+        .iter()
+        .filter_map(|f| {
+            if !(has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
+                .unwrap_or(false)
+                || has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG)
+                    .unwrap_or(false))
+            {
+                Some(decode_field(f))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let property_field_decode = fields
+        .named
+        .iter()
+        .filter_map(|f| {
+            if has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
+                .unwrap_or(false)
+            {
+                Some(decode_field(f))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let decode_properties = if has_properties {
+        quote! {
+            let (property_length, var_bytes_read) = codec::decode_variable_byte_int(src)?;
+            bytes_read += var_bytes_read;
+            let mut property_bytes_read = 0;
+            while property_bytes_read < property_length {
+                let property_type = src.get_u8().try_into()?;
+                property_bytes_read += 1;
+                match property_type {
+                    #(#property_field_decode)*
+                    _ => {
+                        return Err(codec::MqttCodecError::new_with_kind(format!(
+                            "MQTT v5 property type {:?} is not supported",
+                            property_type
+                        ).as_str(), codec::ErrorKind::UnsupportedProperty(property_type as u8)));
+                    }
+                }
+            }
+            bytes_read += property_bytes_read;
+        }
+    } else {
+        quote! {}
+    };
+
+    let decode_impl = quote! {
+        impl codec::Decode for #struct_name {
+            fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+                use bytes::{BufMut, Buf, BytesMut};
+                let mut bytes_read = 0;
+                #(#header_field_decoded)*
+                #decode_properties
+                Ok(bytes_read)
+            }
+        }
+    };
+
+    TokenStream::from(decode_impl)
+}
 
 pub(crate) fn decode_field(field: &syn::Field) -> proc_macro2::TokenStream {
     let field_name = field.ident.as_ref().unwrap();
@@ -172,36 +257,42 @@ fn decode_for_primitive(
     optional_field: bool,
     property_type: &Option<syn::Path>,
 ) -> proc_macro2::TokenStream {
-    let decode_stmt = if property_type.is_some() {
-        if optional_field {
-            quote! {
-               property_bytes_read += value.decode(src)?;
-               self.#field_name = Some(value);
+    let read = if property_type.is_some() {
+        quote! { property_bytes_read }
+    } else {
+        quote! { bytes_read }
+    };
+
+    let (reader, bytes_read) = match field_type {
+        syn::Type::Path(type_path) => {
+            let segment = &type_path.path.segments.last().unwrap().ident;
+            match segment.to_string().as_str() {
+                "u8" => (quote! {src.get_u8()}, quote! {1}),
+                "i8" => (quote! {src.get_i8()}, quote! {1}),
+                "u16" => (quote! {src.get_u16()}, quote! {2}),
+                "i16" => (quote! {src.get_i16()}, quote! {2}),
+                "u32" => (quote! {src.get_u32()}, quote! {4}),
+                "i32" => (quote! {src.get_i32()}, quote! {4}),
+                "bool" => (quote! {src.get_u8() != 0}, quote! {1}),
+                _ => return compile_error2("Unsupported primitive type for Decode derive"),
             }
-        } else {
-            quote! { property_bytes_read += self.#field_name.decode(src)?; }
+        }
+        _ => return compile_error2("Unsupported primitive type for Decode derive"),
+    };
+
+    let assignment = if optional_field {
+        quote! {
+            self.#field_name = Some( #reader );
+            #read += #bytes_read;
         }
     } else {
-        if optional_field {
-            quote! {
-                bytes_read += value.decode(src)?;
-                self.#field_name = Some(value);
-            }
-        } else {
-            quote! { bytes_read += self.#field_name.decode(src)?; }
+        quote! {
+            self.#field_name = #reader;
+            #read += #bytes_read;
         }
     };
 
-    if optional_field {
-        quote! {
-            let mut value = #field_type::default();
-            #decode_stmt
-        }
-    } else {
-        quote! {
-            #decode_stmt
-        }
-    }
+    assignment
 }
 
 fn decode_for_type(

@@ -1,9 +1,6 @@
-use crate::{
-    codec, property::UserProperty, CodecSize, Decode, Encode, MqttCodecError, PropertyCodecSize,
-    PropertyType,
-};
+use crate::{codec, property::UserProperty, MqttCodecError, PropertyType};
 use bytes::{Buf, BufMut};
-use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
+use vaux_macro::packet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PubAckRecReason {
@@ -41,14 +38,14 @@ impl TryFrom<u8> for PubAckRecReason {
     }
 }
 
-impl Encode for PubAckRecReason {
+impl codec::Encode for PubAckRecReason {
     fn encode(&mut self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
         dest.put_u8(*self as u8);
         Ok(())
     }
 }
 
-impl Decode for PubAckRecReason {
+impl codec::Decode for PubAckRecReason {
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
         let byte = src.get_u8();
         *self = PubAckRecReason::try_from(byte)?;
@@ -56,14 +53,14 @@ impl Decode for PubAckRecReason {
     }
 }
 
-impl CodecSize for PubAckRecReason {
+impl codec::CodecSize for PubAckRecReason {
     #[inline]
     fn codec_size(&self) -> u32 {
         1
     }
 }
 
-impl PropertyCodecSize for PubAckRecReason {
+impl codec::PropertyCodecSize for PubAckRecReason {
     #[inline]
     fn property_size(&self) -> u32 {
         2
@@ -92,14 +89,14 @@ impl TryFrom<u8> for PubRelCompReason {
     }
 }
 
-impl Encode for PubRelCompReason {
+impl codec::Encode for PubRelCompReason {
     fn encode(&mut self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
         dest.put_u8(*self as u8);
         Ok(())
     }
 }
 
-impl Decode for PubRelCompReason {
+impl codec::Decode for PubRelCompReason {
     fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
         let byte = src.get_u8();
         *self = PubRelCompReason::try_from(byte)?;
@@ -107,22 +104,23 @@ impl Decode for PubRelCompReason {
     }
 }
 
-impl CodecSize for PubRelCompReason {
+impl codec::CodecSize for PubRelCompReason {
     #[inline]
     fn codec_size(&self) -> u32 {
         1
     }
 }
 
-impl PropertyCodecSize for PubRelCompReason {
+impl codec::PropertyCodecSize for PubRelCompReason {
     #[inline]
     fn property_size(&self) -> u32 {
         2
     }
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Encode, Decode, PropertyCodecSize, CodecSize)]
-pub struct PubAckRec {
+#[packet(packet_type = "codec::PacketType::PubAck")]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct PubAck {
     pub packet_id: u16,
     reason: Option<PubAckRecReason>,
     #[codec(property_type = "PropertyType::ReasonString")]
@@ -131,11 +129,20 @@ pub struct PubAckRec {
     user_properties: UserProperty,
 }
 
-pub type PubAck = PubAckRec;
-pub type PubRec = PubAckRec;
+#[packet(packet_type = "codec::PacketType::PubRec")]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct PubRec {
+    pub packet_id: u16,
+    reason: Option<PubAckRecReason>,
+    #[codec(property_type = "PropertyType::ReasonString")]
+    reason_desc: Option<String>,
+    #[codec(property_type = "PropertyType::UserProperty")]
+    user_properties: UserProperty,
+}
 
-#[derive(Default, Debug, Clone, PartialEq, Eq, Encode, Decode, PropertyCodecSize, CodecSize)]
-pub struct PubRelComp {
+#[packet(packet_type = "codec::PacketType::PubRel")]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct PubRel {
     pub packet_id: u16,
     reason: Option<PubRelCompReason>,
     #[codec(property_type = "PropertyType::ReasonString")]
@@ -144,12 +151,29 @@ pub struct PubRelComp {
     user_properties: UserProperty,
 }
 
-pub type PubRel = PubRelComp;
-pub type PubComp = PubRelComp;
+#[packet(packet_type = "codec::PacketType::PubComp")]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct PubComp {
+    pub packet_id: u16,
+    reason: Option<PubRelCompReason>,
+    #[codec(property_type = "PropertyType::ReasonString")]
+    reason_desc: Option<String>,
+    #[codec(property_type = "PropertyType::UserProperty")]
+    user_properties: UserProperty,
+}
 
-impl PubAckRec {
+impl PubAck {
     pub fn new_with_packet_id(packet_id: u16) -> Self {
-        PubAckRec {
+        PubAck {
+            packet_id,
+            ..Default::default()
+        }
+    }
+}
+
+impl PubRec {
+    pub fn new_with_packet_id(packet_id: u16) -> Self {
+        PubRec {
             packet_id,
             ..Default::default()
         }
@@ -163,9 +187,18 @@ pub enum PublishResponse {
     PubRel,
 }
 
-impl PubRelComp {
+impl PubRel {
     pub fn new_with_packet_id(packet_id: u16) -> Self {
-        PubRelComp {
+        PubRel {
+            packet_id,
+            ..Default::default()
+        }
+    }
+}
+
+impl PubComp {
+    pub fn new_with_packet_id(packet_id: u16) -> Self {
+        PubComp {
             packet_id,
             ..Default::default()
         }

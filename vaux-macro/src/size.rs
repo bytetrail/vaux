@@ -19,13 +19,7 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
             let segment = &type_path.path.segments.last().unwrap().ident;
             if codec_size_with {
                 match attribute_with_name_value(attrs, "codec", "size_with") {
-                    Ok(Some(attr)) => {
-                        if matches!(segment.to_string().as_str(), "Option") {
-                            size_with_path(field_name, &attr, true, is_property)
-                        } else {
-                            size_with_path(field_name, &attr, false, is_property)
-                        }
-                    }
+                    Ok(Some(attr)) => size_with_path(field_name, &attr, is_property),
                     Ok(None) | Err(_) => {
                         compile_error2("Invalid 'size_with' attribute for Size derive")
                     }
@@ -341,7 +335,6 @@ fn is_primitive_type(type_name: &str) -> bool {
 fn size_with_path(
     field_name: &syn::Ident,
     attr: &syn::Attribute,
-    optional_field: bool,
     property_field: bool,
 ) -> proc_macro2::TokenStream {
     let size_prefix = if property_field {
@@ -361,13 +354,6 @@ fn size_with_path(
                         if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
                             if let syn::Lit::Str(lit_str) = &lit_expr.lit {
                                 let path: syn::Path = lit_str.parse().unwrap();
-                                // if optional_field {
-                                //     Some(quote! {
-                                //         if let Some(#field_name) = &self.#field_name {
-                                //             #size_prefix  #path(#field_name);
-                                //         }
-                                //     })
-                                // } else {
                                 Some(quote! {
                                     #size_prefix #path(&self.#field_name);
                                 })
@@ -530,7 +516,7 @@ mod tests {
     fn test_size_with_path() {
         let field_name = syn::Ident::new("custom_field", proc_macro2::Span::call_site());
         let attr: syn::Attribute = syn::parse_quote!(#[codec(size_with = "custom_size_function")]);
-        let tokens = size_with_path(&field_name, &attr, false, false);
+        let tokens = size_with_path(&field_name, &attr, false);
         let expected = quote! {
             total_size += custom_size_function(&self.custom_field);
         };

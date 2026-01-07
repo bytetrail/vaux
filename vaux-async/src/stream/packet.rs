@@ -2,10 +2,7 @@ use super::AsyncMqttStream;
 use bytes::{Bytes, BytesMut};
 use std::fmt::Display;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use vaux_mqtt::{
-    codec::{decode, Packet},
-    Encode,
-};
+use vaux_mqtt::codec::{decode, Encode, Packet};
 
 const READ_BUFFER_SIZE: usize = 4096;
 const MAX_BUFFER_SIZE: usize = 4096 * 1024;
@@ -98,8 +95,15 @@ impl PacketStream {
         loop {
             if bytes_read > 0 {
                 let bytes_mut = &mut BytesMut::from(&self.read_buffer[0..bytes_read]);
+                println!("Decoding packet from {} bytes", bytes_read);
+                println!("Buffer: {:x?}", &bytes_mut.clone().to_vec());
                 match decode(bytes_mut) {
                     Ok(data_read) => {
+                        println!(
+                            "Packet {:?} decoded successfully, decode len: {}",
+                            data_read.as_ref().unwrap().0,
+                            data_read.as_ref().unwrap().1
+                        );
                         if let Some((packet, decode_len)) = data_read {
                             if with_bytes {
                                 // split the buffer into packet and remaining bytes

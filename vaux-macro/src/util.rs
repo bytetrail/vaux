@@ -4,7 +4,7 @@ use syn::{punctuated::Punctuated, Meta, Token};
 
 use crate::{
     CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, CODEC_ATTR_SKIP_ARG,
-    CODEC_ATTR_SKIP_IF_ARG,
+    CODEC_ATTR_SKIP_IF_ARG, PACKET_ATTR, PACKET_ATTR_PACKET_TYPE_ARG,
 };
 
 /// Generates a compile-time error with the given message.
@@ -94,6 +94,18 @@ pub(crate) fn get_skip_if_path(attrs: &[syn::Attribute]) -> Option<syn::Path> {
                         }
                     }
                 }
+            }
+        }
+    }
+    None
+}
+
+pub(crate) fn get_packet_type(nv: &syn::MetaNameValue) -> Option<syn::Path> {
+    if nv.path.is_ident(PACKET_ATTR_PACKET_TYPE_ARG) {
+        if let syn::Expr::Lit(lit_expr) = &nv.value {
+            if let syn::Lit::Str(lit_str) = &lit_expr.lit {
+                let path: syn::Path = lit_str.parse().unwrap();
+                return Some(path);
             }
         }
     }
@@ -262,4 +274,17 @@ pub(crate) fn property_type(attrs: &[syn::Attribute]) -> Option<syn::Path> {
             None
         }
     })
+}
+
+/// Filters out attributes whose path matches any in the exclude list. We use this
+/// to remove our custom attributes before passing the struct to other macros.
+pub(crate) fn filter_attributes(
+    attrs: &Vec<syn::Attribute>,
+    exclude: &[&str],
+) -> Vec<syn::Attribute> {
+    attrs
+        .iter()
+        .filter(|attr| !exclude.iter().any(|r| attr.path().is_ident(r)))
+        .cloned()
+        .collect()
 }

@@ -1,8 +1,8 @@
 use crate::codec::{MAX_VARIABLE_BYTE_INT, MIN_VARIABLE_BYTE_INT};
-use crate::{codec, Decode, Encode, MqttCodecError, PropertyCodecSize, PropertyType};
+use crate::{codec, MqttCodecError, PropertyType};
 use crate::{property::UserProperty, MqttError, MqttVersion, QoSLevel};
 use bytes::{Buf, BufMut};
-use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
+use vaux_macro::{packet, CodecSize, Decode, Encode};
 
 /// MQTT v5 3.8.3.1 Subscription Options
 /// bits 4 and 5 of the subscription options hold the retain handling flag.
@@ -33,7 +33,8 @@ impl TryFrom<u8> for RetainHandling {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Encode, Decode, CodecSize, PropertyCodecSize)]
+#[packet(packet_type = "codec::PacketType::SubAck")]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SubAck {
     packet_id: u16,
     #[codec(property_type = "PropertyType::ReasonString")]
@@ -42,9 +43,9 @@ pub struct SubAck {
     pub user_properties: UserProperty,
     #[codec(
         payload_type = "remaining",
+        size_with = "codec::codec_size_vec_u8_raw",
         encode_with = "encode_suback_reason_vec",
         decode_with = "decode_suback_reason_vec"
-       // size_with = "codec::codec_size_vec_u8",
     )]
     pub reason_codes: Vec<u8>,
 }
@@ -67,13 +68,11 @@ pub fn decode_suback_reason_vec(
     Ok(len as u32)
 }
 
-impl Default for SubAck {
-    fn default() -> Self {
+impl SubAck {
+    fn new_with_packet_id(packet_id: u16) -> Self {
         Self {
-            packet_id: 1,
-            reason: None,
-            user_properties: UserProperty::new(),
-            reason_codes: Vec::new(),
+            packet_id,
+            ..Default::default()
         }
     }
 }
@@ -127,7 +126,8 @@ impl SubscriptionFilter {
     }
 }
 
-#[derive(Default, Debug, Clone, CodecSize, PropertyCodecSize, Encode, Decode, PartialEq, Eq)]
+#[packet(packet_type = "codec::PacketType::Subscribe")]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Subscribe {
     packet_id: u16,
     #[codec(property_type = "PropertyType::SubscriptionIdentifier")]

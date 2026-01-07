@@ -1,10 +1,8 @@
-use crate::{
-    codec, property::UserProperty, Decode, Encode, MqttCodecError, PropertyCodecSize, PropertyType,
-    Reason,
-};
-use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
+use crate::{codec, property::UserProperty, MqttCodecError, PropertyType, Reason};
+use vaux_macro::{packet, CodecSize, Decode, Encode, PropertyCodecSize};
 
-#[derive(Clone, Debug, PartialEq, Eq, CodecSize, PropertyCodecSize, Encode, Decode)]
+#[packet(packet_type = "codec::PacketType::Disconnect")]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub struct Disconnect {
     pub reason: Reason,
     #[codec(property_type = "PropertyType::SessionExpiryInterval")]
@@ -15,18 +13,6 @@ pub struct Disconnect {
     pub server_reference: Option<String>,
     #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
-}
-
-impl Default for Disconnect {
-    fn default() -> Self {
-        Disconnect {
-            reason: Reason::Success,
-            session_expiry_interval: None,
-            reason_string: None,
-            server_reference: None,
-            user_properties: crate::property::UserProperty::new(),
-        }
-    }
 }
 
 impl Disconnect {

@@ -2,7 +2,6 @@ pub mod codec;
 pub mod connack;
 pub mod connect;
 pub mod disconnect;
-pub mod fixed;
 pub mod property;
 pub mod publish;
 pub mod pubresp;
@@ -16,29 +15,12 @@ pub use {
     connack::ConnAck,
     connect::Connect,
     disconnect::Disconnect,
-    fixed::FixedHeader,
     property::PropertyType,
     publish::{PayloadFormat, Publish},
     pubresp::{PubAck, PubAckRecReason, PubComp, PubRec, PubRel, PubRelCompReason},
     subscribe::{Subscribe, SubscriptionFilter},
     will::{WillHeader, WillMessage},
 };
-
-pub trait PropertyCodecSize {
-    fn property_size(&self) -> u32;
-}
-
-pub trait CodecSize {
-    fn codec_size(&self) -> u32;
-}
-
-pub trait Encode {
-    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError>;
-}
-
-pub trait Decode {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError>;
-}
 
 pub enum MqttVersion {
     V3,
