@@ -1,9 +1,10 @@
-use bytes::{BufMut, BytesMut};
+use bytes::{Buf, BufMut, BytesMut};
 use tokio_util::codec::{Decoder, Encoder};
 use vaux_mqtt::{
-    codec::{PingReq, PingResp},
-    decode_fixed_header, ConnAck, Connect, Decode, Disconnect, Encode, MqttCodecError, Packet,
-    PacketType,
+    codec::{
+        fixed::{FixedHeader},
+        Encode, Decode, CodecSize},
+    ConnAck, Connect, Disconnect, MqttCodecError, Packet, PacketType, PingReq, PingResp,
 };
 
 #[derive(Debug)]
@@ -14,35 +15,42 @@ impl Decoder for MqttCodec {
     type Error = MqttCodecError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        match decode_fixed_header(src) {
-            Ok(packet_header) => match packet_header {
-                Some(packet_header) => match packet_header.packet_type() {
-                    PacketType::PingReq => {
-                        Ok(Some(Packet::PingRequest(PingReqCtrl::new(packet_header))))
-                    }
-                    PacketType::PingResp => {
-                        Ok(Some(Packet::PingResponse(PingRespCtrl::new(packet_header))))
-                    }
+        let mut header = FixedHeader::default();
+        match header.decode(src) {
+            Ok(size_read) => {
+                if src.remaining() < size_read as usize {
+                    return Ok(None);
+                }
+                let packet = match header.packet_type {
                     PacketType::Connect => {
-                        let mut connect = Connect::default();
-                        connect.decode(src)?;
-                        Ok(Some(Packet::Connect(Box::new(connect))))
+                        let mut connect = Connect::new_with_fixed_header(header)?;
+                        let _ = connect.decode(src)?;
+                        Packet::Connect(Box::new(connect))
                     }
-                    PacketType::Publish => Ok(None),
                     PacketType::ConnAck => {
-                        let mut connack = ConnAck::default();
-                        connack.decode(src)?;
-                        Ok(Some(Packet::ConnAck(connack)))
+                        let mut connack = ConnAck::new_with_fixed_header(header)?;
+                        let _ = connack.decode(src)?;
+                        Packet::ConnAck(connack)
                     }
                     PacketType::Disconnect => {
-                        let mut disconnect = Disconnect::default();
-                        disconnect.decode(src)?;
-                        Ok(Some(Packet::Disconnect(disconnect)))
+                        let mut disconnect = Disconnect::new_with_fixed_header(header)?;
+                        let _ = disconnect.decode(src)?;
+                        Packet::Disconnect(disconnect)
                     }
-                    _ => Err(MqttCodecError::new("unsupported packet type")),
-                },
-                None => Ok(None),
-            },
+                    PacketType::PingReq => {
+                        let mut pingreq = PingReq::new_with_fixed_header(header)?;
+                        let _ = pingreq.decode(src)?;
+                        Packet::PingRequest(pingreq)
+                    }
+                    PacketType::PingResp => {
+                        let mut pingresp = PingResp::new_with_fixed_header(header)?;
+                        let _ = pingresp.decode(src)?;
+                        Packet::PingResponse(pingresp)
+                    }
+                    _ => return Err(MqttCodecError::new("unsupported packet type")),
+                };
+                Ok(Some(packet))
+            }
             Err(e) => Err(e),
         }
     }
@@ -51,14 +59,7 @@ impl Decoder for MqttCodec {
 impl Encoder<Packet> for MqttCodec {
     type Error = MqttCodecError;
 
-    fn encode(&mut self, packet: Packet, dest: &mut BytesMut) -> Result<(), Self::Error> {
-        match packet {
-            Packet::Connect(c) => c.encode(dest),
-            Packet::ConnAck(c) => c.encode(dest),
-            Packet::Disconnect(d) => d.encode(dest),
-            Packet::PingRequest(header) | Packet::PingResponse(header) => header.encode(dest)?,
-            _ => return Err(MqttCodecError::new("unsupported packet type")),
-        }?;
-        Ok(())
+    fn encode(&mut self, mut packet: Packet, dest: &mut BytesMut) -> Result<(), Self::Error> {
+        packet.encode(dest)
     }
 }

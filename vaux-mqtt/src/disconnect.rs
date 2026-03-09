@@ -1,5 +1,5 @@
 use crate::{codec, property::UserProperty, MqttCodecError, PropertyType, Reason};
-use vaux_macro::{packet, CodecSize, Decode, Encode, PropertyCodecSize};
+use vaux_macro::packet;
 
 #[packet(packet_type = "codec::PacketType::Disconnect")]
 #[derive(Clone, Default, Debug, PartialEq, Eq)]

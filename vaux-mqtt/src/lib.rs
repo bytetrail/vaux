@@ -10,6 +10,7 @@ pub mod test;
 pub mod will;
 
 pub use codec::{MqttCodecError, Packet, PacketType, QoSLevel, Reason};
+use vaux_macro::packet;
 pub use {
     connack::ConnAck,
     connect::Connect,
@@ -70,3 +71,11 @@ impl std::fmt::Display for MqttError {
         write!(f, "{}", self.message)
     }
 }
+
+
+#[packet(packet_type = "codec::PacketType::PingReq")]
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
+pub struct PingReq;
+#[packet(packet_type = "codec::PacketType::PingResp")]
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
+pub struct PingResp; 

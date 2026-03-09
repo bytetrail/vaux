@@ -22,8 +22,8 @@ pub(crate) const CODEC_ATTR_ENCODE_WITH_ARG: &str = "encode_with";
 pub(crate) const CODEC_ATTR_SKIP_ARG: &str = "skip";
 pub(crate) const CODEC_ATTR_SKIP_IF_ARG: &str = "skip_if";
 pub(crate) const CODEC_ATTR_PAYLOAD_ARG: &str = "payload_type";
-pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_REMAINING: &str = "remaining";
-pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_FIELD: &str = "field";
+//pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_REMAINING: &str = "remaining";
+//pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_FIELD: &str = "field";
 
 #[proc_macro_attribute]
 pub fn packet(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -63,10 +63,15 @@ pub fn packet(args: TokenStream, input: TokenStream) -> TokenStream {
                 }
             }
         }
-        _ => {
+        syn::Fields::Unnamed(_) => {
             return compile_error(
-                "packet attribute can only be applied to structs with named fields",
+                "packet attribute cannot be applied to tuple structs",
             )
+        }
+        syn::Fields::Unit => {
+            struct_fields = quote! {
+                #struct_fields
+            }
         }
     }
 
@@ -103,11 +108,15 @@ pub fn packet(args: TokenStream, input: TokenStream) -> TokenStream {
 pub fn derive_codec_property_size(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let name = &input.ident;
-    // ensure that the struct has named fields
+    // ensure that the struct does not have tuple fields
     let fields = match &input.fields {
         syn::Fields::Named(fields_named) => fields_named,
-        _ => {
-            return compile_error("Size can only be derived for structs with named fields");
+        syn::Fields::Unnamed(_) => {
+            return compile_error("Size cannot be used for tuple structs");
+        }
+        syn::Fields::Unit => {
+            // return an empty token stream for unit structs
+            return TokenStream::new();
         }
     };
 
@@ -162,41 +171,47 @@ pub fn derive_codec_property_size(input: TokenStream) -> TokenStream {
 /// # Returns
 /// TokenStream representing the generated implementation.
 ///
-/// <em>Note:</em> This macro currently only supports structs with named fields and relies on the
+/// <em>Note:</em> This macro does not support tuple structs and relies on the
 /// 'vaux_mqtt::codec' module for size calculation functions.
 #[proc_macro_derive(CodecSize, attributes(codec))]
 pub fn derive_codec_size(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let name = &input.ident;
 
-    // ensure that the struct has named fields
+    // ensure that the struct does not have tuple fields
     let fields = match &input.fields {
-        syn::Fields::Named(fields_named) => fields_named,
-        _ => {
-            return compile_error("Size can only be derived for structs with named fields");
+        syn::Fields::Named(fields_named) => Some(fields_named),
+        syn::Fields::Unnamed(_) => {
+            return compile_error("Size macro does not support tuple structs");
         }
+        syn::Fields::Unit => None,
+        
     };
-
-    let has_properties =
-        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG);
+    let has_properties = if let Some(fields) = fields {
+        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
+    } else {
+        false
+    };
     let mut field_sizes = Vec::new();
 
-    for field in &fields.named {
-        if !has_attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
-            .unwrap_or(false)
-        {
-            let field_size_calc = field_size(field);
-            if let Some(skip_path) = get_skip_if_path(&field.attrs) {
-                let field_name = field.ident.as_ref().unwrap();
-                field_sizes.push(quote! {
-                    if !#skip_path(&self.#field_name) {
-                        #field_size_calc
-                    }
-                });
-            } else {
-                field_sizes.push(field_size_calc);
+    if let Some(fields) = fields {
+        for field in &fields.named {
+            if !has_attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
+                .unwrap_or(false)
+            {
+                let field_size_calc = field_size(field);
+                if let Some(skip_path) = get_skip_if_path(&field.attrs) {
+                    let field_name = field.ident.as_ref().unwrap();
+                    field_sizes.push(quote! {
+                        if !#skip_path(&self.#field_name) {
+                            #field_size_calc
+                        }
+                    });
+                } else {
+                    field_sizes.push(field_size_calc);
+                }
+                continue;
             }
-            continue;
         }
     }
     let size_wrapper = if has_properties {
@@ -239,21 +254,32 @@ fn encode_packet(input: TokenStream) -> TokenStream {
 fn encode_internal(input: TokenStream, as_packet: bool) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let struct_name = &input.ident;
-    // ensure that the struct has named fields
+    // ensure that the struct does not have tuple fields
     let fields = match &input.fields {
-        syn::Fields::Named(fields_named) => fields_named,
-        _ => {
-            return compile_error("Encode can only be derived for structs with named fields");
+        syn::Fields::Named(fields_named) => Some(fields_named),
+        syn::Fields::Unnamed(_) => {
+            return compile_error("Encode does not support tuple structs");
+        }
+        syn::Fields::Unit => {
+            // return an empty token stream for unit structs
+            None
         }
     };
     // check if any field has the property attribute
-    let has_properties =
-        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG);
-    let has_payload =
-        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG);
+    let has_properties = if let Some(fields) = fields {
+        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
+    } else {
+        false
+    };
+    let has_payload = if let Some(fields) = fields {
+        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG)
+    } else {
+        false
+    };
     // encode the non-property fields first, then the property fields if any
-    let mut encoded = fields
-        .named
+    let mut encoded = if let Some(fields) = fields {
+        fields
+            .named
         .iter()
         .filter_map(|f| {
             if !(is_property_field(&f.attrs).unwrap_or(false)
@@ -274,14 +300,33 @@ fn encode_internal(input: TokenStream, as_packet: bool) -> TokenStream {
                 None
             }
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+
     if has_properties {
         // encode the property length
         let property_length_encoding = quote! {
             codec::encode_variable_byte_int(self.property_size(), dest)?;
         };
         encoded.push(property_length_encoding);
-        fields.named.iter().for_each(|f| {
+        fields.as_ref().unwrap().named.iter().for_each(|f| {
+            if is_property_field(&f.attrs).unwrap_or(false) {
+                let inner_expr = encode::encode_field(f);
+                if let Some(skip_path) = get_skip_if_path(&f.attrs) {
+                    let field_name = f.ident.as_ref().unwrap();
+                    encoded.push(quote! {
+                        if !#skip_path(&self.#field_name) {
+                            #inner_expr
+                        }
+                    })
+                } else {
+                    encoded.push(inner_expr);
+                }
+            }
+        });
+        fields.as_ref().unwrap().named.iter().for_each(|f| {
             if is_property_field(&f.attrs).unwrap_or(false) {
                 let inner_expr = encode::encode_field(f);
                 if let Some(skip_path) = get_skip_if_path(&f.attrs) {
@@ -298,7 +343,7 @@ fn encode_internal(input: TokenStream, as_packet: bool) -> TokenStream {
         });
     }
     if has_payload {
-        fields.named.iter().for_each(|f| {
+        fields.as_ref().unwrap().named.iter().for_each(|f| {
             if is_payload_field(&f.attrs).unwrap_or(false) {
                 let inner_expr = encode::encode_field(f);
                 if let Some(skip_path) = get_skip_if_path(&f.attrs) {

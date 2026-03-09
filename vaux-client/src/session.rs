@@ -3,6 +3,7 @@ use std::mem;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
 use vaux_mqtt::publish::Publish;
+use vaux_mqtt::pubresp::PubResp;
 use vaux_mqtt::{
     codec::{CodecSize, Encode, PropertyCodecSize},
     ConnAck, Connect, Packet, QoSLevel, Reason,
@@ -411,7 +412,7 @@ impl ClientSession {
                                 ))?;
                                 self.state.pending_qos_send.insert(packet_id, pubrec_state);
                                 // create the PUBREL packet
-                                let pubrel = PubRel::new_with_packet_id(packet_id);
+                                let pubrel = PubResp::new_pubrel_with_packet_id(packet_id);
                                 match self.send_packet(Packet::PubRel(pubrel)).await {
                                     Ok(_) => {
                                         // remove from pending qos
@@ -479,7 +480,7 @@ impl ClientSession {
                     match p.next {
                         QoSPacket::PubRel => {
                             if self.state.auto_ack {
-                                let pubcomp = PubComp::new_with_packet_id(packet_id);
+                                let pubcomp = PubResp::new_pubcomp_with_packet_id(packet_id);
                                 match self.send_packet(Packet::PubComp(pubcomp)).await {
                                     Ok(_) => {
                                         // remove from pending qos
@@ -619,7 +620,7 @@ impl ClientSession {
                 );
                 if self.state.auto_ack {
                     let puback = if let Some(packet_id) = publish.packet_id() {
-                        PubAck::new_with_packet_id(packet_id)
+                        PubResp::new_puback_with_packet_id(packet_id)
                     } else {
                         // TODO send disconnect with reason cod
                         let _ = self.packet_stream.shutdown().await;
@@ -661,7 +662,7 @@ impl ClientSession {
                 self.state.qos_recv_remaining -= 1;
                 if self.state.auto_ack {
                     let pubrec = if let Some(packet_id) = publish.packet_id() {
-                        PubRec::new_with_packet_id(packet_id)
+                        PubResp::new_pubrec_with_packet_id(packet_id)
                     } else {
                         // protocol error, packet ID required with QoS > 0
                         let _ = self.packet_stream.shutdown().await;

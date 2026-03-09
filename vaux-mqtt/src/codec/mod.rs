@@ -1,6 +1,7 @@
 pub mod fixed;
 
 pub use fixed::FixedHeader;
+use vaux_macro::packet;
 
 use crate::{
     connect::Connect,
@@ -34,34 +35,7 @@ pub trait Decode {
     fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError>;
 }
 
-#[derive(Default, Debug, Clone, Eq, PartialEq)]
-pub struct PingReq;
-#[derive(Default, Debug, Clone, Eq, PartialEq)]
-pub struct PingResp;
 
-impl Encode for PingReq {
-    fn encode(&mut self, _dest: &mut BytesMut) -> Result<(), MqttCodecError> {
-        Ok(())
-    }
-}
-
-impl Decode for PingReq {
-    fn decode(&mut self, _src: &mut BytesMut) -> Result<u32, MqttCodecError> {
-        Ok(0)
-    }
-}
-
-impl Encode for PingResp {
-    fn encode(&mut self, _dest: &mut BytesMut) -> Result<(), MqttCodecError> {
-        Ok(())
-    }
-}
-
-impl Decode for PingResp {
-    fn decode(&mut self, _src: &mut BytesMut) -> Result<u32, MqttCodecError> {
-        Ok(0)
-    }
-}
 
 /// MQTT Control Packet Type
 /// #[repr(u8)]
@@ -307,8 +281,8 @@ impl PropertyCodecSize for &QoSLevel {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Packet {
-    PingRequest(PingReq),
-    PingResponse(PingResp),
+    PingRequest(crate::PingReq),
+    PingResponse(crate::PingResp),
     Connect(Box<Connect>),
     ConnAck(ConnAck),
     Publish(Publish),
@@ -468,9 +442,9 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecErro
         _ => {}
     }
     match fixed_header.packet_type {
-        PacketType::PingReq => Ok(Some((Packet::PingRequest(PingReq::default()), decode_len))),
+        PacketType::PingReq => Ok(Some((Packet::PingRequest(crate::PingReq::default()), decode_len))),
         PacketType::PingResp => Ok(Some((
-            Packet::PingResponse(PingResp::default()),
+            Packet::PingResponse(crate::PingResp::default()),
             decode_len,
         ))),
         PacketType::Connect => {

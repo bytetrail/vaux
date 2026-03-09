@@ -8,25 +8,32 @@ use crate::{
 };
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, punctuated::Punctuated, Meta, Token};
+use syn::{FieldsNamed, Meta, Token, parse_macro_input, punctuated::Punctuated};
 
 pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as syn::ItemStruct);
     let struct_name = &input.ident;
-    // ensure that the struct has named fields
+    // ensure that the struct does not have tuple fields
     let fields = match &input.fields {
-        syn::Fields::Named(fields_named) => fields_named,
-        _ => {
-            return compile_error("Decode can only be derived for structs with named fields");
+        syn::Fields::Named(fields_named) => Some(fields_named),
+        syn::Fields::Unnamed(_) => {
+            return compile_error("Decode does not support tuple structs");
+        }
+        syn::Fields::Unit => {
+            // return an empty token stream for unit structs
+            None
         }
     };
     // check if any field has the property attribute
-    let has_properties =
-        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG);
+    let has_properties = if let Some(fields) = fields {
+        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG) }
+    else {
+        false
+    };
 
     // decode the non-property, non-payload fields first, then the property fields if any
-    let header_field_decoded = fields
-        .named
+    let header_field_decoded = if let Some(fields) = fields {
+        fields.named
         .iter()
         .filter_map(|f| {
             if !(has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
@@ -39,13 +46,17 @@ pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
                 None
             }
         })
-        .collect::<Vec<_>>();
-
-    let property_field_decode = fields
-        .named
-        .iter()
-        .filter_map(|f| {
-            if has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
+        .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    
+    let property_field_decode = if let Some(fields) = fields {
+        fields
+            .named
+            .iter()
+            .filter_map(|f| {
+                if has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
                 .unwrap_or(false)
             {
                 Some(decode_field(f))
@@ -53,7 +64,10 @@ pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
                 None
             }
         })
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
 
     let decode_properties = if has_properties {
         quote! {
@@ -107,7 +121,7 @@ pub(crate) fn decode_field(field: &syn::Field) -> proc_macro2::TokenStream {
         attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_DECODE_WITH_ARG).unwrap();
     let payload_type_attr =
         attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG).unwrap();
-    let payload_type = if let Some(payload_attr) = payload_type_attr {
+    let _payload_type = if let Some(payload_attr) = payload_type_attr {
         match payload_attr.meta {
             syn::Meta::NameValue(ref nv) => match nv.value {
                 syn::Expr::Lit(ref expr_lit) => match expr_lit.lit {
@@ -138,7 +152,7 @@ pub(crate) fn decode_field(field: &syn::Field) -> proc_macro2::TokenStream {
         syn::Type::Path(type_path) => {
             //let skip_if = get_skip_if_path(&field.attrs);
             let segment = &type_path.path.segments.last().unwrap().ident;
-            let mut optional_field = false;
+            let optional_field;
             let mut inner_field_type = field_type.clone();
             match segment.to_string().as_str() {
                 "Option" => {
@@ -172,7 +186,7 @@ pub(crate) fn decode_field(field: &syn::Field) -> proc_macro2::TokenStream {
                 decode_for_decode_with(
                     &field_name,
                     &decode_with.unwrap(),
-                    optional_field,
+                    
                     &property_type,
                 )
             } else {
@@ -390,7 +404,6 @@ fn decode_for_vec(
 fn decode_for_decode_with(
     field_name: &syn::Ident,
     attr: &syn::Attribute,
-    optional_field: bool,
     property_type: &Option<syn::Path>,
 ) -> proc_macro2::TokenStream {
     let decode_path = match attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated) {

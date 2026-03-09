@@ -1,4 +1,4 @@
-use crate::codec::{self, CodecSize, PropertyCodecSize, Reason};
+use crate::codec::{self, Reason};
 use crate::property::{PropertyType, UserProperty};
 use crate::{MqttCodecError, QoSLevel};
 use vaux_macro::packet;

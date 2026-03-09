@@ -4,7 +4,7 @@ use syn::{punctuated::Punctuated, Meta, Token};
 
 use crate::{
     CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, CODEC_ATTR_SKIP_ARG,
-    CODEC_ATTR_SKIP_IF_ARG, PACKET_ATTR, PACKET_ATTR_PACKET_TYPE_ARG,
+    CODEC_ATTR_SKIP_IF_ARG, PACKET_ATTR_PACKET_TYPE_ARG,
 };
 
 /// Generates a compile-time error with the given message.

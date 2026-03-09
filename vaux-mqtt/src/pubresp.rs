@@ -140,7 +140,7 @@ impl PubResp {
         }
     }
 
-    pub fn new_pubcompwith_packet_id(packet_id: u16) -> Self {
+    pub fn new_pubcomp_with_packet_id(packet_id: u16) -> Self {
         PubResp {
             fixed_header: codec::FixedHeader::new(codec::PacketType::PubComp),
             packet_id,

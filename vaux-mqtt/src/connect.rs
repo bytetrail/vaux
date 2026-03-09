@@ -1,5 +1,5 @@
 use crate::{
-    codec::{self, CodecSize, PropertyCodecSize},
+    codec::{self, },
     property,
     will::WillHeader,
     MqttCodecError, PropertyType, QoSLevel, WillMessage,
@@ -160,6 +160,20 @@ impl Connect {
             self.session_expiry_interval = None;
         } else {
             self.session_expiry_interval = Some(interval);
+        }
+    }
+
+    pub fn will_message(&self) -> Option<WillMessage> {
+        if self.will() {
+            Some(WillMessage {
+                topic: self.will_topic.clone().unwrap_or_default(),
+                payload: self.will_payload.clone(),
+                qos: self.will_qos().unwrap_or(QoSLevel::AtMostOnce),
+                retain: self.will_retain(),
+                header: self.will_properties.clone().unwrap_or_default(),
+            })
+        } else {
+            None
         }
     }
 
