@@ -164,7 +164,7 @@ impl codec::CodecSize for UserProperty {
 }
 
 impl codec::Encode for UserProperty {
-    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         for (key, values) in &self.0 {
             for value in values {
                 dest.put_u8(PropertyType::UserProperty as u8);

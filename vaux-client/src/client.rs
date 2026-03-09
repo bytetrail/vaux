@@ -8,7 +8,7 @@ use tokio::{
     sync::mpsc::{self, error::SendError, Receiver, Sender},
     task::JoinHandle,
 };
-use vaux_mqtt::{Packet, PacketType, Subscribe, SubscriptionFilter};
+use vaux_mqtt::{Packet, PacketType, QoSLevel, Subscribe, SubscriptionFilter};
 
 // 64K is the default max packet size
 const MAX_CONNECT_WAIT: Duration = Duration::from_secs(5);
@@ -255,28 +255,24 @@ impl MqttClient {
     /// Helper method to subscribe to the topics in the topic filter. This helper
     /// subscribes with a QoS level of "At Most Once", or 0. A SUBACK will
     /// typically be returned on the consumer on a successful subscribe.
-    // pub async fn subscribe(
-    //     &mut self,
-    //     packet_id: u16,
-    //     topic_filter: &[&str],
-    //     qos: QoSLevel,
-    // ) -> std::result::Result<(), SendError<Packet>> {
-    //     let mut subscribe = Subscribe::default();
-    //     subscribe.set_packet_id(packet_id);
-    //     for topic in topic_filter {
-    //         let subscription = SubscriptionFilter {
-    //             filter: (*topic).to_string(),
-    //             qos,
-    //             ..Default::default()
-    //         };
-    //         // self.subscriptions.push(subscription.clone());
-    //         subscribe.add_subscription(subscription);
-    //     }
-    //     self.packet_in
-    //         .0
-    //         .send(vaux_mqtt::Packet::Subscribe(subscribe))
-    //         .await
-    // }
+     pub async fn subscribe(
+        &mut self,
+        packet_id: u16,
+        topic_filter: &[&str],
+        qos: QoSLevel,
+    ) -> std::result::Result<(), SendError<Packet>> {
+        let mut subscribe = Subscribe::default();
+        subscribe.packet_id = packet_id;
+        for topic in topic_filter {
+            let mut subscription = SubscriptionFilter::new((*topic).to_string(), qos);
+            // self.subscriptions.push(subscription.clone());
+            subscribe.add_filter(subscription);
+        }
+        self.packet_in
+            .0
+            .send(vaux_mqtt::Packet::Subscribe(subscribe))
+            .await
+    }
 
     /// Attempts to start an MQTT session with the remote broker. The client will
     /// attempt to connect to the remote broker and send a CONNECT packet. If the

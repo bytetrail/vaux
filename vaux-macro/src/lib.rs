@@ -326,21 +326,6 @@ fn encode_internal(input: TokenStream, as_packet: bool) -> TokenStream {
                 }
             }
         });
-        fields.as_ref().unwrap().named.iter().for_each(|f| {
-            if is_property_field(&f.attrs).unwrap_or(false) {
-                let inner_expr = encode::encode_field(f);
-                if let Some(skip_path) = get_skip_if_path(&f.attrs) {
-                    let field_name = f.ident.as_ref().unwrap();
-                    encoded.push(quote! {
-                        if !#skip_path(&self.#field_name) {
-                            #inner_expr
-                        }
-                    })
-                } else {
-                    encoded.push(inner_expr);
-                }
-            }
-        });
     }
     if has_payload {
         fields.as_ref().unwrap().named.iter().for_each(|f| {
@@ -372,7 +357,7 @@ fn encode_internal(input: TokenStream, as_packet: bool) -> TokenStream {
 
     let encode_impl = quote! {
         impl codec::Encode for #struct_name {
-            fn encode(&mut self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
+            fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
                 use bytes::{BufMut, BytesMut};
                 #packet_encode
                 #(#encoded)*

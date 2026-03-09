@@ -15,7 +15,7 @@ mod codec {
     }
 
     pub trait Encode {
-        fn encode(&mut self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError>;
+        fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError>;
     }
 
     pub fn variable_byte_int_size(value: u32) -> u32 {

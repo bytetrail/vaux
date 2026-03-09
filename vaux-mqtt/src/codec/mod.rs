@@ -4,11 +4,7 @@ pub use fixed::FixedHeader;
 use vaux_macro::packet;
 
 use crate::{
-    connect::Connect,
-    publish::Publish,
-    pubresp::{PubAck, PubComp, PubRec, PubRel},
-    subscribe::SubAck,
-    ConnAck, Disconnect, Subscribe,
+    ConnAck, Disconnect, Subscribe, connect::Connect, publish::Publish, pubresp::{PubAck, PubComp, PubRec, PubRel}, subscribe::SubAck, unsubscribe::{UnsubAck, Unsubscribe}
 };
 use bytes::{Buf, BufMut, BytesMut};
 use std::fmt::{Display, Formatter};
@@ -28,7 +24,7 @@ pub trait CodecSize {
 }
 
 pub trait Encode {
-    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError>;
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError>;
 }
 
 pub trait Decode {
@@ -213,7 +209,7 @@ impl CodecSize for Reason {
 }
 
 impl Encode for Reason {
-    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         dest.put_u8(*self as u8);
         Ok(())
     }
@@ -253,7 +249,7 @@ impl TryFrom<u8> for QoSLevel {
 }
 
 impl Encode for QoSLevel {
-    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         dest.put_u8(*self as u8);
         Ok(())
     }
@@ -279,6 +275,20 @@ impl PropertyCodecSize for &QoSLevel {
     }
 }
 
+impl CodecSize for &String {
+    fn codec_size(&self) -> u32 {
+        2 + self.len() as u32
+    }
+}
+
+impl Encode for &String {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+        encode_string(self, dest)
+    }
+}
+
+
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Packet {
     PingRequest(crate::PingReq),
@@ -293,12 +303,12 @@ pub enum Packet {
     Disconnect(Disconnect),
     Subscribe(Subscribe),
     SubAck(SubAck),
-    // Unsubscribe(Unsubscribe),
-    // UnsubAck(UnsubAck),
+    Unsubscribe(Unsubscribe),
+    UnsubAck(UnsubAck),
 }
 
 impl Encode for Packet {
-    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         match self {
             Packet::PingRequest(pingreq) => pingreq.encode(dest),
             Packet::PingResponse(pingresp) => pingresp.encode(dest),
@@ -312,9 +322,8 @@ impl Encode for Packet {
             Packet::Disconnect(disconnect) => disconnect.encode(dest),
             Packet::Subscribe(subscribe) => subscribe.encode(dest),
             Packet::SubAck(suback) => suback.encode(dest),
-            //         // Packet::Unsubscribe(unsubscribe) => unsubscribe.encode(dest),
-            //         // Packet::UnsubAck(unsuback) => unsuback.encode(dest),
-            //     }
+            Packet::Unsubscribe(unsubscribe) => unsubscribe.encode(dest),
+            Packet::UnsubAck(unsuback) => unsuback.encode(dest),
         }
     }
 }
@@ -334,8 +343,8 @@ impl From<&Packet> for PacketType {
             Packet::Disconnect(_) => PacketType::Disconnect,
             Packet::Subscribe(_) => PacketType::Subscribe,
             Packet::SubAck(_) => PacketType::SubAck,
-            //             Packet::Unsubscribe(_) => PacketType::Unsubscribe,
-            //             Packet::UnsubAck(_) => PacketType::UnsubAck,
+            Packet::Unsubscribe(_) => PacketType::Unsubscribe,
+            Packet::UnsubAck(_) => PacketType::UnsubAck,
         }
     }
 }
@@ -351,6 +360,7 @@ pub enum ErrorKind {
     UnsupportedReason(u8),
     UnsupportedProperty(u8),
     InvalidUTF8,
+    InvalidPacketIdentifier,
 }
 
 #[derive(Default, Debug)]
@@ -532,7 +542,7 @@ impl Decode for String {
 }
 
 impl Encode for Vec<u8> {
-    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         encode_array_field(self, dest)
     }
 }
@@ -689,6 +699,14 @@ pub fn encode_variable_byte_int(val: u32, dest: &mut BytesMut) -> Result<(), Mqt
     Ok(())
 }
 
+pub fn encode_opt_variable_byte_int(val: Option<u32>, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    if let Some(v) = val {
+        encode_variable_byte_int(v, dest)
+    } else {
+        Ok(())
+    }
+}
+
 pub fn encode_opt_variable_byte_int_ref(
     val: &Option<u32>,
     dest: &mut BytesMut,
@@ -735,6 +753,16 @@ pub fn codec_size_opt_vec_u8_raw(src: &Option<Vec<u8>>) -> u32 {
 }
 
 pub fn encode_opt_vec_u8_raw(
+    src: Option<Vec<u8>>,
+    dest: &mut BytesMut,
+) -> Result<(), MqttCodecError> {
+    if let Some(vec) = src {
+        dest.put_slice(&vec);
+    }
+    Ok(())
+}
+
+pub fn encode_opt_vec_u8_raw_ref(
     src: &Option<Vec<u8>>,
     dest: &mut BytesMut,
 ) -> Result<(), MqttCodecError> {

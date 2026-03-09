@@ -48,7 +48,7 @@ impl codec::CodecSize for PubResp {
 }
 
 impl codec::Encode for PubResp {
-    fn encode(&mut self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
+    fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
         self.fixed_header.encode(dest)?;
         if self.reason.unwrap_or_default() == codec::Reason::Success && self.property_size() == 0 {
             // reason code and remaining packet is optional in this case

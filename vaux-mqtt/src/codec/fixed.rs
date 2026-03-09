@@ -78,7 +78,7 @@ impl FixedHeader {
 }
 
 impl Encode for FixedHeader {
-    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         let first_byte = (self.packet_type as u8) | (self.flags & 0x0f);
         dest.put_u8(first_byte);
         Ok(())

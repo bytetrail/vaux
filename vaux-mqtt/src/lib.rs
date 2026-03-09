@@ -6,6 +6,7 @@ pub mod property;
 pub mod publish;
 pub mod pubresp;
 pub mod subscribe;
+pub mod unsubscribe;
 pub mod test;
 pub mod will;
 
@@ -20,6 +21,7 @@ pub use {
     pubresp::{PubAck, PubComp, PubRec, PubRel},
     subscribe::{Subscribe, SubscriptionFilter},
     will::{WillHeader, WillMessage},
+    codec::fixed::{FixedHeader},
 };
 
 pub enum MqttVersion {

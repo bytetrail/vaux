@@ -100,6 +100,7 @@ pub(crate) fn encode_for_vec(
     property_type: Option<proc_macro2::TokenStream>,
 ) -> proc_macro2::TokenStream {
     let field = field_name.as_ref().unwrap();
+    let is_property = property_type.is_some();
     let prop_ident_encode = if let Some(prop_ident) = property_type {
          quote! {
             // Encoding logic for String property            
@@ -133,13 +134,22 @@ pub(crate) fn encode_for_vec(
                                 item.encode(dest)?;
                             }}
                     } else {
-                        quote! {
-                        // Encoding logic for Vec<ComplexType> property
-                        for item in self.#field.iter_mut() {
-                            #prop_ident_encode
-                            item.encode(dest)?;
+                        if is_property {
+                            quote! {
+                            // Encoding logic for Vec<ComplexType> property
+                            for item in self.#field.iter() {
+                                #prop_ident_encode
+                                item.encode(dest)?;
+                            }}
+                        } else {
+                            quote! {
+                                // Encoding logic for Vec<ComplexType> property
+                                for item in self.#field.iter() {
+                                    item.encode(dest)?;
+                                }
+                            }
                         }
-                    } } ,
+                    }  ,
                 }
             }
             _ => {
@@ -189,7 +199,7 @@ pub(crate) fn encode_for_option(
                     else {
                         if property_type.is_some() {
                             return quote! {
-                                if let Some(#field_name) = self.#field_name.as_mut() {
+                                if let Some(#field_name) = self.#field_name.as_ref() {
                                     // Encoding logic for complex property
                                     dest.put_u8(#property_type as u8);
                                     #field_name.encode(dest)?;
@@ -197,7 +207,7 @@ pub(crate) fn encode_for_option(
                             };
                         } else {
                             return quote! {
-                                if let Some(#field_name) = self.#field_name.as_mut() {
+                                if let Some(#field_name) = self.#field_name.as_ref() {
                                     // Encoding logic for complex property
                                     #field_name.encode(dest)?;
                                 }
@@ -305,20 +315,19 @@ fn encode_for_encode_with(
                         if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
                             if let syn::Lit::Str(lit_str) = &lit_expr.lit {
                                 let path: syn::Path = lit_str.parse().unwrap();
-                                // if optional_field {
-                                //     return Some(quote! {
-                                //         if let Some(f) = self.#field_name.as_ref() {
-                                //             #prop_ident_encode
-                                //             #path(f, dest)?;
-                                //         }
-                                //     });
-                                // } else {
+                                if optional_field {
+                                    return Some(quote! {
+                                        if let Some(f) = self.#field_name.as_ref() {
+                                            #prop_ident_encode
+                                            #path(&self.#field_name, dest)?;
+                                        }
+                                    });
+                                } else {
                                     return Some(quote! {
                                         #prop_ident_encode
                                         #path(&self.#field_name, dest)?;    
                                     });
-
-//                                }
+                                }
                             }
                         }
                     }
@@ -399,7 +408,7 @@ mod test {
         let encode_tokens = encode_for_vec(&field_name, &type_path, false, Some(quote! { TestProperty::PropertyFive }));
         let expected = quote! {
             // Encoding logic for Vec<ComplexType> property
-            for item in self.data.iter_mut() {
+            for item in self.data.iter() {
                 // Encoding logic for String property            
                 dest.put_u8(TestProperty::PropertyFive as u8);
                 item.encode(dest)?;
@@ -410,7 +419,7 @@ mod test {
         let encode_tokens = encode_for_vec(&field_name, &type_path, false, None);
         let expected = quote! {
             // Encoding logic for Vec<ComplexType> property
-            for item in self.data.iter_mut() {
+            for item in self.data.iter() {
                 item.encode(dest)?;
             }
         };

@@ -23,7 +23,7 @@ impl TryFrom<u8> for PayloadFormat {
 }
 
 impl codec::Encode for PayloadFormat {
-    fn encode(&mut self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
         dest.put_u8(*self as u8);
         Ok(())
     }
@@ -73,7 +73,7 @@ pub struct Publish {
     pub user_properties: UserProperty,
     #[codec(
         payload_type = "remaining",
-        encode_with = "codec::encode_opt_vec_u8_raw",
+        encode_with = "codec::encode_opt_vec_u8_raw_ref",
         decode_with = "codec::decode_opt_vec_u8_raw",
         size_with = "codec::codec_size_opt_vec_u8_raw"
     )]

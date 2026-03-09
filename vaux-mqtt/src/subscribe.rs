@@ -1,4 +1,4 @@
-use crate::codec::{MAX_VARIABLE_BYTE_INT, MIN_VARIABLE_BYTE_INT};
+use crate::codec::{ErrorKind, MAX_VARIABLE_BYTE_INT, MIN_VARIABLE_BYTE_INT};
 use crate::{codec, MqttCodecError, PropertyType};
 use crate::{property::UserProperty, MqttError, MqttVersion, QoSLevel};
 use bytes::{Buf, BufMut};
@@ -69,11 +69,26 @@ pub fn decode_suback_reason_vec(
 }
 
 impl SubAck {
-    fn new_with_packet_id(packet_id: u16) -> Self {
-        Self {
+    pub fn new_with_packet_id(packet_id: u16) -> Result<Self, MqttCodecError> {
+        if packet_id == 0 {
+            return Err(MqttCodecError::new_with_kind("2.2.1 Packet identified must not be 0", ErrorKind::InvalidPacketIdentifier));    
+        }
+        Ok(Self {
             packet_id,
             ..Default::default()
+        })  
+    }
+
+    pub fn packet_id(&self) -> u16 {
+        self.packet_id
+    }
+
+    pub fn set_packet_id(&mut self, packet_id: u16) -> Result<(), MqttCodecError> {
+        if packet_id == 0 {
+            return Err(MqttCodecError::new_with_kind("2.2.1 Packet identified must not be 0", ErrorKind::InvalidPacketIdentifier));    
         }
+        self.packet_id = packet_id;
+        Ok(())
     }
 }
 
@@ -103,6 +118,11 @@ impl SubscriptionFilter {
             .unwrap_or(QoSLevel::AtMostOnce)
     }
 
+    pub fn with_qos(mut self, qos: QoSLevel) -> Self {
+        self.set_qos(qos);
+        self
+    }
+
     pub fn set_qos(&mut self, qos: QoSLevel) {
         self.options = (self.options & !0b0000_0011) | (qos as u8 & 0b0000_0011);
     }
@@ -129,7 +149,7 @@ impl SubscriptionFilter {
 #[packet(packet_type = "codec::PacketType::Subscribe")]
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Subscribe {
-    packet_id: u16,
+    pub packet_id: u16,
     #[codec(property_type = "PropertyType::SubscriptionIdentifier")]
     #[codec(
         size_with = "codec::codec_size_opt_variable_byte_int_ref",

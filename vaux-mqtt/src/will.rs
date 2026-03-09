@@ -56,13 +56,49 @@ impl From<WillMessage> for Connect {
 }
 
 impl WillMessage {
-    pub fn new(topic: String, payload: Vec<u8>, qos: QoSLevel, retain: bool) -> Self {
+    pub fn new(topic: String, payload: &[u8], qos: QoSLevel, retain: bool) -> Self {
         WillMessage {
             header: WillHeader::default(),
             topic,
-            payload,
+            payload: payload.to_vec(),
             qos,
             retain,
         }
     }
+
+    pub fn with_delay(mut self, delay: u32) -> Self {
+        self.header.will_delay = Some(delay);
+        self
+    }
+
+    pub fn with_payload_format(mut self, format: PayloadFormat) -> Self {
+        self.header.payload_format = Some(format);
+        self
+    }
+
+    pub fn with_message_expiry(mut self, expiry: u32) -> Self {
+        self.header.message_expiry = Some(expiry);
+        self
+    }
+
+    pub fn with_content_type(mut self, content_type: String) -> Self {
+        self.header.content_type = Some(content_type);
+        self
+    }
+
+    pub fn with_response_topic(mut self, response_topic: String) -> Self {
+        self.header.response_topic = Some(response_topic);
+        self
+    }
+
+    pub fn with_correlation_data(mut self, correlation_data: Vec<u8>) -> Self {
+        self.header.correlation_data = correlation_data;
+        self
+    }
+
+    pub fn with_user_properties(mut self, user_properties: UserProperty) -> Self {
+        self.header.user_properties = user_properties;
+        self
+    }
+
 }
