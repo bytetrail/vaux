@@ -17,9 +17,8 @@ pub struct UnsubAck {
     pub reason: String,
     #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
-    #[codec(payload_type = "field")]
-    pub reason_code: Vec<Reason>,
-    
+    #[codec(payload_type = "remaining")]
+    pub reason_code: Vec<Reason>,   
 }
 
 
@@ -29,7 +28,7 @@ pub struct Unsubscribe {
     pub packet_id: u16,
     #[codec(property_type = "PropertyType::UserProperty")]
     pub props: UserProperty,
-    #[codec(payload_type = "field")]
+    #[codec(payload_type = "remaining")]
     pub topics: Vec<String>,
 }
 

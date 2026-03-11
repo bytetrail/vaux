@@ -42,7 +42,7 @@ impl codec::CodecSize for PubResp {
         if let Some(reason_desc) = &self.reason_desc {
             size += 3 + reason_desc.len() as u32; // property identifier + length + string bytes
         }
-        size += self.user_properties.codec_size();
+        size += self.user_properties.property_size();
         size
     }
 }
@@ -71,7 +71,7 @@ impl codec::Encode for PubResp {
 }
 
 impl Decode for PubResp {
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<usize, MqttCodecError> {
         if src.remaining() < 2 {
             return Err(MqttCodecError::new_with_kind(
                 "Insufficient data",

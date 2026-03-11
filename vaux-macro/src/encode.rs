@@ -1,7 +1,138 @@
+use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Meta, Token, punctuated::Punctuated};
-use crate::{CODEC_ATTR, CODEC_ATTR_ENCODE_WITH_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, 
-    util::{attribute_with_name_value, compile_error2, has_attribute_with_name_value, is_primitive_type, payload_type, property_type, skip_field} };
+use syn::{ItemStruct, Meta, Token, parse_macro_input, punctuated::Punctuated};
+use crate::{CODEC_ATTR, CODEC_ATTR_ENCODE_WITH_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, get_skip_if_path, is_payload_field, is_property_field, struct_has_attribute_with_name_value, util::{attribute_with_name_value, compile_error, compile_error2, has_attribute_with_name_value, is_primitive_type, payload_type, property_type, skip_field} };
+
+
+
+pub(crate) fn encode_internal(input: TokenStream, as_packet: bool) -> TokenStream {
+    let input = parse_macro_input!(input as ItemStruct);
+    let struct_name = &input.ident;
+    // ensure that the struct does not have tuple fields
+    let fields = match &input.fields {
+        syn::Fields::Named(fields_named) => Some(fields_named),
+        syn::Fields::Unnamed(_) => {
+            return compile_error("Encode does not support tuple structs");
+        }
+        syn::Fields::Unit => {
+            // return an empty token stream for unit structs
+            None
+        }
+    };
+    // check if any field has the property attribute
+    let has_properties = if let Some(fields) = fields {
+        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
+    } else {
+        false
+    };
+    let has_payload = if let Some(fields) = fields {
+        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG)
+    } else {
+        false
+    };
+    // encode the non-property fields first, then the property fields if any
+    let mut header_fields = if let Some(fields) = fields {
+        fields
+            .named
+        .iter()
+        .filter_map(|f| {
+            if !(is_property_field(&f.attrs).unwrap_or(false)
+                || is_payload_field(&f.attrs).unwrap_or(false))
+            {
+                if let Some(skip_path) = get_skip_if_path(&f.attrs) {
+                    let field_name = f.ident.as_ref().unwrap();
+                    let field_encode = encode_field(f);
+                    Some(quote! {
+                        if !#skip_path(&self.#field_name) {
+                            #field_encode
+                        }
+                    })
+                } else {
+                    Some(encode_field(f))
+                }
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+
+    let property_fields = if has_properties {
+        let mut encoded = Vec::new();
+        // encode the property length
+        let property_length_encoding = quote! {
+            codec::encode_variable_byte_int(self.property_size(), dest)?;
+        };
+        encoded.push(property_length_encoding);
+        fields.as_ref().unwrap().named.iter().for_each(|f| {
+            if is_property_field(&f.attrs).unwrap_or(false) {
+                let inner_expr = encode_field(f);
+                if let Some(skip_path) = get_skip_if_path(&f.attrs) {
+                    let field_name = f.ident.as_ref().unwrap();
+                    encoded.push(quote! {
+                        if !#skip_path(&self.#field_name) {
+                            #inner_expr
+                        }
+                    })
+                } else {
+                    encoded.push(inner_expr);
+                }
+            }
+        });
+        encoded
+     } else {
+        Vec::new()  
+    };
+
+    let payload_fields = if has_payload {
+        fields.as_ref().unwrap().named.iter().filter_map(|f| {
+            if is_payload_field(&f.attrs).unwrap_or(false) {
+                let inner_expr = encode_field(f);
+                if let Some(skip_path) = get_skip_if_path(&f.attrs) {
+                    let field_name = f.ident.as_ref().unwrap();
+                    Some(quote! {
+                        if !#skip_path(&self.#field_name) {
+                            #inner_expr
+                        }
+                    })
+                } else {
+                    Some(inner_expr)
+                }
+            } else {
+                None
+            }
+        }).collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+
+    let packet_encode = if as_packet {
+        quote! {
+            use codec::{CodecSize, PropertyCodecSize};
+            self.fixed_header.encode(dest)?;
+            codec::encode_variable_byte_int(self.codec_size(), dest)?;
+        }
+    } else {
+        quote! {}
+    };
+
+    let encode_impl = quote! {
+        impl codec::Encode for #struct_name {
+            fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
+                use bytes::{BufMut, BytesMut};
+                #packet_encode
+                #(#header_fields)*
+                #(#property_fields)*
+                #(#payload_fields)*
+                Ok(())
+            }
+        }
+    };
+
+    TokenStream::from(encode_impl)
+}
 
 /// Generate encode implementation for struct fields. The struct fields are encoded in
 /// the order they are defined with the exception of property length which does not

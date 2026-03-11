@@ -114,7 +114,7 @@ impl PacketStream {
                                 }
                                 return Ok(Some((packet, Some(packet_bytes.freeze()))));
                             } else {
-                                if decode_len < bytes_read as u32 {
+                                if decode_len < bytes_read  {
                                     self.read_buffer
                                         .copy_within(decode_len as usize..bytes_read, 0);
                                     // adjust offset to end of decoded bytes
@@ -175,13 +175,23 @@ impl PacketStream {
 
     pub async fn write(&mut self, packet: &mut Packet) -> Result<(), Error> {
         let mut dest = BytesMut::default();
+        // print out the packet being encoded for debugging
+        println!("Encoding packet: {:?}", packet);
+        
         let result = packet.encode(&mut dest);
+        for b in &dest {
+            print!("{:02x} ", b);
+        }
+        println!();
         if let Err(e) = result {
+            println!("Error encoding packet {:?}: {}", packet, e);
             return Err(Error::Codec(e));
         }
         if let Err(e) = self.stream.write_all(&dest).await {
+            println!("Error writing packet {:?} to stream: {}", packet, e);
             return Err(Error::Io(e));
         }
+        println!("Packet {:?} encoded and sent successfully, size: {}", packet, dest.len());
         Ok(())
     }
 

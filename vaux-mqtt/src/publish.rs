@@ -30,7 +30,7 @@ impl codec::Encode for PayloadFormat {
 }
 
 impl codec::Decode for PayloadFormat {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
         *self = PayloadFormat::try_from(src.get_u8())?;
         Ok(1)
     }
@@ -42,15 +42,21 @@ impl codec::CodecSize for PayloadFormat {
     }
 }
 
+impl codec::PropertyCodecSize for PayloadFormat {
+    fn property_size(&self) -> u32 {
+        2
+    }
+}
+
 #[packet(packet_type = "codec::PacketType::Publish")]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Publish {
     pub topic_name: String,
     packet_id: Option<u16>,
-    #[codec(property_type = "PropertyType::PayloadFormat")]
-    pub payload_format: Option<PayloadFormat>,
     #[codec(property_type = "PropertyType::MessageExpiry")]
     pub message_expiry: Option<u32>,
+    #[codec(property_type = "PropertyType::PayloadFormat")]
+    pub payload_format: Option<PayloadFormat>,
     #[codec(property_type = "PropertyType::TopicAlias")]
     pub topic_alias: Option<u16>,
     #[codec(property_type = "PropertyType::ResponseTopic")]
@@ -72,10 +78,10 @@ pub struct Publish {
     #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
     #[codec(
-        payload_type = "remaining",
-        encode_with = "codec::encode_opt_vec_u8_raw_ref",
-        decode_with = "codec::decode_opt_vec_u8_raw",
-        size_with = "codec::codec_size_opt_vec_u8_raw"
+         payload_type = "remaining",
+         decode_with = "codec::decode_opt_vec_u8_raw",
+         encode_with = "codec::encode_opt_vec_u8_raw_ref",
+         size_with = "codec::codec_size_opt_vec_u8_raw"
     )]
     pub payload: Option<Vec<u8>>,
 }

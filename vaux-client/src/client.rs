@@ -319,7 +319,11 @@ impl MqttClient {
         })
         .await
         {
-            Ok(_) => handle,
+            Ok(_) => 
+            {
+                println!("client connected successfully within max wait time");
+                handle
+            }
             Err(start_err) => {
                 // if the client is connected then stop the client
                 if self.connected().await {

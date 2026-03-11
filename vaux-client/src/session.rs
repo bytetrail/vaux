@@ -362,9 +362,11 @@ impl ClientSession {
         let mut packet_to_consumer = true;
         match &packet {
             Packet::PingResponse(_pingresp) => {
+                println!("ping response received");
                 packet_to_consumer = self.state.pingresp;
             }
             Packet::Disconnect(d) => {
+                println!("disconnect received: {d:?}");
                 // TODO handle disconnect - verify shutdown behavior
                 let _ = self.packet_stream.shutdown().await;
                 //self.pending_qos1.append(&mut self.pending_publish);

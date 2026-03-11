@@ -1,10 +1,7 @@
 use crate::{
-    skip_field,
-    util::{
-        attribute_with_name_value, compile_error, compile_error2, has_attribute_with_name_value,
-        is_primitive_type, property_type, struct_has_attribute_with_name_value,
-    },
-    CODEC_ATTR, CODEC_ATTR_DECODE_WITH_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG,
+    CODEC_ATTR, CODEC_ATTR_CODEC_MIN_SIZE_ARG, CODEC_ATTR_DECODE_WITH_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PAYLOAD_TYPE_FIELD, CODEC_ATTR_PAYLOAD_TYPE_REMAINING, CODEC_ATTR_PROPERTY_TYPE_ARG, skip_field, util::{
+        attribute_with_name_value, compile_error, compile_error2, has_attribute_with_name_value, is_primitive_type, min_decode_size, payload_type, property_type, struct_has_attribute_with_name_value
+    }
 };
 use proc_macro::TokenStream;
 use quote::quote;
@@ -13,6 +10,9 @@ use syn::{FieldsNamed, Meta, Token, parse_macro_input, punctuated::Punctuated};
 pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as syn::ItemStruct);
     let struct_name = &input.ident;
+    // get the struct attributes to check struct level attributes like min_decode_remaining
+    let struct_attrs = &input.attrs;
+    let min_decode_size = min_decode_size(struct_attrs);
     // ensure that the struct does not have tuple fields
     let fields = match &input.fields {
         syn::Fields::Named(fields_named) => Some(fields_named),
@@ -27,6 +27,12 @@ pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
     // check if any field has the property attribute
     let has_properties = if let Some(fields) = fields {
         struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG) }
+    else {
+        false
+    };
+
+    let has_payload = if let Some(fields) = fields {
+        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG) }
     else {
         false
     };
@@ -72,8 +78,9 @@ pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
     let decode_properties = if has_properties {
         quote! {
             let (property_length, var_bytes_read) = codec::decode_variable_byte_int(src)?;
+            let property_length = property_length as usize;
             bytes_read += var_bytes_read;
-            let mut property_bytes_read = 0;
+            let mut property_bytes_read = 0_usize;
             while property_bytes_read < property_length {
                 let property_type = src.get_u8().try_into()?;
                 property_bytes_read += 1;
@@ -93,13 +100,102 @@ pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
         quote! {}
     };
 
+    let decode_field_payload = if has_payload {
+        // decode any fields with the payload_type argument  set to "field" after the properties
+        if let Some(fields) = fields {
+            fields
+                .named
+                .iter()
+                .filter_map(|f| {
+                        // get the value of the payload_type argument
+                        if let Some(payload_type) = payload_type(&f.attrs) {
+                            if payload_type == CODEC_ATTR_PAYLOAD_TYPE_FIELD {
+                                Some(decode_field(f))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                .collect::<Vec<_>>()    
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    let decode_remaining_payload = if has_payload {
+        if let Some(fields) = fields {
+            fields
+                .named
+                .iter()
+                .filter_map(|f| {
+                        // get the value of the payload_type argument
+                        if let Some(payload_type) = payload_type(&f.attrs) {
+                            if payload_type == CODEC_ATTR_PAYLOAD_TYPE_REMAINING {
+                                Some(decode_field(f))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                .collect::<Vec<_>>()    
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
+
+    if decode_remaining_payload.len() > 1 {
+        return compile_error("Only one field can be marked with payload_type = \"remaining\"");
+    }
+
+    let min_size_check = if let Some(min_size)= min_decode_size {
+        quote! {
+            let required_remaining = if bytes_read < #min_size {
+                #min_size - bytes_read
+            } else {
+                0
+            };
+            if src.remaining() < required_remaining {
+                return Err(codec::MqttCodecError::new_with_kind(
+                    format!("Insufficient data for decoding {}: expected at least {} bytes, got {}", stringify!(#struct_name), #min_size, src.remaining()).as_str(),
+                    codec::ErrorKind::InsufficientData(required_remaining , src.remaining() as usize),
+                ));
+            } else if src.remaining() == 0 && bytes_read == #min_size {
+                return Ok(bytes_read);
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    let min_decode_len = if let Some(min_size) = min_decode_size {
+        quote! { 
+            let mut min_decode_len = #min_size;
+        }
+    } else {
+        quote! {  }
+    };
+
     let decode_impl = quote! {
         impl codec::Decode for #struct_name {
-            fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+            fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<usize, MqttCodecError> {
                 use bytes::{BufMut, Buf, BytesMut};
-                let mut bytes_read = 0;
+                let mut bytes_read = 0_usize;
+                #min_decode_len
+                #min_size_check
                 #(#header_field_decoded)*
+                #min_size_check
                 #decode_properties
+                #(#decode_field_payload)*
+                println!("Finished decoding payload fields");
+                #(#decode_remaining_payload)*
                 Ok(bytes_read)
             }
         }
@@ -119,30 +215,6 @@ pub(crate) fn decode_field(field: &syn::Field) -> proc_macro2::TokenStream {
             .unwrap();
     let decode_with =
         attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_DECODE_WITH_ARG).unwrap();
-    let payload_type_attr =
-        attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG).unwrap();
-    let _payload_type = if let Some(payload_attr) = payload_type_attr {
-        match payload_attr.meta {
-            syn::Meta::NameValue(ref nv) => match nv.value {
-                syn::Expr::Lit(ref expr_lit) => match expr_lit.lit {
-                    syn::Lit::Str(ref lit_str) => Some(&lit_str.value().clone()),
-                    _ => {
-                        return compile_error2(
-                            "payload_type attribute value must be a string literal",
-                        );
-                    }
-                },
-                _ => {
-                    return compile_error2("payload_type attribute value must be a string literal");
-                }
-            },
-            _ => {
-                return compile_error2("payload_type attribute must be a name-value pair");
-            }
-        }
-    } else {
-        None
-    };
     let property_type: Option<syn::Path> = property_type(&field.attrs);
     if property_type.is_none() && is_property {
         return compile_error2("Property attribute requires a property_type argument");
@@ -186,13 +258,11 @@ pub(crate) fn decode_field(field: &syn::Field) -> proc_macro2::TokenStream {
                 decode_for_decode_with(
                     &field_name,
                     &decode_with.unwrap(),
-                    
                     &property_type,
                 )
             } else {
                 match segment.to_string().as_str() {
                     "String" => decode_for_string(field_name, optional_field, &property_type),
-                    // "Option" => decode_for_option(&field_name, &type_path, &property_type),
                     "Vec" => {
                         decode_for_vec(&field_name, &type_path, optional_field, &property_type)
                     }
@@ -363,13 +433,15 @@ fn decode_for_vec(
                     "u8" => {
                         if optional_field {
                             quote! {
-                                let (value, var_bytes_read) = codec::decode_array_field(src)?;
-                                bytes_read += var_bytes_read;
+                                let mut value = Vec::new();
+                                let var_bytes_read = value.decode(src)?;
+                                bytes_read += var_bytes_read;  
                                 self.#field_name = Some(value);
                             }
                         } else {
                             quote! {
-                                let (value, var_bytes_read) = codec::decode_array_field(src)?;
+                                let mut value = Vec::new();
+                                let var_bytes_read = value.decode(src)?;
                                 bytes_read += var_bytes_read;
                                 self.#field_name = value;
                             }
@@ -379,12 +451,39 @@ fn decode_for_vec(
                     | "bool" => compile_error2(
                         "Decode derive does not support Vec of primitive types except Vec<u8>",
                     ),
-                    _type_name => decode_for_type(
-                        field_name,
-                        &syn::Type::Path(vec_inner_type_path.clone()),
-                        optional_field,
-                        property_type,
-                    ),
+                    "String" => {
+                        if optional_field {
+                            quote! {
+                                let mut value = Vec::new();
+                                while src.has_remaining() {
+                                    let mut item = String::new();
+                                    bytes_read += item.decode(src)?;
+                                    value.push(item);
+                                }
+                                self.#field_name = Some(value);
+                            }
+                        } else {
+                            quote! {
+                                let mut value = Vec::new();
+                                while src.has_remaining() {
+                                    let mut item = String::new();
+                                    bytes_read += item.decode(src)?;
+                                    value.push(item);
+                                }
+                                self.#field_name = value;
+                            }
+                        }
+                    }
+                    _type_name =>                     
+                    quote ! {
+                        let mut value = Vec::new();
+                        while src.has_remaining() {
+                            let mut item = #vec_inner_type_path::default();
+                            bytes_read += item.decode(src)?;
+                            value.push(item);
+                        }
+                        self.#field_name = value;
+                    }
                 }
             }
             _ => {
@@ -444,6 +543,7 @@ fn decode_for_decode_with(
         quote! {
             let  (value, decode_bytes_read) = #decode_with(src)?;
             property_bytes_read += decode_bytes_read;
+            let googly = 2;
             self.#field_name = value;
         }
         // }
@@ -458,6 +558,7 @@ fn decode_for_decode_with(
         quote! {
             let (value, decode_bytes_read) = #decode_with(src)?;
             bytes_read += decode_bytes_read;
+            let googly = 1;
             self.#field_name = value;
         }
         //        }

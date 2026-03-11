@@ -3,8 +3,7 @@ use quote::quote;
 use syn::{punctuated::Punctuated, Meta, Token};
 
 use crate::{
-    CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, CODEC_ATTR_SKIP_ARG,
-    CODEC_ATTR_SKIP_IF_ARG, PACKET_ATTR_PACKET_TYPE_ARG,
+    CODEC_ATTR, CODEC_ATTR_CODEC_MIN_SIZE_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, CODEC_ATTR_SKIP_ARG, CODEC_ATTR_SKIP_IF_ARG, PACKET_ATTR_PACKET_TYPE_ARG
 };
 
 /// Generates a compile-time error with the given message.
@@ -48,6 +47,35 @@ pub(crate) fn payload_type(attrs: &[syn::Attribute]) -> Option<String> {
                         if let syn::Expr::Lit(lit_str) = &nv_pair.value {
                             if let syn::Lit::Str(lit_str) = &lit_str.lit {
                                 Some(lit_str.value())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        }
+    })
+}
+
+pub(crate) fn min_decode_size(attrs: &[syn::Attribute]) -> Option<usize> {
+    attrs.iter().find_map(|attr| {
+        if attr.path().is_ident(CODEC_ATTR) {
+            let nested = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated);
+            nested.unwrap().iter().find_map(|meta| {
+                if meta.path().is_ident(CODEC_ATTR_CODEC_MIN_SIZE_ARG) {
+                    if let Meta::NameValue(nv_pair) = meta {
+                        if let syn::Expr::Lit(lit_int) = &nv_pair.value {
+                            if let syn::Lit::Int(lit_int) = &lit_int.lit {
+                                Some(lit_int.base10_parse::<usize>().unwrap())
                             } else {
                                 None
                             }
@@ -275,6 +303,8 @@ pub(crate) fn property_type(attrs: &[syn::Attribute]) -> Option<syn::Path> {
         }
     })
 }
+
+
 
 /// Filters out attributes whose path matches any in the exclude list. We use this
 /// to remove our custom attributes before passing the struct to other macros.

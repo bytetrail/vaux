@@ -86,7 +86,7 @@ impl Encode for FixedHeader {
 }
 
 impl Decode for FixedHeader {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
         if src.remaining() < 2 {
             return Err(MqttCodecError::new_with_kind(
                 "Insufficient data",

@@ -100,6 +100,7 @@ async fn main() {
     let mut packet_in = client.take_packet_consumer().unwrap();
     let producer = client.packet_producer();
 
+    println!("starting publish example");
     publish(
         &mut client,
         producer,
@@ -140,6 +141,7 @@ async fn publish(
     let start = std::time::Instant::now();
     for i in 0..iterations {
         let mut publish = Publish::default();
+        println!("publish property size {}", publish.property_size());
         publish.set_payload_format(vaux_mqtt::PayloadFormat::Utf8);
         publish.message_expiry = Some(1000);
 
@@ -147,7 +149,9 @@ async fn publish(
         publish.topic_name = topic.clone();
         publish.payload = Some(Vec::from(message.as_bytes()));
         publish.set_qos(args.qos);
-        publish.set_packet_id(Some((i + 1) as u16)).unwrap();
+        if args.qos != QoSLevel::AtMostOnce  {
+            publish.set_packet_id(Some((i + 1) as u16)).unwrap();
+        }
 
         println!("publish property size {}", publish.property_size());
         println!("sending publish: {:?}", publish);

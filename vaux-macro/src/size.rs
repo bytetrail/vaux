@@ -18,8 +18,9 @@ pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
         syn::Type::Path(type_path) => {
             let segment = &type_path.path.segments.last().unwrap().ident;
             if codec_size_with {
-                match attribute_with_name_value(attrs, "codec", "size_with") {
-                    Ok(Some(attr)) => size_with_path(field_name, &attr, is_property),
+                let optional = matches!(segment.to_string().as_str(), "Option");
+                match attribute_with_name_value(attrs, "codec", "size_with") {                    
+                    Ok(Some(attr)) => size_with_path(field_name, &attr, is_property, optional),
                     Ok(None) | Err(_) => {
                         compile_error2("Invalid 'size_with' attribute for Size derive")
                     }
@@ -103,25 +104,29 @@ fn size_for_codec_size(
     is_property: bool,
     optional: bool,
 ) -> proc_macro2::TokenStream {
-    let prefix = if is_property {
-        quote! {
-            property_size +=
-        }
-    } else {
-        quote! {
-            total_size +=
-        }
-    };
-
-    if optional {
-        quote! {
-            if let Some(field) = &self.#field_name {
-                #prefix field.codec_size();
+    if is_property {
+        if optional {
+            quote! {
+                if let Some(field) = &self.#field_name {
+                    property_size += field.property_size();
+                }
             }
+        } else {
+             quote! {
+                property_size += self.#field_name.property_size();
+             }
         }
     } else {
-        quote! {
-            #prefix  self.#field_name.codec_size();
+        if optional {
+            quote! {
+                if let Some(field) = &self.#field_name {
+                    total_size += field.codec_size();
+                }
+            }
+        } else {
+            quote! {
+                total_size += self.#field_name.codec_size();
+            }
         }
     }
 }
@@ -336,6 +341,7 @@ fn size_with_path(
     field_name: &syn::Ident,
     attr: &syn::Attribute,
     property_field: bool,
+    optional: bool
 ) -> proc_macro2::TokenStream {
     let size_prefix = if property_field {
         quote! {
@@ -354,10 +360,18 @@ fn size_with_path(
                         if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
                             if let syn::Lit::Str(lit_str) = &lit_expr.lit {
                                 let path: syn::Path = lit_str.parse().unwrap();
-                                Some(quote! {
-                                    #size_prefix #path(&self.#field_name);
-                                })
-                                // }
+                                // if the field is optional, we need to check if it is Some before calling the size function
+                                if optional {
+                                    Some(quote! {
+                                        if let Some(_) = &self.#field_name {
+                                            #size_prefix #path(&self.#field_name);
+                                        }
+                                    })
+                                } else {
+                                     Some(quote! {
+                                        #size_prefix #path(&self.#field_name);
+                                    })
+                                }
                             } else {
                                 Some(compile_error2(
                                     "Expected string literal for 'size_with' attribute",
@@ -516,7 +530,7 @@ mod tests {
     fn test_size_with_path() {
         let field_name = syn::Ident::new("custom_field", proc_macro2::Span::call_site());
         let attr: syn::Attribute = syn::parse_quote!(#[codec(size_with = "custom_size_function")]);
-        let tokens = size_with_path(&field_name, &attr, false);
+        let tokens = size_with_path(&field_name, &attr, false, false);
         let expected = quote! {
             total_size += custom_size_function(&self.custom_field);
         };

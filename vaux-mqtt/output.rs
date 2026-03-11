@@ -1,5 +1,4 @@
 #![feature(prelude_import)]
-#[macro_use]
 extern crate std;
 #[prelude_import]
 use std::prelude::rust_2021::*;
@@ -58,7 +57,7 @@ pub mod codec {
             #[inline]
             #[doc(hidden)]
             #[coverage(off)]
-            fn assert_receiver_is_total_eq(&self) -> () {
+            fn assert_fields_are_eq(&self) {
                 let _: ::core::cmp::AssertParamIsEq<PacketType>;
                 let _: ::core::cmp::AssertParamIsEq<u8>;
             }
@@ -137,7 +136,7 @@ pub mod codec {
             }
         }
         impl Decode for FixedHeader {
-            fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+            fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
                 if src.remaining() < 2 {
                     return Err(
                         MqttCodecError::new_with_kind(
@@ -197,7 +196,6 @@ pub mod codec {
         }
     }
     pub use fixed::FixedHeader;
-    use vaux_macro::packet;
     use crate::{
         ConnAck, Disconnect, Subscribe, connect::Connect, publish::Publish,
         pubresp::{PubAck, PubComp, PubRec, PubRel},
@@ -219,7 +217,7 @@ pub mod codec {
         fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError>;
     }
     pub trait Decode {
-        fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError>;
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError>;
     }
     /// MQTT Control Packet Type
     /// #[repr(u8)]
@@ -290,10 +288,13 @@ pub mod codec {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {}
+        fn assert_fields_are_eq(&self) {}
     }
     #[automatically_derived]
     impl ::core::marker::Copy for PacketType {}
+    #[automatically_derived]
+    #[doc(hidden)]
+    unsafe impl ::core::clone::TrivialClone for PacketType {}
     #[automatically_derived]
     impl ::core::clone::Clone for PacketType {
         #[inline]
@@ -304,7 +305,7 @@ pub mod codec {
     #[automatically_derived]
     impl ::core::hash::Hash for PacketType {
         #[inline]
-        fn hash<__H: ::core::hash::Hasher>(&self, state: &mut __H) -> () {
+        fn hash<__H: ::core::hash::Hasher>(&self, state: &mut __H) {
             let __self_discr = ::core::intrinsics::discriminant_value(self);
             ::core::hash::Hash::hash(&__self_discr, state)
         }
@@ -460,7 +461,7 @@ pub mod codec {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {}
+        fn assert_fields_are_eq(&self) {}
     }
     #[automatically_derived]
     impl ::core::marker::StructuralPartialEq for Reason {}
@@ -475,6 +476,9 @@ pub mod codec {
     }
     #[automatically_derived]
     impl ::core::marker::Copy for Reason {}
+    #[automatically_derived]
+    #[doc(hidden)]
+    unsafe impl ::core::clone::TrivialClone for Reason {}
     #[automatically_derived]
     impl ::core::clone::Clone for Reason {
         #[inline]
@@ -565,10 +569,29 @@ pub mod codec {
         }
     }
     impl Decode for Reason {
-        fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
             let val = src.get_u8();
             *self = val.try_into()?;
             Ok(1)
+        }
+    }
+    pub fn codec_size_vec_reason(reason_codes: &Vec<Reason>) -> u32 {
+        reason_codes.len() as u32
+    }
+    impl Encode for Vec<Reason> {
+        fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+            self.iter().for_each(|reason| dest.put_u8(*reason as u8));
+            Ok(())
+        }
+    }
+    impl Decode for Vec<Reason> {
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
+            let len = src.remaining();
+            for _ in 0..len {
+                let reason = src.get_u8().try_into()?;
+                self.push(reason);
+            }
+            Ok(len)
         }
     }
     #[allow(clippy::enum_variant_names)]
@@ -621,11 +644,15 @@ pub mod codec {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {}
+        fn assert_fields_are_eq(&self) {}
     }
     #[automatically_derived]
     #[allow(clippy::enum_variant_names)]
     impl ::core::marker::Copy for QoSLevel {}
+    #[automatically_derived]
+    #[doc(hidden)]
+    #[allow(clippy::enum_variant_names)]
+    unsafe impl ::core::clone::TrivialClone for QoSLevel {}
     #[automatically_derived]
     #[allow(clippy::enum_variant_names)]
     impl ::core::clone::Clone for QoSLevel {
@@ -638,7 +665,7 @@ pub mod codec {
     #[allow(clippy::enum_variant_names)]
     impl ::core::hash::Hash for QoSLevel {
         #[inline]
-        fn hash<__H: ::core::hash::Hasher>(&self, state: &mut __H) -> () {
+        fn hash<__H: ::core::hash::Hasher>(&self, state: &mut __H) {
             let __self_discr = ::core::intrinsics::discriminant_value(self);
             ::core::hash::Hash::hash(&__self_discr, state)
         }
@@ -671,7 +698,7 @@ pub mod codec {
         }
     }
     impl Decode for QoSLevel {
-        fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
             let val = src.get_u8();
             *self = val.try_into()?;
             Ok(1)
@@ -874,7 +901,7 @@ pub mod codec {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<crate::PingReq>;
             let _: ::core::cmp::AssertParamIsEq<crate::PingResp>;
             let _: ::core::cmp::AssertParamIsEq<Box<Connect>>;
@@ -1085,7 +1112,7 @@ pub mod codec {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<usize>;
             let _: ::core::cmp::AssertParamIsEq<u8>;
         }
@@ -1172,7 +1199,9 @@ pub mod codec {
             }
         }
     }
-    pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecError> {
+    pub fn decode(
+        src: &mut BytesMut,
+    ) -> Result<Option<(Packet, usize)>, MqttCodecError> {
         let mut fixed_header = FixedHeader::default();
         let mut decode_len = fixed_header.decode(src)?;
         {
@@ -1184,7 +1213,16 @@ pub mod codec {
                 ),
             );
         };
-        for idx in 1..=3 {
+        for idx in 0..=3 {
+            {
+                ::std::io::_print(
+                    format_args!(
+                        "Checking byte at index {0} for variable byte int: {1:02x}\n",
+                        idx,
+                        src[idx],
+                    ),
+                );
+            };
             if src[idx] & 0x80 != 0x00 {
                 if src.remaining() < 1 {
                     return Err(
@@ -1277,6 +1315,9 @@ pub mod codec {
                 Ok(Some((Packet::PubRel(pubrel), decode_len)))
             }
             PacketType::Disconnect => {
+                {
+                    ::std::io::_print(format_args!("Decoding disconnect packet\n"));
+                };
                 let mut disconnect = Disconnect::default();
                 decode_len += disconnect.decode(src)?;
                 Ok(Some((Packet::Disconnect(disconnect), decode_len)))
@@ -1300,7 +1341,7 @@ pub mod codec {
         }
     }
     impl Decode for String {
-        fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
             if src.len() < 2 {
                 return Err(MqttCodecError::new("malformed Mqtt packet: string length"));
             }
@@ -1323,7 +1364,27 @@ pub mod codec {
                         ::alloc::fmt::format(format_args!("{0:?}", e))
                     }),
                 ))?;
-            Ok(len as u32 + 2)
+            Ok(len as usize + 2)
+        }
+    }
+    impl Encode for Vec<String> {
+        fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+            for s in self {
+                encode_string(s, dest)?;
+            }
+            Ok(())
+        }
+    }
+    impl Decode for Vec<String> {
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
+            let mut bytes_read = 0;
+            while src.remaining() > 0 {
+                let mut string = String::new();
+                let var_bytes_read = string.decode(src)?;
+                bytes_read += var_bytes_read;
+                self.push(string);
+            }
+            Ok(bytes_read)
         }
     }
     impl Encode for Vec<u8> {
@@ -1332,7 +1393,7 @@ pub mod codec {
         }
     }
     impl Decode for Vec<u8> {
-        fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
             if src.remaining() < 2 {
                 return Err(MqttCodecError::new("Insufficient data for binary length"));
             }
@@ -1349,11 +1410,11 @@ pub mod codec {
                         ErrorKind::InsufficientData(len, src.remaining()),
                     )
                 })?;
-            Ok(len as u32 + 2)
+            Ok(len + 2)
         }
     }
     impl Decode for bool {
-        fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
             *self = match src.get_u8() {
                 0 => Ok(false),
                 1 => Ok(true),
@@ -1373,19 +1434,19 @@ pub mod codec {
         }
     }
     impl Decode for u8 {
-        fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
             *self = src.get_u8();
             Ok(1)
         }
     }
     impl Decode for u16 {
-        fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
             *self = src.get_u16();
             Ok(2)
         }
     }
     impl Decode for u32 {
-        fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
             *self = src.get_u32();
             Ok(4)
         }
@@ -1399,7 +1460,7 @@ pub mod codec {
         dest.put(src.as_bytes());
         Ok(())
     }
-    pub fn decode_string(src: &mut BytesMut) -> Result<(String, u32), MqttCodecError> {
+    pub fn decode_string(src: &mut BytesMut) -> Result<(String, usize), MqttCodecError> {
         let mut string = String::new();
         let bytes_read = string.decode(src)?;
         Ok((string, bytes_read))
@@ -1418,7 +1479,7 @@ pub mod codec {
     }
     pub fn decode_array_field(
         src: &mut BytesMut,
-    ) -> Result<(Vec<u8>, u32), MqttCodecError> {
+    ) -> Result<(Vec<u8>, usize), MqttCodecError> {
         let mut data = Vec::new();
         let bytes_read = data.decode(src)?;
         Ok((data, bytes_read))
@@ -1443,13 +1504,13 @@ pub mod codec {
     }
     pub fn decode_opt_variable_byte_int(
         src: &mut BytesMut,
-    ) -> Result<(Option<u32>, u32), MqttCodecError> {
+    ) -> Result<(Option<u32>, usize), MqttCodecError> {
         let (val, bytes_read) = decode_variable_byte_int(src)?;
         Ok((Some(val), bytes_read))
     }
     pub fn decode_variable_byte_int(
         src: &mut BytesMut,
-    ) -> Result<(u32, u32), MqttCodecError> {
+    ) -> Result<(u32, usize), MqttCodecError> {
         let mut result = 0_u32;
         let mut shift = 0;
         let mut next_byte = src.get_u8();
@@ -1518,7 +1579,7 @@ pub mod codec {
     }
     pub fn decode_vec_u8_raw(
         src: &mut BytesMut,
-    ) -> Result<(Option<Vec<u8>>, u32), MqttCodecError> {
+    ) -> Result<(Option<Vec<u8>>, usize), MqttCodecError> {
         let len = src.remaining();
         let mut dest = Vec::with_capacity(len);
         dest.resize(len, 0);
@@ -1533,27 +1594,12 @@ pub mod codec {
                     ErrorKind::InsufficientData(len, src.remaining()),
                 )
             })?;
-        Ok((Some(dest), len as u32))
-    }
-    pub fn codec_size_opt_vec_u8_raw(src: &Option<Vec<u8>>) -> u32 {
-        match src {
-            Some(vec) => vec.len() as u32,
-            None => 0,
-        }
-    }
-    pub fn encode_opt_vec_u8_raw(
-        src: &Option<Vec<u8>>,
-        dest: &mut BytesMut,
-    ) -> Result<(), MqttCodecError> {
-        if let Some(vec) = src {
-            dest.put_slice(vec);
-        }
-        Ok(())
+        Ok((Some(dest), len))
     }
     pub fn decode_opt_vec_u8_raw(
         src: &mut BytesMut,
-        len: usize,
-    ) -> Result<(Option<Vec<u8>>, u32), MqttCodecError> {
+    ) -> Result<(Option<Vec<u8>>, usize), MqttCodecError> {
+        let len = src.remaining();
         let mut vec = Vec::new();
         vec.resize(len, 0);
         let dest_buf: &mut [u8] = &mut vec[0..len];
@@ -1567,7 +1613,31 @@ pub mod codec {
                     ErrorKind::InsufficientData(len, src.remaining()),
                 )
             })?;
-        Ok((Some(vec), len as u32))
+        Ok((Some(vec), len))
+    }
+    pub fn codec_size_opt_vec_u8_raw(src: &Option<Vec<u8>>) -> u32 {
+        match src {
+            Some(vec) => vec.len() as u32,
+            None => 0,
+        }
+    }
+    pub fn encode_opt_vec_u8_raw(
+        src: Option<Vec<u8>>,
+        dest: &mut BytesMut,
+    ) -> Result<(), MqttCodecError> {
+        if let Some(vec) = src {
+            dest.put_slice(&vec);
+        }
+        Ok(())
+    }
+    pub fn encode_opt_vec_u8_raw_ref(
+        src: &Option<Vec<u8>>,
+        dest: &mut BytesMut,
+    ) -> Result<(), MqttCodecError> {
+        if let Some(vec) = src {
+            dest.put_slice(vec);
+        }
+        Ok(())
     }
 }
 pub mod connack {
@@ -1761,7 +1831,7 @@ pub mod connack {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<codec::FixedHeader>;
             let _: ::core::cmp::AssertParamIsEq<u8>;
             let _: ::core::cmp::AssertParamIsEq<Reason>;
@@ -1830,7 +1900,7 @@ pub mod connack {
                 property_size += 1 + 2;
             }
             if let Some(field) = &self.maximum_qos {
-                property_size += field.codec_size();
+                property_size += 1 + field.codec_size();
             }
             if let Some(_) = &self.retain_available {
                 property_size += 1 + 1;
@@ -1852,7 +1922,7 @@ pub mod connack {
             if let Some(_) = &self.subscription_identifier_available {
                 property_size += 1 + 1;
             }
-            property_size += self.user_properties.codec_size();
+            property_size += 1 + self.user_properties.codec_size();
             if let Some(_) = &self.wildcard_subscription_available {
                 property_size += 1 + 1;
             }
@@ -1960,17 +2030,21 @@ pub mod connack {
         }
     }
     impl codec::Decode for ConnAck {
-        fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(
+            &mut self,
+            src: &mut bytes::BytesMut,
+        ) -> Result<usize, MqttCodecError> {
             use bytes::{BufMut, Buf, BytesMut};
-            let mut bytes_read = 0;
+            let mut bytes_read = 0_usize;
             self.ack_flags = src.get_u8();
             bytes_read += 1;
             bytes_read += self.reason.decode(src)?;
             let (property_length, var_bytes_read) = codec::decode_variable_byte_int(
                 src,
             )?;
+            let property_length = property_length as usize;
             bytes_read += var_bytes_read;
-            let mut property_bytes_read = 0;
+            let mut property_bytes_read = 0_usize;
             while property_bytes_read < property_length {
                 let property_type = src.get_u8().try_into()?;
                 property_bytes_read += 1;
@@ -2054,7 +2128,8 @@ pub mod connack {
                         self.auth_method = Some(value);
                     }
                     PropertyType::AuthData => {
-                        let (value, var_bytes_read) = codec::decode_array_field(src)?;
+                        let mut value = Vec::new();
+                        let var_bytes_read = value.decode(src)?;
                         bytes_read += var_bytes_read;
                         self.auth_data = value;
                     }
@@ -2077,6 +2152,9 @@ pub mod connack {
                 }
             }
             bytes_read += property_bytes_read;
+            {
+                ::std::io::_print(format_args!("Finished decoding payload fields\n"));
+            };
             Ok(bytes_read)
         }
     }
@@ -2291,7 +2369,7 @@ pub mod connect {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<codec::FixedHeader>;
             let _: ::core::cmp::AssertParamIsEq<String>;
             let _: ::core::cmp::AssertParamIsEq<u8>;
@@ -2403,7 +2481,7 @@ pub mod connect {
                     property_size += 1 + 2 + self.auth_data.len() as u32;
                 }
             }
-            property_size += self.user_properties.codec_size();
+            property_size += 1 + self.user_properties.codec_size();
             property_size
         }
     }
@@ -2471,9 +2549,12 @@ pub mod connect {
         }
     }
     impl codec::Decode for Connect {
-        fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(
+            &mut self,
+            src: &mut bytes::BytesMut,
+        ) -> Result<usize, MqttCodecError> {
             use bytes::{BufMut, Buf, BytesMut};
-            let mut bytes_read = 0;
+            let mut bytes_read = 0_usize;
             bytes_read += self.protocol_name.decode(src)?;
             self.protocol_version = src.get_u8();
             bytes_read += 1;
@@ -2484,8 +2565,9 @@ pub mod connect {
             let (property_length, var_bytes_read) = codec::decode_variable_byte_int(
                 src,
             )?;
+            let property_length = property_length as usize;
             bytes_read += var_bytes_read;
-            let mut property_bytes_read = 0;
+            let mut property_bytes_read = 0_usize;
             while property_bytes_read < property_length {
                 let property_type = src.get_u8().try_into()?;
                 property_bytes_read += 1;
@@ -2526,7 +2608,8 @@ pub mod connect {
                         self.auth_method = Some(value);
                     }
                     PropertyType::AuthData => {
-                        let (value, var_bytes_read) = codec::decode_array_field(src)?;
+                        let mut value = Vec::new();
+                        let var_bytes_read = value.decode(src)?;
                         bytes_read += var_bytes_read;
                         self.auth_data = value;
                     }
@@ -2552,6 +2635,25 @@ pub mod connect {
                 }
             }
             bytes_read += property_bytes_read;
+            bytes_read += self.client_id.decode(src)?;
+            let mut value = WillHeader::default();
+            bytes_read += value.decode(src)?;
+            self.will_properties = Some(value);
+            let mut value = Vec::new();
+            let var_bytes_read = value.decode(src)?;
+            bytes_read += var_bytes_read;
+            self.will_payload = value;
+            let mut value = String::default();
+            bytes_read += value.decode(src)?;
+            self.will_topic = Some(value);
+            bytes_read += self.username.decode(src)?;
+            let mut value = Vec::new();
+            let var_bytes_read = value.decode(src)?;
+            bytes_read += var_bytes_read;
+            self.password = value;
+            {
+                ::std::io::_print(format_args!("Finished decoding payload fields\n"));
+            };
             Ok(bytes_read)
         }
     }
@@ -2674,9 +2776,9 @@ pub mod connect {
 }
 pub mod disconnect {
     use crate::{codec, property::UserProperty, MqttCodecError, PropertyType, Reason};
-    use vaux_macro::packet;
+    use vaux_macro::{PropertyCodecSize, packet};
     pub struct Disconnect {
-        pub fixed_header: codec::FixedHeader,
+        fixed_header: codec::FixedHeader,
         pub reason: Reason,
         pub session_expiry_interval: Option<u32>,
         pub reason_string: Option<String>,
@@ -2696,20 +2798,6 @@ pub mod disconnect {
                 reason_string: ::core::clone::Clone::clone(&self.reason_string),
                 server_reference: ::core::clone::Clone::clone(&self.server_reference),
                 user_properties: ::core::clone::Clone::clone(&self.user_properties),
-            }
-        }
-    }
-    #[automatically_derived]
-    impl ::core::default::Default for Disconnect {
-        #[inline]
-        fn default() -> Disconnect {
-            Disconnect {
-                fixed_header: ::core::default::Default::default(),
-                reason: ::core::default::Default::default(),
-                session_expiry_interval: ::core::default::Default::default(),
-                reason_string: ::core::default::Default::default(),
-                server_reference: ::core::default::Default::default(),
-                user_properties: ::core::default::Default::default(),
             }
         }
     }
@@ -2759,7 +2847,7 @@ pub mod disconnect {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<codec::FixedHeader>;
             let _: ::core::cmp::AssertParamIsEq<Reason>;
             let _: ::core::cmp::AssertParamIsEq<Option<u32>>;
@@ -2768,25 +2856,31 @@ pub mod disconnect {
             let _: ::core::cmp::AssertParamIsEq<UserProperty>;
         }
     }
+    impl Default for Disconnect {
+        fn default() -> Self {
+            Self {
+                fixed_header: codec::FixedHeader::new(codec::PacketType::Disconnect),
+                reason: Reason::NormalDisconnect,
+                session_expiry_interval: None,
+                reason_string: None,
+                server_reference: None,
+                user_properties: UserProperty::default(),
+            }
+        }
+    }
+    impl Disconnect {
+        pub fn new(reason: Reason) -> Self {
+            Self {
+                fixed_header: codec::FixedHeader::new(codec::PacketType::Disconnect),
+                reason,
+                ..Default::default()
+            }
+        }
+    }
     impl Disconnect {
         pub fn new_with_fixed_header(
             fixed_header: codec::FixedHeader,
         ) -> Result<Self, codec::MqttCodecError> {
-            if fixed_header.packet_type != codec::PacketType::Disconnect {
-                return Err(
-                    MqttCodecError::new(
-                        ::alloc::__export::must_use({
-                                ::alloc::fmt::format(
-                                    format_args!(
-                                        "Unsuppprted PacketType for {0}",
-                                        "#struct_name",
-                                    ),
-                                )
-                            })
-                            .as_str(),
-                    ),
-                );
-            }
             Ok(Self {
                 fixed_header,
                 ..Default::default()
@@ -2846,15 +2940,76 @@ pub mod disconnect {
         }
     }
     impl codec::Decode for Disconnect {
-        fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(
+            &mut self,
+            src: &mut bytes::BytesMut,
+        ) -> Result<usize, MqttCodecError> {
             use bytes::{BufMut, Buf, BytesMut};
-            let mut bytes_read = 0;
+            let mut bytes_read = 0_usize;
+            let mut min_decode_len = 0usize;
+            let required_remaining = if bytes_read < 0usize {
+                0usize - bytes_read
+            } else {
+                0
+            };
+            if src.remaining() < required_remaining {
+                return Err(
+                    codec::MqttCodecError::new_with_kind(
+                        ::alloc::__export::must_use({
+                                ::alloc::fmt::format(
+                                    format_args!(
+                                        "Insufficient data for decoding {0}: expected at least {1} bytes, got {2}",
+                                        "Disconnect",
+                                        required_remaining,
+                                        src.remaining(),
+                                    ),
+                                )
+                            })
+                            .as_str(),
+                        codec::ErrorKind::InsufficientData(
+                            required_remaining,
+                            src.remaining() as usize,
+                        ),
+                    ),
+                );
+            } else if src.remaining() == 0 && bytes_read == 0usize {
+                return Ok(bytes_read);
+            }
             bytes_read += self.reason.decode(src)?;
+            let required_remaining = if bytes_read < 0usize {
+                0usize - bytes_read
+            } else {
+                0
+            };
+            if src.remaining() < required_remaining {
+                return Err(
+                    codec::MqttCodecError::new_with_kind(
+                        ::alloc::__export::must_use({
+                                ::alloc::fmt::format(
+                                    format_args!(
+                                        "Insufficient data for decoding {0}: expected at least {1} bytes, got {2}",
+                                        "Disconnect",
+                                        0usize,
+                                        src.remaining(),
+                                    ),
+                                )
+                            })
+                            .as_str(),
+                        codec::ErrorKind::InsufficientData(
+                            required_remaining,
+                            src.remaining() as usize,
+                        ),
+                    ),
+                );
+            } else if src.remaining() == 0 && bytes_read == 0usize {
+                return Ok(bytes_read);
+            }
             let (property_length, var_bytes_read) = codec::decode_variable_byte_int(
                 src,
             )?;
+            let property_length = property_length as usize;
             bytes_read += var_bytes_read;
-            let mut property_bytes_read = 0;
+            let mut property_bytes_read = 0_usize;
             while property_bytes_read < property_length {
                 let property_type = src.get_u8().try_into()?;
                 property_bytes_read += 1;
@@ -2896,15 +3051,8 @@ pub mod disconnect {
                 }
             }
             bytes_read += property_bytes_read;
+            bytes_read += property_bytes_read;
             Ok(bytes_read)
-        }
-    }
-    impl Disconnect {
-        pub fn new(reason: Reason) -> Self {
-            Self {
-                reason,
-                ..Default::default()
-            }
         }
     }
 }
@@ -2981,7 +3129,7 @@ pub mod property {
     #[automatically_derived]
     impl ::core::hash::Hash for PropertyType {
         #[inline]
-        fn hash<__H: ::core::hash::Hasher>(&self, state: &mut __H) -> () {
+        fn hash<__H: ::core::hash::Hasher>(&self, state: &mut __H) {
             let __self_discr = ::core::intrinsics::discriminant_value(self);
             ::core::hash::Hash::hash(&__self_discr, state)
         }
@@ -3027,6 +3175,9 @@ pub mod property {
     #[automatically_derived]
     impl ::core::marker::Copy for PropertyType {}
     #[automatically_derived]
+    #[doc(hidden)]
+    unsafe impl ::core::clone::TrivialClone for PropertyType {}
+    #[automatically_derived]
     impl ::core::clone::Clone for PropertyType {
         #[inline]
         fn clone(&self) -> PropertyType {
@@ -3049,7 +3200,7 @@ pub mod property {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {}
+        fn assert_fields_are_eq(&self) {}
     }
     impl Display for PropertyType {
         fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -3220,7 +3371,7 @@ pub mod property {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<HashMap<String, Vec<String>>>;
         }
     }
@@ -3251,7 +3402,7 @@ pub mod property {
     }
     impl codec::Decode for UserProperty {
         /// Decode a single user property key-value pair and add it to the map.
-        fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
             let (key_value, key_len) = codec::decode_string(src)?;
             let (value, len) = codec::decode_string(src)?;
             let bytes_read = 2 + key_len + 2 + len;
@@ -3319,6 +3470,9 @@ pub mod publish {
         }
     }
     #[automatically_derived]
+    #[doc(hidden)]
+    unsafe impl ::core::clone::TrivialClone for PayloadFormat {}
+    #[automatically_derived]
     impl ::core::clone::Clone for PayloadFormat {
         #[inline]
         fn clone(&self) -> PayloadFormat {
@@ -3343,12 +3497,12 @@ pub mod publish {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {}
+        fn assert_fields_are_eq(&self) {}
     }
     #[automatically_derived]
     impl ::core::hash::Hash for PayloadFormat {
         #[inline]
-        fn hash<__H: ::core::hash::Hasher>(&self, state: &mut __H) -> () {
+        fn hash<__H: ::core::hash::Hasher>(&self, state: &mut __H) {
             let __self_discr = ::core::intrinsics::discriminant_value(self);
             ::core::hash::Hash::hash(&__self_discr, state)
         }
@@ -3370,7 +3524,7 @@ pub mod publish {
         }
     }
     impl codec::Decode for PayloadFormat {
-        fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
             *self = PayloadFormat::try_from(src.get_u8())?;
             Ok(1)
         }
@@ -3384,8 +3538,8 @@ pub mod publish {
         pub fixed_header: codec::FixedHeader,
         pub topic_name: String,
         packet_id: Option<u16>,
-        pub payload_format: Option<PayloadFormat>,
         pub message_expiry: Option<u32>,
+        pub payload_format: Option<PayloadFormat>,
         pub topic_alias: Option<u16>,
         pub response_topic: Option<String>,
         pub correlation_data: Vec<u8>,
@@ -3402,8 +3556,8 @@ pub mod publish {
                 "fixed_header",
                 "topic_name",
                 "packet_id",
-                "payload_format",
                 "message_expiry",
+                "payload_format",
                 "topic_alias",
                 "response_topic",
                 "correlation_data",
@@ -3416,8 +3570,8 @@ pub mod publish {
                 &self.fixed_header,
                 &self.topic_name,
                 &self.packet_id,
-                &self.payload_format,
                 &self.message_expiry,
+                &self.payload_format,
                 &self.topic_alias,
                 &self.response_topic,
                 &self.correlation_data,
@@ -3442,8 +3596,8 @@ pub mod publish {
                 fixed_header: ::core::clone::Clone::clone(&self.fixed_header),
                 topic_name: ::core::clone::Clone::clone(&self.topic_name),
                 packet_id: ::core::clone::Clone::clone(&self.packet_id),
-                payload_format: ::core::clone::Clone::clone(&self.payload_format),
                 message_expiry: ::core::clone::Clone::clone(&self.message_expiry),
+                payload_format: ::core::clone::Clone::clone(&self.payload_format),
                 topic_alias: ::core::clone::Clone::clone(&self.topic_alias),
                 response_topic: ::core::clone::Clone::clone(&self.response_topic),
                 correlation_data: ::core::clone::Clone::clone(&self.correlation_data),
@@ -3461,12 +3615,12 @@ pub mod publish {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<codec::FixedHeader>;
             let _: ::core::cmp::AssertParamIsEq<String>;
             let _: ::core::cmp::AssertParamIsEq<Option<u16>>;
-            let _: ::core::cmp::AssertParamIsEq<Option<PayloadFormat>>;
             let _: ::core::cmp::AssertParamIsEq<Option<u32>>;
+            let _: ::core::cmp::AssertParamIsEq<Option<PayloadFormat>>;
             let _: ::core::cmp::AssertParamIsEq<Option<u16>>;
             let _: ::core::cmp::AssertParamIsEq<Option<String>>;
             let _: ::core::cmp::AssertParamIsEq<Vec<u8>>;
@@ -3485,8 +3639,8 @@ pub mod publish {
             self.fixed_header == other.fixed_header
                 && self.topic_name == other.topic_name
                 && self.packet_id == other.packet_id
-                && self.payload_format == other.payload_format
                 && self.message_expiry == other.message_expiry
+                && self.payload_format == other.payload_format
                 && self.topic_alias == other.topic_alias
                 && self.response_topic == other.response_topic
                 && self.correlation_data == other.correlation_data
@@ -3530,7 +3684,9 @@ pub mod publish {
             if let Some(_) = &self.packet_id {
                 total_size += 2;
             }
-            total_size += codec::codec_size_opt_vec_u8_raw(&self.payload);
+            if let Some(_) = &self.payload {
+                total_size += codec::codec_size_opt_vec_u8_raw(&self.payload);
+            }
             let property_size = self.property_size();
             total_size + property_size + codec::variable_byte_int_size(property_size)
         }
@@ -3539,11 +3695,11 @@ pub mod publish {
         fn property_size(&self) -> u32 {
             use codec::CodecSize;
             let mut property_size = 0;
-            if let Some(field) = &self.payload_format {
-                property_size += field.codec_size();
-            }
             if let Some(_) = &self.message_expiry {
                 property_size += 1 + 4;
+            }
+            if let Some(field) = &self.payload_format {
+                property_size += 1 + field.codec_size();
             }
             if let Some(_) = &self.topic_alias {
                 property_size += 1 + 2;
@@ -3557,16 +3713,18 @@ pub mod publish {
                     property_size += 1 + 2 + self.correlation_data.len() as u32;
                 }
             }
-            property_size
-                += 1
-                    + codec::codec_size_opt_variable_byte_int_ref(
-                        &self.subscription_identifiers,
-                    );
+            if let Some(_) = &self.subscription_identifiers {
+                property_size
+                    += 1
+                        + codec::codec_size_opt_variable_byte_int_ref(
+                            &self.subscription_identifiers,
+                        );
+            }
             if let Some(field_name) = &self.content_type {
                 let value_size = field_name.len() as u32 + 2;
                 property_size += 1 + value_size;
             }
-            property_size += self.user_properties.codec_size();
+            property_size += 1 + self.user_properties.codec_size();
             property_size
         }
     }
@@ -3581,13 +3739,13 @@ pub mod publish {
                 dest.put_u16(v);
             }
             codec::encode_variable_byte_int(self.property_size(), dest)?;
-            if let Some(payload_format) = self.payload_format.as_ref() {
-                dest.put_u8(PropertyType::PayloadFormat as u8);
-                payload_format.encode(dest)?;
-            }
             if let Some(v) = self.message_expiry {
                 dest.put_u8(PropertyType::MessageExpiry as u8);
                 dest.put_u32(v);
+            }
+            if let Some(payload_format) = self.payload_format.as_ref() {
+                dest.put_u8(PropertyType::PayloadFormat as u8);
+                payload_format.encode(dest)?;
             }
             if let Some(v) = self.topic_alias {
                 dest.put_u8(PropertyType::TopicAlias as u8);
@@ -3603,8 +3761,8 @@ pub mod publish {
             }
             if let Some(f) = self.subscription_identifiers.as_ref() {
                 dest.put_u8(PropertyType::SubscriptionIdentifier as u8);
-                codec::encode_opt_variable_byte_int(
-                    self.subscription_identifiers,
+                codec::encode_opt_variable_byte_int_ref(
+                    &self.subscription_identifiers,
                     dest,
                 )?;
             }
@@ -3614,15 +3772,18 @@ pub mod publish {
             }
             self.user_properties.encode(dest)?;
             if let Some(f) = self.payload.as_ref() {
-                codec::encode_opt_vec_u8_raw(self.payload, dest)?;
+                codec::encode_opt_vec_u8_raw_ref(&self.payload, dest)?;
             }
             Ok(())
         }
     }
     impl codec::Decode for Publish {
-        fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(
+            &mut self,
+            src: &mut bytes::BytesMut,
+        ) -> Result<usize, MqttCodecError> {
             use bytes::{BufMut, Buf, BytesMut};
-            let mut bytes_read = 0;
+            let mut bytes_read = 0_usize;
             bytes_read += self.topic_name.decode(src)?;
             let mut value = u16::default();
             bytes_read += value.decode(src)?;
@@ -3630,21 +3791,22 @@ pub mod publish {
             let (property_length, var_bytes_read) = codec::decode_variable_byte_int(
                 src,
             )?;
+            let property_length = property_length as usize;
             bytes_read += var_bytes_read;
-            let mut property_bytes_read = 0;
+            let mut property_bytes_read = 0_usize;
             while property_bytes_read < property_length {
                 let property_type = src.get_u8().try_into()?;
                 property_bytes_read += 1;
                 match property_type {
-                    PropertyType::PayloadFormat => {
-                        let mut value = PayloadFormat::default();
-                        property_bytes_read += value.decode(src)?;
-                        self.payload_format = Some(value);
-                    }
                     PropertyType::MessageExpiry => {
                         let mut value = u32::default();
                         property_bytes_read += value.decode(src)?;
                         self.message_expiry = Some(value);
+                    }
+                    PropertyType::PayloadFormat => {
+                        let mut value = PayloadFormat::default();
+                        property_bytes_read += value.decode(src)?;
+                        self.payload_format = Some(value);
                     }
                     PropertyType::TopicAlias => {
                         let mut value = u16::default();
@@ -3657,7 +3819,8 @@ pub mod publish {
                         self.response_topic = Some(value);
                     }
                     PropertyType::CorrelationData => {
-                        let (value, var_bytes_read) = codec::decode_array_field(src)?;
+                        let mut value = Vec::new();
+                        let var_bytes_read = value.decode(src)?;
                         bytes_read += var_bytes_read;
                         self.correlation_data = value;
                     }
@@ -3666,6 +3829,7 @@ pub mod publish {
                             src,
                         )?;
                         property_bytes_read += decode_bytes_read;
+                        let googly = 2;
                         self.subscription_identifiers = value;
                     }
                     PropertyType::ContentType => {
@@ -3695,6 +3859,13 @@ pub mod publish {
                 }
             }
             bytes_read += property_bytes_read;
+            {
+                ::std::io::_print(format_args!("Finished decoding payload fields\n"));
+            };
+            let (value, decode_bytes_read) = codec::decode_opt_vec_u8_raw(src)?;
+            bytes_read += decode_bytes_read;
+            let googly = 1;
+            self.payload = value;
             Ok(bytes_read)
         }
     }
@@ -3916,6 +4087,9 @@ pub mod pubresp {
         }
     }
     #[automatically_derived]
+    #[doc(hidden)]
+    unsafe impl ::core::clone::TrivialClone for PubRelCompReason {}
+    #[automatically_derived]
     impl ::core::clone::Clone for PubRelCompReason {
         #[inline]
         fn clone(&self) -> PubRelCompReason {
@@ -3940,7 +4114,7 @@ pub mod pubresp {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {}
+        fn assert_fields_are_eq(&self) {}
     }
     #[automatically_derived]
     impl ::core::default::Default for PubRelCompReason {
@@ -4024,7 +4198,7 @@ pub mod pubresp {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<codec::FixedHeader>;
             let _: ::core::cmp::AssertParamIsEq<u16>;
             let _: ::core::cmp::AssertParamIsEq<Option<codec::Reason>>;
@@ -4040,7 +4214,7 @@ pub mod pubresp {
                 let value_size = field_name.len() as u32 + 2;
                 property_size += 1 + value_size;
             }
-            property_size += self.user_properties.codec_size();
+            property_size += 1 + self.user_properties.codec_size();
             property_size
         }
     }
@@ -4086,7 +4260,10 @@ pub mod pubresp {
         }
     }
     impl Decode for PubResp {
-        fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(
+            &mut self,
+            src: &mut bytes::BytesMut,
+        ) -> Result<usize, MqttCodecError> {
             if src.remaining() < 2 {
                 return Err(
                     MqttCodecError::new_with_kind(
@@ -4236,7 +4413,7 @@ pub mod pubresp {
 }
 pub mod subscribe {
     use crate::codec::{ErrorKind, MAX_VARIABLE_BYTE_INT, MIN_VARIABLE_BYTE_INT};
-    use crate::{codec, MqttCodecError, PropertyType};
+    use crate::{MqttCodecError, PropertyType, Reason, codec};
     use crate::{property::UserProperty, MqttError, MqttVersion, QoSLevel};
     use bytes::{Buf, BufMut};
     use vaux_macro::{packet, CodecSize, Decode, Encode};
@@ -4254,6 +4431,9 @@ pub mod subscribe {
     }
     #[automatically_derived]
     impl ::core::marker::Copy for RetainHandling {}
+    #[automatically_derived]
+    #[doc(hidden)]
+    unsafe impl ::core::clone::TrivialClone for RetainHandling {}
     #[automatically_derived]
     impl ::core::clone::Clone for RetainHandling {
         #[inline]
@@ -4298,7 +4478,7 @@ pub mod subscribe {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {}
+        fn assert_fields_are_eq(&self) {}
     }
     impl TryFrom<u8> for RetainHandling {
         type Error = MqttCodecError;
@@ -4327,7 +4507,7 @@ pub mod subscribe {
         packet_id: u16,
         pub reason: Option<String>,
         pub user_properties: UserProperty,
-        pub reason_codes: Vec<u8>,
+        pub reason_codes: Vec<Reason>,
     }
     #[automatically_derived]
     impl ::core::fmt::Debug for SubAck {
@@ -4392,12 +4572,12 @@ pub mod subscribe {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<codec::FixedHeader>;
             let _: ::core::cmp::AssertParamIsEq<u16>;
             let _: ::core::cmp::AssertParamIsEq<Option<String>>;
             let _: ::core::cmp::AssertParamIsEq<UserProperty>;
-            let _: ::core::cmp::AssertParamIsEq<Vec<u8>>;
+            let _: ::core::cmp::AssertParamIsEq<Vec<Reason>>;
         }
     }
     impl SubAck {
@@ -4430,7 +4610,7 @@ pub mod subscribe {
             use codec::PropertyCodecSize;
             let mut total_size = 0;
             total_size += 2;
-            total_size += codec::codec_size_vec_u8_raw(&self.reason_codes);
+            total_size += codec::codec_size_vec_reason(&self.reason_codes);
             let property_size = self.property_size();
             total_size + property_size + codec::variable_byte_int_size(property_size)
         }
@@ -4443,7 +4623,7 @@ pub mod subscribe {
                 let value_size = field_name.len() as u32 + 2;
                 property_size += 1 + value_size;
             }
-            property_size += self.user_properties.codec_size();
+            property_size += 1 + self.user_properties.codec_size();
             property_size
         }
     }
@@ -4460,21 +4640,27 @@ pub mod subscribe {
                 codec::encode_string(v, dest)?;
             }
             self.user_properties.encode(dest)?;
-            encode_suback_reason_vec(&self.reason_codes, dest)?;
+            for item in self.reason_codes.iter() {
+                item.encode(dest)?;
+            }
             Ok(())
         }
     }
     impl codec::Decode for SubAck {
-        fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(
+            &mut self,
+            src: &mut bytes::BytesMut,
+        ) -> Result<usize, MqttCodecError> {
             use bytes::{BufMut, Buf, BytesMut};
-            let mut bytes_read = 0;
+            let mut bytes_read = 0_usize;
             self.packet_id = src.get_u16();
             bytes_read += 2;
             let (property_length, var_bytes_read) = codec::decode_variable_byte_int(
                 src,
             )?;
+            let property_length = property_length as usize;
             bytes_read += var_bytes_read;
-            let mut property_bytes_read = 0;
+            let mut property_bytes_read = 0_usize;
             while property_bytes_read < property_length {
                 let property_type = src.get_u8().try_into()?;
                 property_bytes_read += 1;
@@ -4506,24 +4692,18 @@ pub mod subscribe {
                 }
             }
             bytes_read += property_bytes_read;
+            {
+                ::std::io::_print(format_args!("Finished decoding payload fields\n"));
+            };
+            let mut value = Vec::new();
+            while src.has_remaining() {
+                let mut item = Reason::default();
+                bytes_read += item.decode(src)?;
+                value.push(item);
+            }
+            self.reason_codes = value;
             Ok(bytes_read)
         }
-    }
-    pub fn encode_suback_reason_vec(
-        reasons: &Vec<u8>,
-        dest: &mut bytes::BytesMut,
-    ) -> Result<(), MqttCodecError> {
-        dest.put_slice(reasons);
-        Ok(())
-    }
-    pub fn decode_suback_reason_vec(
-        reasons: &mut Vec<u8>,
-        src: &mut bytes::BytesMut,
-    ) -> Result<u32, MqttCodecError> {
-        let len = src.remaining();
-        reasons.extend_from_slice(&src[..]);
-        src.advance(len);
-        Ok(len as u32)
     }
     impl SubAck {
         pub fn new_with_packet_id(packet_id: u16) -> Result<Self, MqttCodecError> {
@@ -4610,7 +4790,7 @@ pub mod subscribe {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<String>;
             let _: ::core::cmp::AssertParamIsEq<u8>;
         }
@@ -4624,12 +4804,18 @@ pub mod subscribe {
         }
     }
     impl codec::Decode for SubscriptionFilter {
-        fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(
+            &mut self,
+            src: &mut bytes::BytesMut,
+        ) -> Result<usize, MqttCodecError> {
             use bytes::{BufMut, Buf, BytesMut};
-            let mut bytes_read = 0;
+            let mut bytes_read = 0_usize;
             bytes_read += self.filter.decode(src)?;
             self.options = src.get_u8();
             bytes_read += 1;
+            {
+                ::std::io::_print(format_args!("Finished decoding payload fields\n"));
+            };
             Ok(bytes_read)
         }
     }
@@ -4677,21 +4863,8 @@ pub mod subscribe {
         pub fixed_header: codec::FixedHeader,
         pub packet_id: u16,
         pub subscription_id: Option<u32>,
-        pub props: UserProperty,
+        pub user_props: UserProperty,
         pub filter: Vec<SubscriptionFilter>,
-    }
-    #[automatically_derived]
-    impl ::core::default::Default for Subscribe {
-        #[inline]
-        fn default() -> Subscribe {
-            Subscribe {
-                fixed_header: ::core::default::Default::default(),
-                packet_id: ::core::default::Default::default(),
-                subscription_id: ::core::default::Default::default(),
-                props: ::core::default::Default::default(),
-                filter: ::core::default::Default::default(),
-            }
-        }
     }
     #[automatically_derived]
     impl ::core::fmt::Debug for Subscribe {
@@ -4706,8 +4879,8 @@ pub mod subscribe {
                 &self.packet_id,
                 "subscription_id",
                 &self.subscription_id,
-                "props",
-                &self.props,
+                "user_props",
+                &self.user_props,
                 "filter",
                 &&self.filter,
             )
@@ -4721,7 +4894,7 @@ pub mod subscribe {
                 fixed_header: ::core::clone::Clone::clone(&self.fixed_header),
                 packet_id: ::core::clone::Clone::clone(&self.packet_id),
                 subscription_id: ::core::clone::Clone::clone(&self.subscription_id),
-                props: ::core::clone::Clone::clone(&self.props),
+                user_props: ::core::clone::Clone::clone(&self.user_props),
                 filter: ::core::clone::Clone::clone(&self.filter),
             }
         }
@@ -4734,7 +4907,7 @@ pub mod subscribe {
         fn eq(&self, other: &Subscribe) -> bool {
             self.packet_id == other.packet_id && self.fixed_header == other.fixed_header
                 && self.subscription_id == other.subscription_id
-                && self.props == other.props && self.filter == other.filter
+                && self.user_props == other.user_props && self.filter == other.filter
         }
     }
     #[automatically_derived]
@@ -4742,7 +4915,7 @@ pub mod subscribe {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<codec::FixedHeader>;
             let _: ::core::cmp::AssertParamIsEq<u16>;
             let _: ::core::cmp::AssertParamIsEq<Option<u32>>;
@@ -4792,10 +4965,14 @@ pub mod subscribe {
         fn property_size(&self) -> u32 {
             use codec::CodecSize;
             let mut property_size = 0;
-            property_size
-                += 1
-                    + codec::codec_size_opt_variable_byte_int_ref(&self.subscription_id);
-            property_size += self.props.codec_size();
+            if let Some(_) = &self.subscription_id {
+                property_size
+                    += 1
+                        + codec::codec_size_opt_variable_byte_int_ref(
+                            &self.subscription_id,
+                        );
+            }
+            property_size += 1 + self.user_props.codec_size();
             property_size
         }
     }
@@ -4809,9 +4986,9 @@ pub mod subscribe {
             codec::encode_variable_byte_int(self.property_size(), dest)?;
             if let Some(f) = self.subscription_id.as_ref() {
                 dest.put_u8(PropertyType::SubscriptionIdentifier as u8);
-                codec::encode_opt_variable_byte_int(self.subscription_id, dest)?;
+                codec::encode_opt_variable_byte_int_ref(&self.subscription_id, dest)?;
             }
-            self.props.encode(dest)?;
+            self.user_props.encode(dest)?;
             for item in self.filter.iter() {
                 item.encode(dest)?;
             }
@@ -4819,16 +4996,20 @@ pub mod subscribe {
         }
     }
     impl codec::Decode for Subscribe {
-        fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(
+            &mut self,
+            src: &mut bytes::BytesMut,
+        ) -> Result<usize, MqttCodecError> {
             use bytes::{BufMut, Buf, BytesMut};
-            let mut bytes_read = 0;
+            let mut bytes_read = 0_usize;
             self.packet_id = src.get_u16();
             bytes_read += 2;
             let (property_length, var_bytes_read) = codec::decode_variable_byte_int(
                 src,
             )?;
+            let property_length = property_length as usize;
             bytes_read += var_bytes_read;
-            let mut property_bytes_read = 0;
+            let mut property_bytes_read = 0_usize;
             while property_bytes_read < property_length {
                 let property_type = src.get_u8().try_into()?;
                 property_bytes_read += 1;
@@ -4838,10 +5019,11 @@ pub mod subscribe {
                             src,
                         )?;
                         property_bytes_read += decode_bytes_read;
+                        let googly = 2;
                         self.subscription_id = value;
                     }
                     PropertyType::UserProperty => {
-                        property_bytes_read += self.props.decode(src)?;
+                        property_bytes_read += self.user_props.decode(src)?;
                     }
                     _ => {
                         return Err(
@@ -4862,7 +5044,28 @@ pub mod subscribe {
                 }
             }
             bytes_read += property_bytes_read;
+            {
+                ::std::io::_print(format_args!("Finished decoding payload fields\n"));
+            };
+            let mut value = Vec::new();
+            while src.has_remaining() {
+                let mut item = SubscriptionFilter::default();
+                bytes_read += item.decode(src)?;
+                value.push(item);
+            }
+            self.filter = value;
             Ok(bytes_read)
+        }
+    }
+    impl Default for Subscribe {
+        fn default() -> Self {
+            Self {
+                fixed_header: codec::FixedHeader::new(codec::PacketType::Subscribe),
+                packet_id: 0,
+                subscription_id: None,
+                user_props: UserProperty::default(),
+                filter: Vec::new(),
+            }
         }
     }
     impl Subscribe {
@@ -4996,7 +5199,7 @@ pub mod unsubscribe {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<codec::FixedHeader>;
             let _: ::core::cmp::AssertParamIsEq<u16>;
             let _: ::core::cmp::AssertParamIsEq<String>;
@@ -5052,7 +5255,7 @@ pub mod unsubscribe {
             let mut property_size = 0;
             let value_size = self.reason.len() as u32 + 2;
             property_size += 1 + value_size;
-            property_size += self.user_properties.codec_size();
+            property_size += 1 + self.user_properties.codec_size();
             property_size
         }
     }
@@ -5074,16 +5277,20 @@ pub mod unsubscribe {
         }
     }
     impl codec::Decode for UnsubAck {
-        fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(
+            &mut self,
+            src: &mut bytes::BytesMut,
+        ) -> Result<usize, MqttCodecError> {
             use bytes::{BufMut, Buf, BytesMut};
-            let mut bytes_read = 0;
+            let mut bytes_read = 0_usize;
             self.packet_id = src.get_u16();
             bytes_read += 2;
             let (property_length, var_bytes_read) = codec::decode_variable_byte_int(
                 src,
             )?;
+            let property_length = property_length as usize;
             bytes_read += var_bytes_read;
-            let mut property_bytes_read = 0;
+            let mut property_bytes_read = 0_usize;
             while property_bytes_read < property_length {
                 let property_type = src.get_u8().try_into()?;
                 property_bytes_read += 1;
@@ -5113,6 +5320,16 @@ pub mod unsubscribe {
                 }
             }
             bytes_read += property_bytes_read;
+            {
+                ::std::io::_print(format_args!("Finished decoding payload fields\n"));
+            };
+            let mut value = Vec::new();
+            while src.has_remaining() {
+                let mut item = Reason::default();
+                bytes_read += item.decode(src)?;
+                value.push(item);
+            }
+            self.reason_code = value;
             Ok(bytes_read)
         }
     }
@@ -5179,7 +5396,7 @@ pub mod unsubscribe {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<codec::FixedHeader>;
             let _: ::core::cmp::AssertParamIsEq<u16>;
             let _: ::core::cmp::AssertParamIsEq<UserProperty>;
@@ -5228,7 +5445,7 @@ pub mod unsubscribe {
         fn property_size(&self) -> u32 {
             use codec::CodecSize;
             let mut property_size = 0;
-            property_size += self.props.codec_size();
+            property_size += 1 + self.props.codec_size();
             property_size
         }
     }
@@ -5248,16 +5465,20 @@ pub mod unsubscribe {
         }
     }
     impl codec::Decode for Unsubscribe {
-        fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(
+            &mut self,
+            src: &mut bytes::BytesMut,
+        ) -> Result<usize, MqttCodecError> {
             use bytes::{BufMut, Buf, BytesMut};
-            let mut bytes_read = 0;
+            let mut bytes_read = 0_usize;
             self.packet_id = src.get_u16();
             bytes_read += 2;
             let (property_length, var_bytes_read) = codec::decode_variable_byte_int(
                 src,
             )?;
+            let property_length = property_length as usize;
             bytes_read += var_bytes_read;
-            let mut property_bytes_read = 0;
+            let mut property_bytes_read = 0_usize;
             while property_bytes_read < property_length {
                 let property_type = src.get_u8().try_into()?;
                 property_bytes_read += 1;
@@ -5284,6 +5505,16 @@ pub mod unsubscribe {
                 }
             }
             bytes_read += property_bytes_read;
+            {
+                ::std::io::_print(format_args!("Finished decoding payload fields\n"));
+            };
+            let mut value = Vec::new();
+            while src.has_remaining() {
+                let mut item = String::new();
+                bytes_read += item.decode(src)?;
+                value.push(item);
+            }
+            self.topics = value;
             Ok(bytes_read)
         }
     }
@@ -5404,7 +5635,7 @@ pub mod will {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<Option<u32>>;
             let _: ::core::cmp::AssertParamIsEq<Option<PayloadFormat>>;
             let _: ::core::cmp::AssertParamIsEq<Option<u32>>;
@@ -5462,14 +5693,18 @@ pub mod will {
         }
     }
     impl codec::Decode for WillHeader {
-        fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+        fn decode(
+            &mut self,
+            src: &mut bytes::BytesMut,
+        ) -> Result<usize, MqttCodecError> {
             use bytes::{BufMut, Buf, BytesMut};
-            let mut bytes_read = 0;
+            let mut bytes_read = 0_usize;
             let (property_length, var_bytes_read) = codec::decode_variable_byte_int(
                 src,
             )?;
+            let property_length = property_length as usize;
             bytes_read += var_bytes_read;
-            let mut property_bytes_read = 0;
+            let mut property_bytes_read = 0_usize;
             while property_bytes_read < property_length {
                 let property_type = src.get_u8().try_into()?;
                 property_bytes_read += 1;
@@ -5500,7 +5735,8 @@ pub mod will {
                         self.response_topic = Some(value);
                     }
                     PropertyType::CorrelationData => {
-                        let (value, var_bytes_read) = codec::decode_array_field(src)?;
+                        let mut value = Vec::new();
+                        let var_bytes_read = value.decode(src)?;
                         bytes_read += var_bytes_read;
                         self.correlation_data = value;
                     }
@@ -5526,6 +5762,9 @@ pub mod will {
                 }
             }
             bytes_read += property_bytes_read;
+            {
+                ::std::io::_print(format_args!("Finished decoding payload fields\n"));
+            };
             Ok(bytes_read)
         }
     }
@@ -5537,7 +5776,7 @@ pub mod will {
                 property_size += 1 + 4;
             }
             if let Some(field) = &self.payload_format {
-                property_size += field.codec_size();
+                property_size += 1 + field.codec_size();
             }
             if let Some(_) = &self.message_expiry {
                 property_size += 1 + 4;
@@ -5555,7 +5794,7 @@ pub mod will {
                     property_size += 1 + 2 + self.correlation_data.len() as u32;
                 }
             }
-            property_size += self.user_properties.codec_size();
+            property_size += 1 + self.user_properties.codec_size();
             property_size
         }
     }
@@ -5625,7 +5864,7 @@ pub mod will {
         #[inline]
         #[doc(hidden)]
         #[coverage(off)]
-        fn assert_receiver_is_total_eq(&self) -> () {
+        fn assert_fields_are_eq(&self) {
             let _: ::core::cmp::AssertParamIsEq<WillHeader>;
             let _: ::core::cmp::AssertParamIsEq<String>;
             let _: ::core::cmp::AssertParamIsEq<Vec<u8>>;
@@ -5693,6 +5932,7 @@ pub mod will {
 }
 pub use codec::{MqttCodecError, Packet, PacketType, QoSLevel, Reason};
 use vaux_macro::packet;
+use crate::codec::Decode;
 pub use {
     connack::ConnAck, connect::Connect, disconnect::Disconnect, property::PropertyType,
     publish::{PayloadFormat, Publish},
@@ -5753,15 +5993,6 @@ pub struct PingReq {
     pub fixed_header: codec::FixedHeader,
 }
 #[automatically_derived]
-impl ::core::default::Default for PingReq {
-    #[inline]
-    fn default() -> PingReq {
-        PingReq {
-            fixed_header: ::core::default::Default::default(),
-        }
-    }
-}
-#[automatically_derived]
 impl ::core::fmt::Debug for PingReq {
     #[inline]
     fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
@@ -5787,7 +6018,7 @@ impl ::core::cmp::Eq for PingReq {
     #[inline]
     #[doc(hidden)]
     #[coverage(off)]
-    fn assert_receiver_is_total_eq(&self) -> () {
+    fn assert_fields_are_eq(&self) {
         let _: ::core::cmp::AssertParamIsEq<codec::FixedHeader>;
     }
 }
@@ -5841,23 +6072,24 @@ impl codec::Encode for PingReq {
     }
 }
 impl codec::Decode for PingReq {
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<usize, MqttCodecError> {
         use bytes::{BufMut, Buf, BytesMut};
-        let mut bytes_read = 0;
+        let mut bytes_read = 0_usize;
+        {
+            ::std::io::_print(format_args!("Finished decoding payload fields\n"));
+        };
         Ok(bytes_read)
+    }
+}
+impl Default for PingReq {
+    fn default() -> Self {
+        Self {
+            fixed_header: codec::FixedHeader::new(codec::PacketType::PingReq),
+        }
     }
 }
 pub struct PingResp {
     pub fixed_header: codec::FixedHeader,
-}
-#[automatically_derived]
-impl ::core::default::Default for PingResp {
-    #[inline]
-    fn default() -> PingResp {
-        PingResp {
-            fixed_header: ::core::default::Default::default(),
-        }
-    }
 }
 #[automatically_derived]
 impl ::core::fmt::Debug for PingResp {
@@ -5885,7 +6117,7 @@ impl ::core::cmp::Eq for PingResp {
     #[inline]
     #[doc(hidden)]
     #[coverage(off)]
-    fn assert_receiver_is_total_eq(&self) -> () {
+    fn assert_fields_are_eq(&self) {
         let _: ::core::cmp::AssertParamIsEq<codec::FixedHeader>;
     }
 }
@@ -5939,9 +6171,19 @@ impl codec::Encode for PingResp {
     }
 }
 impl codec::Decode for PingResp {
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<usize, MqttCodecError> {
         use bytes::{BufMut, Buf, BytesMut};
-        let mut bytes_read = 0;
+        let mut bytes_read = 0_usize;
+        {
+            ::std::io::_print(format_args!("Finished decoding payload fields\n"));
+        };
         Ok(bytes_read)
+    }
+}
+impl Default for PingResp {
+    fn default() -> Self {
+        Self {
+            fixed_header: codec::FixedHeader::new(codec::PacketType::PingResp),
+        }
     }
 }

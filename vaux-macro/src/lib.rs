@@ -3,6 +3,7 @@ mod encode;
 mod size;
 mod util;
 use crate::decode::decode_internal;
+use crate::encode::encode_internal;
 use crate::size::field_size;
 use crate::util::{
     compile_error, filter_attributes, get_packet_type, get_skip_if_path,
@@ -22,8 +23,9 @@ pub(crate) const CODEC_ATTR_ENCODE_WITH_ARG: &str = "encode_with";
 pub(crate) const CODEC_ATTR_SKIP_ARG: &str = "skip";
 pub(crate) const CODEC_ATTR_SKIP_IF_ARG: &str = "skip_if";
 pub(crate) const CODEC_ATTR_PAYLOAD_ARG: &str = "payload_type";
-//pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_REMAINING: &str = "remaining";
-//pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_FIELD: &str = "field";
+pub(crate) const CODEC_ATTR_CODEC_MIN_SIZE_ARG: &str = "min_decode";
+pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_REMAINING: &str = "remaining";
+pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_FIELD: &str = "field";
 
 #[proc_macro_attribute]
 pub fn packet(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -251,125 +253,9 @@ fn encode_packet(input: TokenStream) -> TokenStream {
     encode_internal(input, true)
 }
 
-fn encode_internal(input: TokenStream, as_packet: bool) -> TokenStream {
-    let input = parse_macro_input!(input as ItemStruct);
-    let struct_name = &input.ident;
-    // ensure that the struct does not have tuple fields
-    let fields = match &input.fields {
-        syn::Fields::Named(fields_named) => Some(fields_named),
-        syn::Fields::Unnamed(_) => {
-            return compile_error("Encode does not support tuple structs");
-        }
-        syn::Fields::Unit => {
-            // return an empty token stream for unit structs
-            None
-        }
-    };
-    // check if any field has the property attribute
-    let has_properties = if let Some(fields) = fields {
-        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
-    } else {
-        false
-    };
-    let has_payload = if let Some(fields) = fields {
-        struct_has_attribute_with_name_value(fields, CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG)
-    } else {
-        false
-    };
-    // encode the non-property fields first, then the property fields if any
-    let mut encoded = if let Some(fields) = fields {
-        fields
-            .named
-        .iter()
-        .filter_map(|f| {
-            if !(is_property_field(&f.attrs).unwrap_or(false)
-                || is_payload_field(&f.attrs).unwrap_or(false))
-            {
-                if let Some(skip_path) = get_skip_if_path(&f.attrs) {
-                    let field_name = f.ident.as_ref().unwrap();
-                    let field_encode = encode::encode_field(f);
-                    Some(quote! {
-                        if !#skip_path(&self.#field_name) {
-                            #field_encode
-                        }
-                    })
-                } else {
-                    Some(encode::encode_field(f))
-                }
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
-
-    if has_properties {
-        // encode the property length
-        let property_length_encoding = quote! {
-            codec::encode_variable_byte_int(self.property_size(), dest)?;
-        };
-        encoded.push(property_length_encoding);
-        fields.as_ref().unwrap().named.iter().for_each(|f| {
-            if is_property_field(&f.attrs).unwrap_or(false) {
-                let inner_expr = encode::encode_field(f);
-                if let Some(skip_path) = get_skip_if_path(&f.attrs) {
-                    let field_name = f.ident.as_ref().unwrap();
-                    encoded.push(quote! {
-                        if !#skip_path(&self.#field_name) {
-                            #inner_expr
-                        }
-                    })
-                } else {
-                    encoded.push(inner_expr);
-                }
-            }
-        });
-    }
-    if has_payload {
-        fields.as_ref().unwrap().named.iter().for_each(|f| {
-            if is_payload_field(&f.attrs).unwrap_or(false) {
-                let inner_expr = encode::encode_field(f);
-                if let Some(skip_path) = get_skip_if_path(&f.attrs) {
-                    let field_name = f.ident.as_ref().unwrap();
-                    encoded.push(quote! {
-                        if !#skip_path(&self.#field_name) {
-                            #inner_expr
-                        }
-                    })
-                } else {
-                    encoded.push(inner_expr);
-                }
-            }
-        });
-    }
-
-    let packet_encode = if as_packet {
-        quote! {
-            use codec::{CodecSize, PropertyCodecSize};
-            self.fixed_header.encode(dest)?;
-            codec::encode_variable_byte_int(self.codec_size(), dest)?;
-        }
-    } else {
-        quote! {}
-    };
-
-    let encode_impl = quote! {
-        impl codec::Encode for #struct_name {
-            fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
-                use bytes::{BufMut, BytesMut};
-                #packet_encode
-                #(#encoded)*
-                Ok(())
-            }
-        }
-    };
-
-    TokenStream::from(encode_impl)
-}
-
 #[proc_macro_derive(Decode, attributes(codec_as))]
 pub fn derive_decode(input: TokenStream) -> TokenStream {
     decode_internal(input)
 }
+
+

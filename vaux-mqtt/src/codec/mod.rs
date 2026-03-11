@@ -1,8 +1,5 @@
 pub mod fixed;
-
 pub use fixed::FixedHeader;
-use vaux_macro::packet;
-
 use crate::{
     ConnAck, Disconnect, Subscribe, connect::Connect, publish::Publish, pubresp::{PubAck, PubComp, PubRec, PubRel}, subscribe::SubAck, unsubscribe::{UnsubAck, Unsubscribe}
 };
@@ -28,7 +25,7 @@ pub trait Encode {
 }
 
 pub trait Decode {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError>;
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError>;
 }
 
 
@@ -141,6 +138,7 @@ impl Display for Reason {
     }
 }
 
+
 #[allow(non_upper_case_globals)]
 impl Reason {
     pub const NormalDisconnect: Reason = Reason::Success;
@@ -216,12 +214,35 @@ impl Encode for Reason {
 }
 
 impl Decode for Reason {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
         let val = src.get_u8();
         *self = val.try_into()?;
         Ok(1)
     }
 }
+
+pub fn codec_size_vec_reason(reason_codes: &Vec<Reason>) -> u32 {
+    reason_codes.len() as u32
+}
+
+impl Encode for Vec<Reason> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+        self.iter().for_each(|reason| dest.put_u8(*reason as u8));
+        Ok(())
+    }
+}
+
+impl Decode for Vec<Reason> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
+        let len = src.remaining();
+        for _ in 0..len {
+            let reason = src.get_u8().try_into()?;
+            self.push(reason);
+        }
+        Ok(len)
+    }
+}
+
 
 #[allow(clippy::enum_variant_names)]
 #[repr(u8)]
@@ -256,7 +277,7 @@ impl Encode for QoSLevel {
 }
 
 impl Decode for QoSLevel {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
         let val = src.get_u8();
         *self = val.try_into()?;
         Ok(1)
@@ -402,14 +423,15 @@ impl MqttCodecError {
     }
 }
 
-pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecError> {
+pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, usize)>, MqttCodecError> {
     let mut fixed_header = FixedHeader::default();
     let mut decode_len = fixed_header.decode(src)?;
     println!(
         "Fixed header decoded: {:?}, bytes read: {}",
         fixed_header, decode_len
     );
-    for idx in 1..=3 {
+    for idx in 0..=3 {
+        println!("Checking byte at index {} for variable byte int: {:02x}", idx, src[idx]);
         if src[idx] & 0x80 != 0x00 {
             // insufficient bytes left to read remaining
             if src.remaining() < 1 {
@@ -488,6 +510,7 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecErro
             Ok(Some((Packet::PubRel(pubrel), decode_len)))
         }
         PacketType::Disconnect => {
+            println!("Decoding disconnect packet");
             let mut disconnect = Disconnect::default();
             decode_len += disconnect.decode(src)?;
             Ok(Some((Packet::Disconnect(disconnect), decode_len)))
@@ -522,7 +545,7 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, u32)>, MqttCodecErro
 }
 
 impl Decode for String {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
         if src.len() < 2 {
             return Err(MqttCodecError::new("malformed Mqtt packet: string length"));
         }
@@ -537,7 +560,29 @@ impl Decode for String {
             )
         })?;
         *self = String::from_utf8(dest_vec).map_err(|e| MqttCodecError::new(&format!("{e:?}")))?;
-        Ok(len as u32 + 2)
+        Ok(len as usize + 2)
+    }
+}
+
+impl Encode for Vec<String> {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+        for s in self {
+            encode_string(s, dest)?;
+        }
+        Ok(())
+    }
+}
+
+impl Decode for Vec<String> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
+        let mut bytes_read = 0;
+        while src.remaining() > 0 {
+            let mut string = String::new();
+            let var_bytes_read = string.decode(src)?;
+            bytes_read += var_bytes_read;
+            self.push(string);
+        }
+        Ok(bytes_read)
     }
 }
 
@@ -548,7 +593,7 @@ impl Encode for Vec<u8> {
 }
 
 impl Decode for Vec<u8> {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
         if src.remaining() < 2 {
             return Err(MqttCodecError::new("Insufficient data for binary length"));
         }
@@ -562,12 +607,12 @@ impl Decode for Vec<u8> {
             )
         })?;
 
-        Ok(len as u32 + 2)
+        Ok(len + 2)
     }
 }
 
 impl Decode for bool {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
         *self = match src.get_u8() {
             0 => Ok(false),
             1 => Ok(true),
@@ -581,21 +626,21 @@ impl Decode for bool {
 }
 
 impl Decode for u8 {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
         *self = src.get_u8();
         Ok(1)
     }
 }
 
 impl Decode for u16 {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
         *self = src.get_u16();
         Ok(2)
     }
 }
 
 impl Decode for u32 {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
         *self = src.get_u32();
         Ok(4)
     }
@@ -611,7 +656,7 @@ pub fn encode_string(src: &str, dest: &mut BytesMut) -> Result<(), MqttCodecErro
     Ok(())
 }
 
-pub fn decode_string(src: &mut BytesMut) -> Result<(String, u32), MqttCodecError> {
+pub fn decode_string(src: &mut BytesMut) -> Result<(String, usize), MqttCodecError> {
     let mut string = String::new();
     let bytes_read = string.decode(src)?;
     Ok((string, bytes_read))
@@ -627,7 +672,7 @@ pub fn encode_array_field(src: &[u8], dest: &mut BytesMut) -> Result<(), MqttCod
     Ok(())
 }
 
-pub fn decode_array_field(src: &mut BytesMut) -> Result<(Vec<u8>, u32), MqttCodecError> {
+pub fn decode_array_field(src: &mut BytesMut) -> Result<(Vec<u8>, usize), MqttCodecError> {
     let mut data = Vec::new();
     let bytes_read = data.decode(src)?;
     Ok((data, bytes_read))
@@ -656,12 +701,12 @@ pub fn codec_size_opt_variable_byte_int_ref(src: &Option<u32>) -> u32 {
 
 pub fn decode_opt_variable_byte_int(
     src: &mut BytesMut,
-) -> Result<(Option<u32>, u32), MqttCodecError> {
+) -> Result<(Option<u32>, usize), MqttCodecError> {
     let (val, bytes_read) = decode_variable_byte_int(src)?;
     Ok((Some(val), bytes_read))
 }
 
-pub fn decode_variable_byte_int(src: &mut BytesMut) -> Result<(u32, u32), MqttCodecError> {
+pub fn decode_variable_byte_int(src: &mut BytesMut) -> Result<(u32, usize), MqttCodecError> {
     let mut result = 0_u32;
     let mut shift = 0;
     let mut next_byte = src.get_u8();
@@ -731,7 +776,7 @@ pub fn encode_vec_u8_raw(src: &Vec<u8>, dest: &mut BytesMut) -> Result<(), MqttC
     Ok(())
 }
 
-pub fn decode_vec_u8_raw(src: &mut BytesMut) -> Result<(Option<Vec<u8>>, u32), MqttCodecError> {
+pub fn decode_vec_u8_raw(src: &mut BytesMut) -> Result<(Option<Vec<u8>>, usize), MqttCodecError> {
     let len = src.remaining();
     let mut dest = Vec::with_capacity(len);
     dest.resize(len, 0);
@@ -742,8 +787,25 @@ pub fn decode_vec_u8_raw(src: &mut BytesMut) -> Result<(Option<Vec<u8>>, u32), M
             ErrorKind::InsufficientData(len, src.remaining()),
         )
     })?;
-    Ok((Some(dest), len as u32))
+    Ok((Some(dest), len))
 }
+
+pub fn decode_opt_vec_u8_raw(
+    src: &mut BytesMut,
+) -> Result<(Option<Vec<u8>>, usize), MqttCodecError> {
+    let len = src.remaining();
+    let mut vec = Vec::new();
+    vec.resize(len, 0);
+    let dest_buf: &mut [u8] = &mut vec[0..len];
+    src.try_copy_to_slice(dest_buf).map_err(|e| {
+        MqttCodecError::new_with_kind(
+            format!("{e:?}").as_str(),
+            ErrorKind::InsufficientData(len, src.remaining()),
+        )
+    })?;
+    Ok((Some(vec), len))    
+}
+
 
 pub fn codec_size_opt_vec_u8_raw(src: &Option<Vec<u8>>) -> u32 {
     match src {
@@ -772,18 +834,3 @@ pub fn encode_opt_vec_u8_raw_ref(
     Ok(())
 }
 
-pub fn decode_opt_vec_u8_raw(
-    src: &mut BytesMut,
-    len: usize,
-) -> Result<(Option<Vec<u8>>, u32), MqttCodecError> {
-    let mut vec = Vec::new();
-    vec.resize(len, 0);
-    let dest_buf: &mut [u8] = &mut vec[0..len];
-    src.try_copy_to_slice(dest_buf).map_err(|e| {
-        MqttCodecError::new_with_kind(
-            format!("{e:?}").as_str(),
-            ErrorKind::InsufficientData(len, src.remaining()),
-        )
-    })?;
-    Ok((Some(vec), len as u32))
-}

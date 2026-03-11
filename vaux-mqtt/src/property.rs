@@ -149,8 +149,8 @@ impl TryFrom<u8> for PropertyType {
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct UserProperty(HashMap<String, Vec<String>>);
 
-impl codec::CodecSize for UserProperty {
-    fn codec_size(&self) -> u32 {
+impl codec::PropertyCodecSize for UserProperty {
+    fn property_size(&self) -> u32 {
         let mut size = 0;
         for (key, values) in &self.0 {
             for value in values {
@@ -178,7 +178,7 @@ impl codec::Encode for UserProperty {
 
 impl codec::Decode for UserProperty {
     /// Decode a single user property key-value pair and add it to the map.
-    fn decode(&mut self, src: &mut BytesMut) -> Result<u32, MqttCodecError> {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
         let (key_value, key_len) = codec::decode_string(src)?;
         let (value, len) = codec::decode_string(src)?;
         let bytes_read = 2 + key_len + 2 + len;

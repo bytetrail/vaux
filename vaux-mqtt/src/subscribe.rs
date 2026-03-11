@@ -1,5 +1,5 @@
 use crate::codec::{ErrorKind, MAX_VARIABLE_BYTE_INT, MIN_VARIABLE_BYTE_INT};
-use crate::{codec, MqttCodecError, PropertyType};
+use crate::{MqttCodecError, PropertyType, Reason, codec};
 use crate::{property::UserProperty, MqttError, MqttVersion, QoSLevel};
 use bytes::{Buf, BufMut};
 use vaux_macro::{packet, CodecSize, Decode, Encode};
@@ -43,30 +43,13 @@ pub struct SubAck {
     pub user_properties: UserProperty,
     #[codec(
         payload_type = "remaining",
-        size_with = "codec::codec_size_vec_u8_raw",
-        encode_with = "encode_suback_reason_vec",
-        decode_with = "decode_suback_reason_vec"
+        size_with = "codec::codec_size_vec_reason",
     )]
-    pub reason_codes: Vec<u8>,
+    pub reason_codes: Vec<Reason>,
 }
 
-pub fn encode_suback_reason_vec(
-    reasons: &Vec<u8>,
-    dest: &mut bytes::BytesMut,
-) -> Result<(), MqttCodecError> {
-    dest.put_slice(reasons);
-    Ok(())
-}
 
-pub fn decode_suback_reason_vec(
-    reasons: &mut Vec<u8>,
-    src: &mut bytes::BytesMut,
-) -> Result<u32, MqttCodecError> {
-    let len = src.remaining();
-    reasons.extend_from_slice(&src[..]);
-    src.advance(len);
-    Ok(len as u32)
-}
+
 
 impl SubAck {
     pub fn new_with_packet_id(packet_id: u16) -> Result<Self, MqttCodecError> {
@@ -147,7 +130,7 @@ impl SubscriptionFilter {
 }
 
 #[packet(packet_type = "codec::PacketType::Subscribe")]
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Subscribe {
     pub packet_id: u16,
     #[codec(property_type = "PropertyType::SubscriptionIdentifier")]
@@ -158,9 +141,23 @@ pub struct Subscribe {
     )]
     pub subscription_id: Option<u32>,
     #[codec(property_type = "PropertyType::UserProperty")]
-    pub props: UserProperty,
+    pub user_props: UserProperty,
     #[codec(payload_type = "remaining")]
     pub filter: Vec<SubscriptionFilter>,
+}
+
+
+
+impl Default for Subscribe {
+    fn default() -> Self {
+        Self {
+            fixed_header: codec::FixedHeader::new(codec::PacketType::Subscribe),
+            packet_id: 0,
+            subscription_id: None,
+            user_props: UserProperty::default(),
+            filter: Vec::new(),
+        }
+    }
 }
 
 impl Subscribe {
