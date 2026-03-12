@@ -205,19 +205,9 @@ impl ClientSession {
             connect.set_will_message(will);
         }
         let mut connect_packet = Packet::Connect(Box::new(connect));
-        println!("Connect packet created, sending to broker");
         if let Packet::Connect(ref mut boxed_connect) = connect_packet {
-            println!("connect codec size {}", boxed_connect.codec_size());
-            println!("connect property size {}", boxed_connect.property_size());
-            println!("sending connect: {:?}", boxed_connect);
-
             let mut dest = bytes::BytesMut::with_capacity(boxed_connect.codec_size() as usize);
             boxed_connect.encode(&mut dest).unwrap();
-            println!("encoded connect packet ({} bytes)", dest.len());
-            for byte in dest.iter() {
-                print!("{:02X} ", byte);
-            }
-            println!();
         }
 
         match self.packet_stream.write(&mut connect_packet).await {
@@ -279,7 +269,6 @@ impl ClientSession {
     ///
     pub(crate) async fn read_next(&mut self) -> crate::Result<Option<Packet>> {
         self.packet_stream.read().await.map_err(|e| {
-            println!("read error: {e}");
             MqttError::new(&format!("unable to read packet: {e}"), ErrorKind::Transport)
         })
     }
@@ -362,11 +351,9 @@ impl ClientSession {
         let mut packet_to_consumer = true;
         match &packet {
             Packet::PingResponse(_pingresp) => {
-                println!("ping response received");
                 packet_to_consumer = self.state.pingresp;
             }
             Packet::Disconnect(d) => {
-                println!("disconnect received: {d:?}");
                 // TODO handle disconnect - verify shutdown behavior
                 let _ = self.packet_stream.shutdown().await;
                 //self.pending_qos1.append(&mut self.pending_publish);

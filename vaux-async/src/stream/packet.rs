@@ -95,15 +95,8 @@ impl PacketStream {
         loop {
             if bytes_read > 0 {
                 let bytes_mut = &mut BytesMut::from(&self.read_buffer[0..bytes_read]);
-                println!("Decoding packet from {} bytes", bytes_read);
-                println!("Buffer: {:x?}", &bytes_mut.clone().to_vec());
                 match decode(bytes_mut) {
                     Ok(data_read) => {
-                        println!(
-                            "Packet {:?} decoded successfully, decode len: {}",
-                            data_read.as_ref().unwrap().0,
-                            data_read.as_ref().unwrap().1
-                        );
                         if let Some((packet, decode_len)) = data_read {
                             if with_bytes {
                                 // split the buffer into packet and remaining bytes
@@ -175,23 +168,14 @@ impl PacketStream {
 
     pub async fn write(&mut self, packet: &mut Packet) -> Result<(), Error> {
         let mut dest = BytesMut::default();
-        // print out the packet being encoded for debugging
-        println!("Encoding packet: {:?}", packet);
-        
+        // print out the packet being encoded for debugging        
         let result = packet.encode(&mut dest);
-        for b in &dest {
-            print!("{:02x} ", b);
-        }
-        println!();
         if let Err(e) = result {
-            println!("Error encoding packet {:?}: {}", packet, e);
             return Err(Error::Codec(e));
         }
         if let Err(e) = self.stream.write_all(&dest).await {
-            println!("Error writing packet {:?} to stream: {}", packet, e);
             return Err(Error::Io(e));
         }
-        println!("Packet {:?} encoded and sent successfully, size: {}", packet, dest.len());
         Ok(())
     }
 

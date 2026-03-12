@@ -426,12 +426,8 @@ impl MqttCodecError {
 pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, usize)>, MqttCodecError> {
     let mut fixed_header = FixedHeader::default();
     let mut decode_len = fixed_header.decode(src)?;
-    println!(
-        "Fixed header decoded: {:?}, bytes read: {}",
-        fixed_header, decode_len
-    );
+
     for idx in 0..=3 {
-        println!("Checking byte at index {} for variable byte int: {:02x}", idx, src[idx]);
         if src[idx] & 0x80 != 0x00 {
             // insufficient bytes left to read remaining
             if src.remaining() < 1 {
@@ -451,11 +447,6 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, usize)>, MqttCodecEr
             ErrorKind::InsufficientData(bytes_read as usize, src.remaining()),
         ));
     }
-    println!(
-        "Remaining length decoded: {}, src remaining: {}",
-        packet_remaining,
-        src.remaining()
-    );
     decode_len += bytes_read;
     match src.remaining() {
         val if val < packet_remaining as usize => {
@@ -506,11 +497,10 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, usize)>, MqttCodecEr
         }
         PacketType::PubRel => {
             let mut pubrel = PubRel::default();
-            pubrel.decode(src)?;
+            decode_len += pubrel.decode(src)?;
             Ok(Some((Packet::PubRel(pubrel), decode_len)))
         }
         PacketType::Disconnect => {
-            println!("Decoding disconnect packet");
             let mut disconnect = Disconnect::default();
             decode_len += disconnect.decode(src)?;
             Ok(Some((Packet::Disconnect(disconnect), decode_len)))
@@ -530,16 +520,16 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, usize)>, MqttCodecEr
             decode_len += suback.decode(src)?;
             Ok(Some((Packet::SubAck(suback), decode_len)))
         }
-        // PacketType::Unsubscribe => {
-        //     let mut unsubscribe = Unsubscribe::default();
-        //     unsubscribe.decode(src)?;
-        //     Ok(Some((Packet::Unsubscribe(unsubscribe), decode_len)))
-        // }
-        // PacketType::UnsubAck => {
-        //     let mut unsuback = UnsubAck::default();
-        //     unsuback.decode(src)?;
-        //     Ok(Some((Packet::UnsubAck(unsuback), decode_len)))
-        // }
+        PacketType::Unsubscribe => {
+            let mut unsubscribe = Unsubscribe::default();
+            decode_len += unsubscribe.decode(src)?;
+            Ok(Some((Packet::Unsubscribe(unsubscribe), decode_len)))
+        }
+        PacketType::UnsubAck => {
+            let mut unsuback = UnsubAck::default();
+            decode_len += unsuback.decode(src)?;
+            Ok(Some((Packet::UnsubAck(unsuback), decode_len)))
+        }
         _ => Err(MqttCodecError::new("unsupported packet type")),
     }
 }
@@ -550,10 +540,9 @@ impl Decode for String {
             return Err(MqttCodecError::new("malformed Mqtt packet: string length"));
         }
         let len = src.get_u16();
-        let mut dest_vec = Vec::with_capacity(len as usize);
-        let dest: &mut [u8] = &mut dest_vec[0..len as usize];
+        let mut dest_vec = vec![0; len as usize];
 
-        src.try_copy_to_slice(dest).map_err(|e| {
+        src.try_copy_to_slice(&mut dest_vec).map_err(|e| {
             MqttCodecError::new_with_kind(
                 format!("{e:?}").as_str(),
                 ErrorKind::InsufficientData(len as usize, src.remaining()),

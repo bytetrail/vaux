@@ -194,7 +194,6 @@ pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
                 #min_size_check
                 #decode_properties
                 #(#decode_field_payload)*
-                println!("Finished decoding payload fields");
                 #(#decode_remaining_payload)*
                 Ok(bytes_read)
             }
