@@ -5,10 +5,15 @@
 
 ![Logo](images/vaux-logo-3.svg) 
 
-Vaux, pronounced vôks, is an MQTT v5.0 broker built using Rust. Vaux is designed
-to be a secure, reliable, and performant MQTT broker able to run on a range of 
-computing platforms from a Raspberry PI to a server class compute environment in
-public cloud infrastructure.
+Vaux, pronounced vôks, is an MQTT v5.0 client library and broker built using Rust. 
+Vaux is designed to be a secure, reliable, and performant MQTT broker able to run on
+a range of computing platforms from a Raspberry PI to a server class compute environment in
+public cloud infrastructure. 
+
+With Rust and cargo we are able to develop a client and
+broker architecture that includes only those capabilities required at runtime in your 
+environment. This provides for a less resource intensive deployment with a smaller attack 
+surface that meets the needs of the deployment.
 
 MQTT v3 is on the roadmap; however, is not initially supported.
 
