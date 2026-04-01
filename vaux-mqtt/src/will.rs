@@ -2,12 +2,12 @@ use crate::connect::Connect;
 use crate::property::UserProperty;
 use crate::publish::PayloadFormat;
 use crate::{
-    codec::{self, PropertyCodecSize},
+    codec::{self, },
     MqttCodecError, PropertyType, QoSLevel,
 };
-use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize};
+use vaux_macro::{CodecSize, Decode, Encode, PropertyEncode, PropertyCodecSize};
 
-#[derive(Debug, Default, Clone, Eq, PartialEq, Encode, Decode, PropertyCodecSize, CodecSize)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Encode, Decode, PropertyEncode, PropertyCodecSize, CodecSize)]
 /// MQTT Will message. The Will message name comes from last will and
 /// testament. The will message is typically sent under the following
 /// conditions when a client disconnects:

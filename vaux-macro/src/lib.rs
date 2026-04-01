@@ -3,7 +3,7 @@ mod encode;
 mod size;
 mod util;
 use crate::decode::decode_internal;
-use crate::encode::encode_internal;
+use crate::encode::{encode_internal, property_encode_internal};
 use crate::size::field_size;
 use crate::util::{
     compile_error, filter_attributes, get_packet_type, get_skip_if_path,
@@ -31,6 +31,7 @@ pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_FIELD: &str = "field";
 pub fn packet(args: TokenStream, input: TokenStream) -> TokenStream {
     let codec_size_impl = derive_codec_size(input.clone());
     let codec_property_size_impl = derive_codec_property_size(input.clone());
+    let property_encode_impl = derive_property_encode(input.clone());
     let encode_impl = encode_packet(input.clone());
     let decode_impl = derive_decode(input.clone());
 
@@ -101,6 +102,7 @@ pub fn packet(args: TokenStream, input: TokenStream) -> TokenStream {
         .into_iter()
         .chain(codec_size_impl)
         .chain(codec_property_size_impl)
+        .chain(property_encode_impl)
         .chain(encode_impl)
         .chain(decode_impl)
         .collect()
@@ -158,6 +160,8 @@ pub fn derive_codec_property_size(input: TokenStream) -> TokenStream {
     };
     TokenStream::from(size_wrapper)
 }
+
+
 
 /// Derives the CodecSize trait for a struct, calculating the total size based on its fields.
 /// If the struct contains fields marked as properties, it includes the property size and
@@ -242,6 +246,11 @@ pub fn derive_codec_size(input: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(size_wrapper)
+}
+
+#[proc_macro_derive(PropertyEncode, attributes(codec))]
+pub fn derive_property_encode(input: TokenStream) -> TokenStream {
+    property_encode_internal(input, false)
 }
 
 #[proc_macro_derive(Encode, attributes(codec))]

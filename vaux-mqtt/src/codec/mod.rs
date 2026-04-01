@@ -20,6 +20,14 @@ pub trait CodecSize {
     fn codec_size(&self) -> u32;
 }
 
+pub trait PropertyEncode {
+    fn property_encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError>;
+}
+
+pub trait PropertyDecode {
+    fn property_decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError>;
+}   
+
 pub trait Encode {
     fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError>;
 }

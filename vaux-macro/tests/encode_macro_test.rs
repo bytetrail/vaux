@@ -1,20 +1,29 @@
 use bytes::BufMut;
-use vaux_macro::{CodecSize, Encode, PropertyCodecSize};
+use vaux_macro::{CodecSize, Encode, PropertyCodecSize, PropertyEncode};
 
 mod codec {
     pub use crate::MqttCodecError;
     use bytes::BufMut;
     pub use bytes::BytesMut;
 
-    pub trait CodecSize {
-        fn codec_size(&self) -> u32;
-    }
-
     pub trait PropertyCodecSize {
         fn property_size(&self) -> u32;
     }
 
-    pub trait Encode {
+    pub trait CodecSize : PropertyCodecSize {
+        fn codec_size(&self) -> u32;
+    }
+
+    
+    pub trait PropertyEncode {
+        fn property_encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError>;
+    }
+
+    pub trait PropertyDecode {
+        fn property_decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError>;
+    }
+
+    pub trait Encode: PropertyEncode {
         fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError>;
     }
 
@@ -102,9 +111,9 @@ pub struct MqttCodecError {
 
 #[test]
 fn test_primitive_encode_impl() {
-    use crate::codec::Encode;
+    use crate::codec::{PropertyEncode, CodecSize, PropertyCodecSize, Encode};
 
-    #[derive(CodecSize, Encode)]
+    #[derive(CodecSize, PropertyCodecSize, PropertyEncode, Encode)]
     struct TestStruct {
         _a: u8,
         _b: u16,
@@ -132,9 +141,9 @@ fn test_primitive_encode_impl() {
 
 #[test]
 fn test_string_encode_impl() {
-    use crate::codec::Encode;
+    use crate::codec::{PropertyEncode, CodecSize, PropertyCodecSize, Encode};
 
-    #[derive(CodecSize, Encode)]
+    #[derive(CodecSize, PropertyCodecSize, PropertyEncode, Encode)]
     struct TestStruct {
         test_string: String,
     }
@@ -153,9 +162,9 @@ fn test_string_encode_impl() {
 
 #[test]
 fn test_option_string_encode_impl() {
-    use crate::codec::Encode;
+    use crate::codec::{PropertyEncode, CodecSize, PropertyCodecSize, Encode};
 
-    #[derive(CodecSize, Encode)]
+    #[derive(PropertyCodecSize, CodecSize, PropertyEncode, Encode)]
     struct TestStruct {
         optional_string: Option<String>,
     }
@@ -181,7 +190,7 @@ fn test_option_string_encode_impl() {
 
 #[test]
 fn test_custom_encode_with() {
-    use crate::codec::Encode;
+    use crate::codec::{PropertyEncode, CodecSize, PropertyCodecSize, Encode};
 
     fn custom_size(value: &u64) -> u32 {
         4 // Custom size logic: for example, always 4 bytes
@@ -196,7 +205,7 @@ fn test_custom_encode_with() {
         Ok(())
     }
 
-    #[derive(CodecSize, Encode)]
+    #[derive(CodecSize, PropertyCodecSize, PropertyEncode,Encode)]
     struct TestStruct {
         #[codec(size_with = "custom_size", encode_with = "custom_encode")]
         custom_encoded_field: u64,
@@ -222,9 +231,9 @@ fn is_zero(s: &u32) -> bool {
 
 #[test]
 fn test_skip_if_impl() {
-    use crate::codec::CodecSize;
+    use crate::codec::{PropertyEncode, CodecSize, PropertyCodecSize, Encode};
 
-    #[derive(CodecSize)]
+    #[derive(CodecSize, PropertyCodecSize, PropertyEncode, Encode)]
     struct TestStruct {
         #[codec(skip_if = "is_zero")]
         optional_w_none: u32,
@@ -250,13 +259,13 @@ fn test_skip_if_impl() {
 
 #[test]
 fn test_property_skip_if_impl() {
-    use crate::codec::{CodecSize, PropertyCodecSize};
+    use crate::codec::{PropertyEncode, CodecSize, PropertyCodecSize, Encode};
 
     fn is_zero(s: &u32) -> bool {
         *s == 0
     }
 
-    #[derive(PropertyCodecSize, CodecSize, Encode)]
+    #[derive(PropertyCodecSize, CodecSize, PropertyEncode, Encode)]
     struct TestStruct {
         #[codec(property_type = "TestProperty::PropertyOne")]
         #[codec(skip_if = "is_zero")]

@@ -1,4 +1,4 @@
-use crate::{codec, property::UserProperty, MqttCodecError, PacketType, PropertyType, QoSLevel};
+use crate::{codec::{self, Encode}, property::UserProperty, MqttCodecError, PacketType, PropertyType, QoSLevel};
 use bytes::{Buf, BufMut, BytesMut};
 use vaux_macro::packet;
 

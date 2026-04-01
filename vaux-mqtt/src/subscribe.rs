@@ -1,7 +1,6 @@
-use crate::codec::{ErrorKind, MAX_VARIABLE_BYTE_INT, MIN_VARIABLE_BYTE_INT};
+use crate::codec::{Encode, ErrorKind, MAX_VARIABLE_BYTE_INT, MIN_VARIABLE_BYTE_INT};
 use crate::{MqttCodecError, PropertyType, Reason, codec};
 use crate::{property::UserProperty, MqttError, MqttVersion, QoSLevel};
-use bytes::{Buf, BufMut};
 use vaux_macro::{packet, CodecSize, Decode, Encode};
 
 /// MQTT v5 3.8.3.1 Subscription Options

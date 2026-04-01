@@ -12,7 +12,7 @@ pub mod will;
 
 pub use codec::{MqttCodecError, Packet, PacketType, QoSLevel, Reason};
 use vaux_macro::packet;
-use crate::codec::Decode;
+use crate::codec::{Encode, PropertyEncode, PropertyCodecSize, Decode};
 
 pub use {
     connack::ConnAck,
