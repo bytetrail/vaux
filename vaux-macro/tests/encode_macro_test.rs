@@ -259,7 +259,7 @@ fn test_skip_if_impl() {
 
 #[test]
 fn test_property_skip_if_impl() {
-    use crate::codec::{PropertyEncode, CodecSize, PropertyCodecSize, Encode};
+    use crate::codec::{CodecSize, PropertyCodecSize};
 
     fn is_zero(s: &u32) -> bool {
         *s == 0

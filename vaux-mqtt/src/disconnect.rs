@@ -1,7 +1,8 @@
-use crate::{MqttCodecError, PropertyType, Reason, codec::{self, CodecSize, PropertyCodecSize}, property::UserProperty};
-use vaux_macro::{PropertyCodecSize};
+use crate::{MqttCodecError, PropertyType, Reason, codec::{self, CodecSize, PropertyCodecSize, PropertyEncode}, property::UserProperty};
+use bytes::Buf;
+use vaux_macro::{PropertyCodecSize, PropertyEncode};
 
-#[derive(Clone, Debug, PartialEq, Eq, PropertyCodecSize)]
+#[derive(Clone, Debug, PartialEq, Eq, PropertyCodecSize, PropertyEncode)]
 pub struct Disconnect {
     fixed_header: codec::FixedHeader,
     pub reason: Reason,
@@ -88,7 +89,6 @@ impl codec::CodecSize for Disconnect {
 
 impl codec::Encode for Disconnect {
     fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
-        use bytes::{BufMut, BytesMut};
         self.fixed_header.encode(dest)?;
         codec::encode_variable_byte_int(self.codec_size(), dest)?;
         if self.reason != Reason::NormalDisconnect || self.property_size() > 0 {
@@ -97,20 +97,7 @@ impl codec::Encode for Disconnect {
         if self.property_size()  == 0 {
             return Ok(());
         }
-        codec::encode_variable_byte_int(self.property_size(), dest)?;
-        if let Some(v) = self.session_expiry_interval {
-            dest.put_u8(PropertyType::SessionExpiryInterval as u8);
-            dest.put_u32(v);
-        }
-        if let Some(v) = self.reason_string.as_ref() {
-            dest.put_u8(PropertyType::ReasonString as u8);
-            codec::encode_string(v, dest)?;
-        }
-        if let Some(v) = self.server_reference.as_ref() {
-            dest.put_u8(PropertyType::ServerReference as u8);
-            codec::encode_string(v, dest)?;
-        }
-        self.user_properties.encode(dest)?;
+        self.property_encode(dest)?;
         Ok(())
     }
 }
@@ -120,7 +107,6 @@ impl codec::Encode for Disconnect {
             &mut self,
             src: &mut bytes::BytesMut,
         ) -> Result<usize, MqttCodecError> {
-            use bytes::{BufMut, Buf, BytesMut};
             let mut bytes_read = 0_usize;
             let mut min_decode_len = 0usize;
             let required_remaining = if bytes_read < 0usize {
@@ -137,17 +123,7 @@ impl codec::Encode for Disconnect {
                             required_remaining,
                             src.remaining(),
                         ).as_str(),
-                        // ::alloc::__export::must_use({
-                        //         ::alloc::fmt::format(
-                        //             format_args!(
-                        //                 "Insufficient data for decoding {0}: expected at least {1} bytes, got {2}",
-                        //                 "Disconnect",
-                        //                 0usize,
-                        //                 src.remaining(),
-                        //             ),
-                        //         )
-                        //     })
-                        //     .as_str(),
+
                         codec::ErrorKind::InsufficientData(
                             required_remaining,
                             src.remaining() as usize,

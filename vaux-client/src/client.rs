@@ -264,8 +264,7 @@ impl MqttClient {
         let mut subscribe = Subscribe::default();
         subscribe.packet_id = packet_id;
         for topic in topic_filter {
-            let mut subscription = SubscriptionFilter::new((*topic).to_string(), qos);
-            // self.subscriptions.push(subscription.clone());
+            let subscription = SubscriptionFilter::new((*topic).to_string(), qos);
             subscribe.add_filter(subscription);
         }
         self.packet_in
