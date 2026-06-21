@@ -6,15 +6,15 @@ pub mod property;
 pub mod publish;
 pub mod pubresp;
 pub mod subscribe;
-pub mod unsubscribe;
 pub mod test;
+pub mod unsubscribe;
 pub mod will;
 
 pub use codec::{MqttCodecError, Packet, PacketType, QoSLevel, Reason};
 use vaux_macro::packet;
-use crate::codec::{Encode, PropertyEncode, PropertyCodecSize, Decode};
 
 pub use {
+    codec::fixed::FixedHeader,
     connack::ConnAck,
     connect::Connect,
     disconnect::Disconnect,
@@ -23,7 +23,6 @@ pub use {
     pubresp::{PubAck, PubComp, PubRec, PubRel},
     subscribe::{Subscribe, SubscriptionFilter},
     will::{WillHeader, WillMessage},
-    codec::fixed::{FixedHeader},
 };
 
 pub enum MqttVersion {
@@ -76,9 +75,8 @@ impl std::fmt::Display for MqttError {
     }
 }
 
-
 #[packet(packet_type = "codec::PacketType::PingReq")]
-#[derive( Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct PingReq;
 
 impl Default for PingReq {
@@ -88,7 +86,6 @@ impl Default for PingReq {
         }
     }
 }
-
 
 #[packet(packet_type = "codec::PacketType::PingResp")]
 #[derive(Debug, Clone, Eq, PartialEq)]

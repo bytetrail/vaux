@@ -1,4 +1,8 @@
-use crate::{codec::{self, Encode}, property::UserProperty, MqttCodecError, PacketType, PropertyType, QoSLevel};
+use crate::{
+    codec::{self},
+    property::UserProperty,
+    MqttCodecError, PacketType, PropertyType, QoSLevel,
+};
 use bytes::{Buf, BufMut, BytesMut};
 use vaux_macro::packet;
 
@@ -78,10 +82,10 @@ pub struct Publish {
     #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
     #[codec(
-         payload_type = "remaining",
-         decode_with = "codec::decode_opt_vec_u8_raw",
-         encode_with = "codec::encode_opt_vec_u8_raw_ref",
-         size_with = "codec::codec_size_opt_vec_u8_raw"
+        payload_type = "remaining",
+        decode_with = "codec::decode_opt_vec_u8_raw",
+        encode_with = "codec::encode_opt_vec_u8_raw_ref",
+        size_with = "codec::codec_size_opt_vec_u8_raw"
     )]
     pub payload: Option<Vec<u8>>,
 }

@@ -1,6 +1,6 @@
 use crate::{
     skip_field,
-    util::{attribute_with_name_value, compile_error2, has_attribute_with_name_value},
+    util::{attribute_with_name_value, compile_error2, has_attribute_with_name_value, is_primitive_type},
 };
 use quote::quote;
 use syn::{punctuated::Punctuated, Meta, Token};
@@ -325,15 +325,6 @@ fn size_for_primitive_internal(field_type: &str) -> proc_macro2::TokenStream {
             field_type
         )),
     }
-}
-
-/// Checks if the given type name is a supported primitive type for size calculation.
-/// Currently supports u8, i8, bool, u16, i16, u32, i32, and char.
-fn is_primitive_type(type_name: &str) -> bool {
-    matches!(
-        type_name,
-        "u8" | "i8" | "bool" | "u16" | "i16" | "u32" | "i32" | "char"
-    )
 }
 
 /// Extracts the path from the ```codec(size_with = "path")``` attribute when present

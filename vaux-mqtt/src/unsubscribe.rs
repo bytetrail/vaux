@@ -1,13 +1,10 @@
-use std::{collections::HashSet, sync::LazyLock};
-
-use bytes::{Buf, BufMut};
 use vaux_macro::packet;
 
 use crate::{
-    FixedHeader, PacketType, PropertyType, Reason, codec::{self, CodecSize, Decode, Encode, MqttCodecError}, property::UserProperty 
+    codec::{self, MqttCodecError},
+    property::UserProperty,
+    PropertyType, Reason,
 };
-
-
 
 #[packet(packet_type = "codec::PacketType::UnsubAck")]
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -18,9 +15,8 @@ pub struct UnsubAck {
     #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
     #[codec(payload_type = "remaining")]
-    pub reason_code: Vec<Reason>,   
+    pub reason_code: Vec<Reason>,
 }
-
 
 #[packet(packet_type = "codec::PacketType::Unsubscribe")]
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -33,7 +29,6 @@ pub struct Unsubscribe {
 }
 
 impl Unsubscribe {
-
     pub fn new(packet_id: u16, topics: Vec<String>) -> Self {
         Self {
             packet_id,

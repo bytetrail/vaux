@@ -3,7 +3,7 @@ use quote::quote;
 use syn::{punctuated::Punctuated, Meta, Token};
 
 use crate::{
-    CODEC_ATTR, CODEC_ATTR_CODEC_MIN_SIZE_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, CODEC_ATTR_SKIP_ARG, CODEC_ATTR_SKIP_IF_ARG, PACKET_ATTR_PACKET_TYPE_ARG
+    CODEC_ATTR, CODEC_ATTR_ABBREVIATED_WHEN_ARG, CODEC_ATTR_AS_PACKET_ARG, CODEC_ATTR_CODEC_MIN_SIZE_ARG, CODEC_ATTR_NON_ABBREVIATED_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, CODEC_ATTR_SKIP_ARG, CODEC_ATTR_SKIP_DECODE_ARG, CODEC_ATTR_SKIP_IF_ARG, PACKET_ATTR_PACKET_TYPE_ARG
 };
 
 /// Generates a compile-time error with the given message.
@@ -31,6 +31,18 @@ pub(crate) fn is_property_field(attrs: &[syn::Attribute]) -> Result<bool, syn::E
 
 pub(crate) fn is_payload_field(attrs: &[syn::Attribute]) -> Result<bool, syn::Error> {
     has_attribute_with_name_value(attrs, CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG)
+}
+
+pub(crate) fn is_non_abbreviated_field(attrs: &[syn::Attribute]) -> Result<bool, syn::Error> {
+    has_attribute_with_path(attrs, CODEC_ATTR, CODEC_ATTR_NON_ABBREVIATED_ARG)
+}
+
+pub(crate) fn is_as_packet(attrs: &[syn::Attribute]) -> bool {
+    has_attribute_with_path(attrs, CODEC_ATTR, CODEC_ATTR_AS_PACKET_ARG).unwrap_or(false)
+}
+
+pub(crate) fn is_skip_decode(attrs: &[syn::Attribute]) -> bool {
+    has_attribute_with_path(attrs, CODEC_ATTR, CODEC_ATTR_SKIP_DECODE_ARG).unwrap_or(false)
 }
 
 /// Returns the payload type if there is a ```payload_type``` in the attributes for the field.
@@ -76,6 +88,35 @@ pub(crate) fn min_decode_size(attrs: &[syn::Attribute]) -> Option<usize> {
                         if let syn::Expr::Lit(lit_int) = &nv_pair.value {
                             if let syn::Lit::Int(lit_int) = &lit_int.lit {
                                 Some(lit_int.base10_parse::<usize>().unwrap())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        }
+    })
+}
+
+pub(crate) fn abbreviated_when_expr(attrs: &[syn::Attribute]) -> Option<syn::Expr> {
+    attrs.iter().find_map(|attr| {
+        if attr.path().is_ident(CODEC_ATTR) {
+            let nested = attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated);
+            nested.unwrap().iter().find_map(|meta| {
+                if meta.path().is_ident(CODEC_ATTR_ABBREVIATED_WHEN_ARG) {
+                    if let Meta::NameValue(nv_pair) = meta {
+                        if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
+                            if let syn::Lit::Str(lit_str) = &lit_expr.lit {
+                                Some(lit_str.parse::<syn::Expr>().unwrap())
                             } else {
                                 None
                             }

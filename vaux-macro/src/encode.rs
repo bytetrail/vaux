@@ -1,9 +1,9 @@
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{ItemStruct, Meta, Token, parse_macro_input, punctuated::Punctuated};
-use crate::{CODEC_ATTR, CODEC_ATTR_ENCODE_WITH_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, get_skip_if_path, is_payload_field, is_property_field, struct_has_attribute_with_name_value, util::{attribute_with_name_value, compile_error, compile_error2, has_attribute_with_name_value, is_primitive_type, payload_type, property_type, skip_field} };
+use crate::{CODEC_ATTR, CODEC_ATTR_ENCODE_WITH_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PROPERTY_TYPE_ARG, get_skip_if_path, is_payload_field, is_property_field, struct_has_attribute_with_name_value, util::{abbreviated_when_expr, attribute_with_name_value, compile_error, compile_error2, has_attribute_with_name_value, is_primitive_type, payload_type, property_type, skip_field} };
 
-pub(crate) fn property_encode_internal(input: TokenStream, as_packet: bool) -> TokenStream {
+pub(crate) fn property_encode_internal(input: TokenStream, _as_packet: bool) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let struct_name = &input.ident;    // ensure that the struct does not have tuple fields
     let fields = match &input.fields {
@@ -67,6 +67,7 @@ pub(crate) fn property_encode_internal(input: TokenStream, as_packet: bool) -> T
 pub(crate) fn encode_internal(input: TokenStream, as_packet: bool) -> TokenStream {
     let input = parse_macro_input!(input as ItemStruct);
     let struct_name = &input.ident;
+    let as_packet = as_packet || crate::util::is_as_packet(&input.attrs);
     // ensure that the struct does not have tuple fields
     let fields = match &input.fields {
         syn::Fields::Named(fields_named) => Some(fields_named),
@@ -90,33 +91,34 @@ pub(crate) fn encode_internal(input: TokenStream, as_packet: bool) -> TokenStrea
         false
     };
     // encode the non-property fields first, then the property fields if any
-    let header_fields = if let Some(fields) = fields {
-        fields
-            .named
-        .iter()
-        .filter_map(|f| {
-            if !(is_property_field(&f.attrs).unwrap_or(false)
-                || is_payload_field(&f.attrs).unwrap_or(false))
+    let mut header_fields = Vec::new();
+    let mut non_abbreviated_header_fields = Vec::new();
+    if let Some(fields) = fields {
+        for f in &fields.named {
+            if is_property_field(&f.attrs).unwrap_or(false)
+                || is_payload_field(&f.attrs).unwrap_or(false)
             {
-                if let Some(skip_path) = get_skip_if_path(&f.attrs) {
-                    let field_name = f.ident.as_ref().unwrap();
-                    let field_encode = encode_field(f);
-                    Some(quote! {
-                        if !#skip_path(&self.#field_name) {
-                            #field_encode
-                        }
-                    })
-                } else {
-                    Some(encode_field(f))
+                continue;
+            }
+            let is_non_abbrev = crate::util::is_non_abbreviated_field(&f.attrs).unwrap_or(false);
+            let encoded = if let Some(skip_path) = get_skip_if_path(&f.attrs) {
+                let field_name = f.ident.as_ref().unwrap();
+                let field_encode = encode_field(f);
+                quote! {
+                    if !#skip_path(&self.#field_name) {
+                        #field_encode
+                    }
                 }
             } else {
-                None
+                encode_field(f)
+            };
+            if is_non_abbrev {
+                non_abbreviated_header_fields.push(encoded);
+            } else {
+                header_fields.push(encoded);
             }
-        })
-        .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
+        }
+    }
 
 
 
@@ -152,9 +154,21 @@ pub(crate) fn encode_internal(input: TokenStream, as_packet: bool) -> TokenStrea
         quote! {}
     };
 
+    let abbreviated_when = abbreviated_when_expr(&input.attrs);
+
     let property_encode = if has_properties && as_packet {
         quote! {
             self.property_encode(dest)?;
+        }
+    } else {
+        quote! {}
+    };
+
+    let abbreviated_check = if let Some(abbreviated_expr) = abbreviated_when {
+        quote! {
+            if #abbreviated_expr {
+                return Ok(());
+            }
         }
     } else {
         quote! {}
@@ -167,6 +181,8 @@ pub(crate) fn encode_internal(input: TokenStream, as_packet: bool) -> TokenStrea
                 use codec::PropertyEncode;
                 #packet_encode
                 #(#header_fields)*
+                #abbreviated_check
+                #(#non_abbreviated_header_fields)*
                 #property_encode
                 #(#payload_fields)*
                 Ok(())
@@ -196,7 +212,7 @@ pub(crate) fn encode_field(field: &syn::Field) -> proc_macro2::TokenStream {
     if property_type.is_none() && is_property {
         return compile_error2("Property attribute requires a property_type argument");
     } 
-    let payload_type = payload_type(&field.attrs);
+    let _payload_type = payload_type(&field.attrs);
 
     // convert the property_type str to an enumeration path
     let property_type_ident = if is_property && property_type.is_some() { 
@@ -301,7 +317,7 @@ pub(crate) fn encode_for_vec(
                     "i8" | "u16" | "i16" | "i32" | "u32" | "u64" | "i64" | "f32" | "f64" | "bool" => {
                         return compile_error2("Unsupported Vec inner type for Encode derive");
                     }
-                    field_type=> if is_optional {
+                    _field_type=> if is_optional {
                         quote! {
                             for item in #field {
                                 #prop_ident_encode

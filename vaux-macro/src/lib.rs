@@ -6,7 +6,7 @@ use crate::decode::decode_internal;
 use crate::encode::{encode_internal, property_encode_internal};
 use crate::size::field_size;
 use crate::util::{
-    compile_error, filter_attributes, get_packet_type, get_skip_if_path,
+    abbreviated_when_expr, compile_error, filter_attributes, get_packet_type, get_skip_if_path,
     has_attribute_with_name_value, is_payload_field, is_property_field, skip_field,
     struct_has_attribute_with_name_value,
 };
@@ -26,6 +26,10 @@ pub(crate) const CODEC_ATTR_PAYLOAD_ARG: &str = "payload_type";
 pub(crate) const CODEC_ATTR_CODEC_MIN_SIZE_ARG: &str = "min_decode";
 pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_REMAINING: &str = "remaining";
 pub(crate) const CODEC_ATTR_PAYLOAD_TYPE_FIELD: &str = "field";
+pub(crate) const CODEC_ATTR_ABBREVIATED_WHEN_ARG: &str = "abbreviated_when";
+pub(crate) const CODEC_ATTR_NON_ABBREVIATED_ARG: &str = "non_abbreviated";
+pub(crate) const CODEC_ATTR_AS_PACKET_ARG: &str = "as_packet";
+pub(crate) const CODEC_ATTR_SKIP_DECODE_ARG: &str = "skip_decode";
 
 #[proc_macro_attribute]
 pub fn packet(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -33,11 +37,18 @@ pub fn packet(args: TokenStream, input: TokenStream) -> TokenStream {
     let codec_property_size_impl = derive_codec_property_size(input.clone());
     let property_encode_impl = derive_property_encode(input.clone());
     let encode_impl = encode_packet(input.clone());
-    let decode_impl = derive_decode(input.clone());
+
+    let pre_parse: syn::ItemStruct = syn::parse(input.clone()).expect("failed to parse struct");
+    let skip_decode = crate::util::is_skip_decode(&pre_parse.attrs);
+    let decode_impl = if skip_decode {
+        TokenStream::new()
+    } else {
+        derive_decode(input.clone())
+    };
 
     // get the packet type from the control packet attribute
     let input = parse_macro_input!(input as syn::ItemStruct);
-    let struct_attrs = filter_attributes(&input.attrs, &[PACKET_ATTR]);
+    let struct_attrs = filter_attributes(&input.attrs, &[PACKET_ATTR, CODEC_ATTR]);
     let struct_name = &input.ident;
     let struct_vis = &input.vis;
 
@@ -45,10 +56,39 @@ pub fn packet(args: TokenStream, input: TokenStream) -> TokenStream {
     let nv = parse_macro_input!(args as syn::MetaNameValue);
     let packet_type = get_packet_type(&nv);
 
+    // check if the user's derive list includes Default
+    let has_default_derive = struct_attrs.iter().any(|attr| {
+        if attr.path().is_ident("derive") {
+            if let Ok(nested) = attr.parse_args_with(syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated) {
+                return nested.iter().any(|p| p.is_ident("Default"));
+            }
+        }
+        false
+    });
+
+    // filter Default from derive attributes to replace with a packet-aware impl
+    let struct_attrs: Vec<syn::Attribute> = if has_default_derive {
+        struct_attrs.iter().map(|attr| {
+            if attr.path().is_ident("derive") {
+                if let Ok(nested) = attr.parse_args_with(syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated) {
+                    let filtered: Vec<&syn::Path> = nested.iter().filter(|p| !p.is_ident("Default")).collect();
+                    if filtered.is_empty() {
+                        return syn::parse_quote!(#[cfg(any())]);
+                    }
+                    return syn::parse_quote!(#[derive(#(#filtered),*)]);
+                }
+            }
+            attr.clone()
+        }).collect()
+    } else {
+        struct_attrs
+    };
+
     // filter out the codec attributes as no longer needed and add the fixed header
     let mut struct_fields = quote! {
         pub fixed_header: codec::FixedHeader,
     };
+    let mut default_field_inits = Vec::new();
 
     match &input.fields {
         syn::Fields::Named(fields_named) => {
@@ -63,6 +103,11 @@ pub fn packet(args: TokenStream, input: TokenStream) -> TokenStream {
 
                     #(#field_attrs)*
                     #field_vis #field_name: #field_type,
+                };
+                if has_default_derive {
+                    default_field_inits.push(quote! {
+                        #field_name: Default::default(),
+                    });
                 }
             }
         }
@@ -78,11 +123,28 @@ pub fn packet(args: TokenStream, input: TokenStream) -> TokenStream {
         }
     }
 
+    let default_impl = if has_default_derive {
+        quote! {
+            impl Default for #struct_name {
+                fn default() -> Self {
+                    Self {
+                        fixed_header: codec::FixedHeader::new(#packet_type),
+                        #(#default_field_inits)*
+                    }
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let output = quote! {
         #(#struct_attrs)*
         #struct_vis struct #struct_name {
             #struct_fields
         }
+
+        #default_impl
 
         impl #struct_name {
             #struct_vis fn new_with_fixed_header(fixed_header: codec::FixedHeader) -> Result<Self, codec::MqttCodecError> {
@@ -199,37 +261,64 @@ pub fn derive_codec_size(input: TokenStream) -> TokenStream {
         false
     };
     let mut field_sizes = Vec::new();
+    let mut non_abbreviated_field_sizes = Vec::new();
 
     if let Some(fields) = fields {
         for field in &fields.named {
-            if !has_attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
+            if has_attribute_with_name_value(&field.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
                 .unwrap_or(false)
             {
-                let field_size_calc = field_size(field);
-                if let Some(skip_path) = get_skip_if_path(&field.attrs) {
-                    let field_name = field.ident.as_ref().unwrap();
-                    field_sizes.push(quote! {
-                        if !#skip_path(&self.#field_name) {
-                            #field_size_calc
-                        }
-                    });
-                } else {
-                    field_sizes.push(field_size_calc);
-                }
                 continue;
+            }
+            let is_non_abbrev = crate::util::is_non_abbreviated_field(&field.attrs).unwrap_or(false);
+            let field_size_calc = field_size(field);
+            let sized = if let Some(skip_path) = get_skip_if_path(&field.attrs) {
+                let field_name = field.ident.as_ref().unwrap();
+                quote! {
+                    if !#skip_path(&self.#field_name) {
+                        #field_size_calc
+                    }
+                }
+            } else {
+                field_size_calc
+            };
+            if is_non_abbrev {
+                non_abbreviated_field_sizes.push(sized);
+            } else {
+                field_sizes.push(sized);
             }
         }
     }
-    let size_wrapper = if has_properties {
-        quote! {
-            impl codec::CodecSize for #name {
+    let abbreviated_when = abbreviated_when_expr(&input.attrs);
 
-                fn codec_size(&self) -> u32 {
-                    use codec::PropertyCodecSize;
-                    let mut total_size = 0;
-                    #(#field_sizes)*
-                    let property_size = self.property_size();
-                    total_size + property_size + codec::variable_byte_int_size(property_size)
+    let size_wrapper = if has_properties {
+        if let Some(abbreviated_expr) = abbreviated_when {
+            quote! {
+                impl codec::CodecSize for #name {
+                    fn codec_size(&self) -> u32 {
+                        use codec::PropertyCodecSize;
+                        let mut total_size = 0;
+                        #(#field_sizes)*
+                        if #abbreviated_expr {
+                            return total_size;
+                        }
+                        #(#non_abbreviated_field_sizes)*
+                        let property_size = self.property_size();
+                        total_size + property_size + codec::variable_byte_int_size(property_size)
+                    }
+                }
+            }
+        } else {
+            quote! {
+                impl codec::CodecSize for #name {
+                    fn codec_size(&self) -> u32 {
+                        use codec::PropertyCodecSize;
+                        let mut total_size = 0;
+                        #(#field_sizes)*
+                        #(#non_abbreviated_field_sizes)*
+                        let property_size = self.property_size();
+                        total_size + property_size + codec::variable_byte_int_size(property_size)
+                    }
                 }
             }
         }
@@ -239,6 +328,7 @@ pub fn derive_codec_size(input: TokenStream) -> TokenStream {
                 fn codec_size(&self) -> u32 {
                     let mut total_size = 0;
                     #(#field_sizes)*
+                    #(#non_abbreviated_field_sizes)*
                     total_size
                 }
             }

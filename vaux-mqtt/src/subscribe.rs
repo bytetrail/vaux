@@ -1,5 +1,5 @@
-use crate::codec::{Encode, ErrorKind, MAX_VARIABLE_BYTE_INT, MIN_VARIABLE_BYTE_INT};
-use crate::{MqttCodecError, PropertyType, Reason, codec};
+use crate::codec::{ErrorKind, MAX_VARIABLE_BYTE_INT, MIN_VARIABLE_BYTE_INT};
+use crate::{codec, MqttCodecError, PropertyType, Reason};
 use crate::{property::UserProperty, MqttError, MqttVersion, QoSLevel};
 use vaux_macro::{packet, CodecSize, Decode, Encode};
 
@@ -40,25 +40,22 @@ pub struct SubAck {
     pub reason: Option<String>,
     #[codec(property_type = "PropertyType::UserProperty")]
     pub user_properties: UserProperty,
-    #[codec(
-        payload_type = "remaining",
-        size_with = "codec::codec_size_vec_reason",
-    )]
+    #[codec(payload_type = "remaining", size_with = "codec::codec_size_vec_reason")]
     pub reason_codes: Vec<Reason>,
 }
-
-
-
 
 impl SubAck {
     pub fn new_with_packet_id(packet_id: u16) -> Result<Self, MqttCodecError> {
         if packet_id == 0 {
-            return Err(MqttCodecError::new_with_kind("2.2.1 Packet identified must not be 0", ErrorKind::InvalidPacketIdentifier));    
+            return Err(MqttCodecError::new_with_kind(
+                "2.2.1 Packet identified must not be 0",
+                ErrorKind::InvalidPacketIdentifier,
+            ));
         }
         Ok(Self {
             packet_id,
             ..Default::default()
-        })  
+        })
     }
 
     pub fn packet_id(&self) -> u16 {
@@ -67,7 +64,10 @@ impl SubAck {
 
     pub fn set_packet_id(&mut self, packet_id: u16) -> Result<(), MqttCodecError> {
         if packet_id == 0 {
-            return Err(MqttCodecError::new_with_kind("2.2.1 Packet identified must not be 0", ErrorKind::InvalidPacketIdentifier));    
+            return Err(MqttCodecError::new_with_kind(
+                "2.2.1 Packet identified must not be 0",
+                ErrorKind::InvalidPacketIdentifier,
+            ));
         }
         self.packet_id = packet_id;
         Ok(())
@@ -144,8 +144,6 @@ pub struct Subscribe {
     #[codec(payload_type = "remaining")]
     pub filter: Vec<SubscriptionFilter>,
 }
-
-
 
 impl Default for Subscribe {
     fn default() -> Self {

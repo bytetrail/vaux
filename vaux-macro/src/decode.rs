@@ -1,11 +1,11 @@
 use crate::{
-    CODEC_ATTR, CODEC_ATTR_CODEC_MIN_SIZE_ARG, CODEC_ATTR_DECODE_WITH_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PAYLOAD_TYPE_FIELD, CODEC_ATTR_PAYLOAD_TYPE_REMAINING, CODEC_ATTR_PROPERTY_TYPE_ARG, skip_field, util::{
-        attribute_with_name_value, compile_error, compile_error2, has_attribute_with_name_value, is_primitive_type, min_decode_size, payload_type, property_type, struct_has_attribute_with_name_value
+    CODEC_ATTR, CODEC_ATTR_DECODE_WITH_ARG, CODEC_ATTR_PAYLOAD_ARG, CODEC_ATTR_PAYLOAD_TYPE_FIELD, CODEC_ATTR_PAYLOAD_TYPE_REMAINING, CODEC_ATTR_PROPERTY_TYPE_ARG, skip_field, util::{
+        abbreviated_when_expr, attribute_with_name_value, compile_error, compile_error2, has_attribute_with_name_value, is_primitive_type, min_decode_size, payload_type, property_type, struct_has_attribute_with_name_value
     }
 };
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{FieldsNamed, Meta, Token, parse_macro_input, punctuated::Punctuated};
+use syn::{Meta, Token, parse_macro_input, punctuated::Punctuated};
 
 pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as syn::ItemStruct);
@@ -38,24 +38,25 @@ pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
     };
 
     // decode the non-property, non-payload fields first, then the property fields if any
-    let header_field_decoded = if let Some(fields) = fields {
-        fields.named
-        .iter()
-        .filter_map(|f| {
-            if !(has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
+    let mut header_field_decoded = Vec::new();
+    let mut non_abbreviated_header_decoded = Vec::new();
+    if let Some(fields) = fields {
+        for f in &fields.named {
+            if has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PROPERTY_TYPE_ARG)
                 .unwrap_or(false)
                 || has_attribute_with_name_value(&f.attrs, CODEC_ATTR, CODEC_ATTR_PAYLOAD_ARG)
-                    .unwrap_or(false))
+                    .unwrap_or(false)
             {
-                Some(decode_field(f))
-            } else {
-                None
+                continue;
             }
-        })
-        .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
+            let is_non_abbrev = crate::util::is_non_abbreviated_field(&f.attrs).unwrap_or(false);
+            if is_non_abbrev {
+                non_abbreviated_header_decoded.push(decode_field(f));
+            } else {
+                header_field_decoded.push(decode_field(f));
+            }
+        }
+    }
     
     let property_field_decode = if let Some(fields) = fields {
         fields
@@ -183,6 +184,17 @@ pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
         quote! {  }
     };
 
+    let abbreviated_when = abbreviated_when_expr(&input.attrs);
+    let abbreviated_check = if abbreviated_when.is_some() {
+        quote! {
+            if !src.has_remaining() {
+                return Ok(bytes_read);
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let decode_impl = quote! {
         impl codec::Decode for #struct_name {
             fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<usize, MqttCodecError> {
@@ -191,6 +203,8 @@ pub(crate) fn decode_internal(input: TokenStream) -> TokenStream {
                 #min_decode_len
                 #min_size_check
                 #(#header_field_decoded)*
+                #abbreviated_check
+                #(#non_abbreviated_header_decoded)*
                 #min_size_check
                 #decode_properties
                 #(#decode_field_payload)*
@@ -257,6 +271,7 @@ pub(crate) fn decode_field(field: &syn::Field) -> proc_macro2::TokenStream {
                 decode_for_decode_with(
                     &field_name,
                     &decode_with.unwrap(),
+                    optional_field,
                     &property_type,
                 )
             } else {
@@ -415,7 +430,7 @@ fn decode_for_vec(
     field_name: &syn::Ident,
     type_path: &syn::TypePath,
     optional_field: bool,
-    property_type: &Option<syn::Path>,
+    _property_type: &Option<syn::Path>,
 ) -> proc_macro2::TokenStream {
     let decode_stmt = match &type_path.path.segments.last().unwrap().arguments {
         syn::PathArguments::AngleBracketed(args) => match args.args.first().unwrap() {
@@ -502,6 +517,7 @@ fn decode_for_vec(
 fn decode_for_decode_with(
     field_name: &syn::Ident,
     attr: &syn::Attribute,
+    _optional_field: bool,
     property_type: &Option<syn::Path>,
 ) -> proc_macro2::TokenStream {
     let decode_path = match attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated) {
@@ -532,34 +548,134 @@ fn decode_for_decode_with(
     let decode_with = decode_path.unwrap();
 
     if property_type.is_some() {
-        //      if optional_field {
-        // quote! {
-        //         let( value, decode_bytes_read) = #decode_with(src)?;
-        //         property_bytes_read += decode_bytes_read;
-        //         self.#field_name = Some(value);
-        //     }
-        // } else {
         quote! {
-            let  (value, decode_bytes_read) = #decode_with(src)?;
+            let (value, decode_bytes_read) = #decode_with(src)?;
             property_bytes_read += decode_bytes_read;
-            let googly = 2;
             self.#field_name = value;
         }
-        // }
     } else {
-        // if optional_field {
-        //     quote! {
-        //         let (value, decode_bytes_read) = #decode_with(src)?;
-        //         bytes_read += decode_bytes_read;
-        //         self.#field_name = Some(value);
-        //     }
-        // } else {
         quote! {
             let (value, decode_bytes_read) = #decode_with(src)?;
             bytes_read += decode_bytes_read;
-            let googly = 1;
             self.#field_name = value;
         }
-        //        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use quote::quote;
+
+    #[test]
+    fn test_decode_with_non_optional() {
+        let field_name = syn::Ident::new("custom_field", proc_macro2::Span::call_site());
+        let attr: syn::Attribute = syn::parse_quote!(#[codec(decode_with = "custom_decode_fn")]);
+        let tokens = decode_for_decode_with(&field_name, &attr, false, &None);
+        let expected = quote! {
+            let (value, decode_bytes_read) = custom_decode_fn(src)?;
+            bytes_read += decode_bytes_read;
+            self.custom_field = value;
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_decode_with_optional() {
+        let field_name = syn::Ident::new("opt_field", proc_macro2::Span::call_site());
+        let attr: syn::Attribute = syn::parse_quote!(#[codec(decode_with = "decode_opt_value")]);
+        let tokens = decode_for_decode_with(&field_name, &attr, true, &None);
+        let expected = quote! {
+            let (value, decode_bytes_read) = decode_opt_value(src)?;
+            bytes_read += decode_bytes_read;
+            self.opt_field = value;
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_decode_with_property() {
+        let field_name = syn::Ident::new("prop_field", proc_macro2::Span::call_site());
+        let attr: syn::Attribute = syn::parse_quote!(#[codec(decode_with = "decode_prop_value")]);
+        let prop_type: syn::Path = syn::parse_str("PropertyType::TestProp").unwrap();
+        let tokens = decode_for_decode_with(&field_name, &attr, false, &Some(prop_type));
+        let expected = quote! {
+            let (value, decode_bytes_read) = decode_prop_value(src)?;
+            property_bytes_read += decode_bytes_read;
+            self.prop_field = value;
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_decode_for_string_non_optional() {
+        let field_name = syn::Ident::new("name", proc_macro2::Span::call_site());
+        let tokens = decode_for_string(&field_name, false, &None);
+        let expected = quote! {
+            bytes_read += self.name.decode(src)?;
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_decode_for_string_optional() {
+        let field_name = syn::Ident::new("name", proc_macro2::Span::call_site());
+        let tokens = decode_for_string(&field_name, true, &None);
+        let expected = quote! {
+            let mut value = String::new();
+            bytes_read += value.decode(src)?;
+            self.name = Some(value);
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_decode_for_string_property() {
+        let field_name = syn::Ident::new("reason_string", proc_macro2::Span::call_site());
+        let prop_type: syn::Path = syn::parse_str("PropertyType::ReasonString").unwrap();
+        let tokens = decode_for_string(&field_name, true, &Some(prop_type));
+        let expected = quote! {
+            let mut value = String::new();
+            property_bytes_read += value.decode(src)?;
+            self.reason_string = Some(value);
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_decode_for_primitive_u16() {
+        let field_name = syn::Ident::new("packet_id", proc_macro2::Span::call_site());
+        let field_type: syn::Type = syn::parse_str("u16").unwrap();
+        let tokens = decode_for_primitive(&field_name, &field_type, false, &None);
+        let expected = quote! {
+            self.packet_id = src.get_u16();
+            bytes_read += 2;
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_decode_for_primitive_optional_u32() {
+        let field_name = syn::Ident::new("expiry", proc_macro2::Span::call_site());
+        let field_type: syn::Type = syn::parse_str("u32").unwrap();
+        let tokens = decode_for_primitive(&field_name, &field_type, true, &None);
+        let expected = quote! {
+            self.expiry = Some(src.get_u32());
+            bytes_read += 4;
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_decode_for_primitive_property() {
+        let field_name = syn::Ident::new("max_qos", proc_macro2::Span::call_site());
+        let field_type: syn::Type = syn::parse_str("u8").unwrap();
+        let prop_type: syn::Path = syn::parse_str("PropertyType::MaxQoS").unwrap();
+        let tokens = decode_for_primitive(&field_name, &field_type, true, &Some(prop_type));
+        let expected = quote! {
+            self.max_qos = Some(src.get_u8());
+            property_bytes_read += 1;
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
     }
 }

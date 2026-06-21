@@ -1,8 +1,8 @@
 use crate::{
-    codec::{self, PropertyCodecSize,  Encode, PropertyEncode},
+    codec::{self},
     property,
     will::WillHeader,
-    MqttCodecError, PropertyType,  QoSLevel, WillMessage,
+    MqttCodecError, PropertyType, QoSLevel, WillMessage,
 };
 use vaux_macro::packet;
 
@@ -17,6 +17,7 @@ const MQTT_PROTOCOL_NAME: &str = "MQTT";
 const MQTT_PROTOCOL_VERSION: u8 = 0x05;
 
 #[packet(packet_type = "codec::PacketType::Connect")]
+#[codec(skip_decode)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Connect {
     protocol_name: String,
@@ -184,5 +185,117 @@ impl Connect {
         self.set_will(true);
         self.set_will_qos(will.qos);
         self.set_will_retain(will.retain);
+    }
+}
+
+impl codec::Decode for Connect {
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<usize, MqttCodecError> {
+        use bytes::Buf;
+        let mut bytes_read = 0_usize;
+
+        // header fields
+        bytes_read += self.protocol_name.decode(src)?;
+        self.protocol_version = src.get_u8();
+        bytes_read += 1;
+        self.connect_flags = src.get_u8();
+        bytes_read += 1;
+        self.keep_alive = src.get_u16();
+        bytes_read += 2;
+
+        // properties
+        let (property_length, var_bytes_read) = codec::decode_variable_byte_int(src)?;
+        let property_length = property_length as usize;
+        bytes_read += var_bytes_read;
+        let mut property_bytes_read = 0_usize;
+        while property_bytes_read < property_length {
+            let property_type: PropertyType = src.get_u8().try_into()?;
+            property_bytes_read += 1;
+            match property_type {
+                PropertyType::SessionExpiryInterval => {
+                    let mut value = u32::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.session_expiry_interval = Some(value);
+                }
+                PropertyType::RecvMax => {
+                    self.receive_maximum = Some(src.get_u16());
+                    property_bytes_read += 2;
+                }
+                PropertyType::MaxPacketSize => {
+                    let mut value = u32::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.max_packet_size = Some(value);
+                }
+                PropertyType::TopicAliasMax => {
+                    self.topic_alias_maximum = Some(src.get_u16());
+                    property_bytes_read += 2;
+                }
+                PropertyType::ReqRespInfo => {
+                    self.request_response_info = Some(src.get_u8() != 0);
+                    property_bytes_read += 1;
+                }
+                PropertyType::ReqProblemInfo => {
+                    self.request_problem_info = Some(src.get_u8() != 0);
+                    property_bytes_read += 1;
+                }
+                PropertyType::AuthMethod => {
+                    let mut value = String::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.auth_method = Some(value);
+                }
+                PropertyType::AuthData => {
+                    let mut value = Vec::new();
+                    property_bytes_read += value.decode(src)?;
+                    self.auth_data = value;
+                }
+                PropertyType::UserProperty => {
+                    property_bytes_read += self.user_properties.decode(src)?;
+                }
+                _ => {
+                    return Err(codec::MqttCodecError::new_with_kind(
+                        format!(
+                            "MQTT v5 property type {:?} is not supported for Connect",
+                            property_type
+                        )
+                        .as_str(),
+                        codec::ErrorKind::UnsupportedProperty(property_type as u8),
+                    ));
+                }
+            }
+        }
+        bytes_read += property_bytes_read;
+
+        // payload: client_id (always present)
+        bytes_read += self.client_id.decode(src)?;
+
+        // payload: will fields (only if WILL flag set)
+        if self.will() {
+            let mut will_header = WillHeader::default();
+            bytes_read += will_header.decode(src)?;
+            self.will_properties = Some(will_header);
+
+            let mut value = Vec::new();
+            let var_bytes_read = value.decode(src)?;
+            bytes_read += var_bytes_read;
+            self.will_payload = value;
+
+            let mut value = String::default();
+            bytes_read += value.decode(src)?;
+            self.will_topic = Some(value);
+        }
+
+        // payload: username (only if USERNAME flag set)
+        if self.username() {
+            bytes_read += self.username.decode(src)?;
+        }
+
+        // payload: password (only if PASSWORD flag set)
+        if self.password() {
+            let mut value = Vec::new();
+            let var_bytes_read = value.decode(src)?;
+            bytes_read += var_bytes_read;
+            self.password = value;
+        }
+
+        Ok(bytes_read)
     }
 }
