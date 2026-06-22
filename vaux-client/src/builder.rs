@@ -168,6 +168,14 @@ impl ClientBuilder {
         self
     }
 
+    /// Enables or disables the client-side keep-alive ping. When enabled (the default),
+    /// the client automatically sends PINGREQ packets at the keep-alive interval.
+    /// Disabling this is useful for testing broker-side keep-alive timeout behavior.
+    pub fn with_keep_alive_enabled(mut self, enabled: bool) -> Self {
+        self.state.keep_alive_enabled = enabled;
+        self
+    }
+
     /// Sets the pingresp filter for the MQTT client. By default the client will not pass
     /// PINGRESP packets to the packet consumer. If with_pingresp is set to true, the
     /// client will pass PINGRESP packets to the packet consumer.

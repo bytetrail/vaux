@@ -408,20 +408,18 @@ impl MqttClient {
                     return Err(ClientError::new(e, session.end_session().await));
                 }
             }
-            // get the session keep alive duration set after the connect
             let keep_alive = session.keep_alive().await;
-            // set the client keep alive duration
             {
                 *_keep_alive.write().await = keep_alive;
             }
-            // get the session expiry duration set after the connect
             let session_expiry = session.session_expiry().await;
             {
                 *_session_expiry.write().await = session_expiry;
             }
+            let keep_alive_enabled = session.keep_alive_enabled();
             loop {
                 select! {
-                    _ = MqttClient::keep_alive_timer(keep_alive) => {
+                    _ = MqttClient::keep_alive_timer(keep_alive), if keep_alive_enabled => {
                         match session.handle_keep_alive().await {
                             Ok(_) => {
                                 // do nothing

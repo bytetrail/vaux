@@ -7,6 +7,7 @@ use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     RwLock,
 };
+use tokio_util::sync::CancellationToken;
 use vaux_mqtt::{Reason, WillMessage};
 
 #[derive(Debug, Default)]
@@ -169,6 +170,7 @@ impl SessionPool {
 #[derive(Debug)]
 pub(crate) enum SessionControl {
     Disconnect(Reason),
+    Deliver(Box<vaux_mqtt::Publish>),
 }
 
 #[derive(Debug)]
@@ -185,7 +187,7 @@ pub struct Session {
     keep_alive: Duration,
     pub session_expiry: Option<Duration>,
     will_message: Option<WillMessage>,
-    subscriptions: Vec<Subscription>,
+    pending_will: Option<CancellationToken>,
     control: (Sender<SessionControl>, Option<Receiver<SessionControl>>),
 }
 
@@ -200,7 +202,7 @@ impl Session {
             keep_alive,
             session_expiry: None,
             will_message,
-            subscriptions: Vec::new(),
+            pending_will: None,
             control: (sender, Some(receiver)),
         }
     }
@@ -219,12 +221,11 @@ impl Session {
     }
 
     pub async fn disconnect(&self, reason: Reason) {
-        // TODO - handle errors and return
-        self.control
-            .0
-            .send(SessionControl::Disconnect(reason))
-            .await
-            .expect("Failed to send disconnect message");
+        let _ = self.send_control(SessionControl::Disconnect(reason)).await;
+    }
+
+    pub async fn send_control(&self, msg: SessionControl) -> Result<(), tokio::sync::mpsc::error::SendError<SessionControl>> {
+        self.control.0.send(msg).await
     }
 
     /// Clears the will message from the session. This is typically done on a successful
@@ -232,6 +233,25 @@ impl Session {
     /// (3.14.4 DICONNECT Actions)[https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901216]
     pub fn clear_will(&mut self) {
         self.will_message = None;
+    }
+
+    pub fn set_will(&mut self, will: Option<WillMessage>) {
+        self.will_message = will;
+    }
+
+    pub fn take_will(&mut self) -> Option<WillMessage> {
+        self.will_message.take()
+    }
+
+    pub fn set_pending_will(&mut self, token: CancellationToken) {
+        self.cancel_pending_will();
+        self.pending_will = Some(token);
+    }
+
+    pub fn cancel_pending_will(&mut self) {
+        if let Some(token) = self.pending_will.take() {
+            token.cancel();
+        }
     }
 
     pub fn id(&self) -> &str {
@@ -293,7 +313,6 @@ pub mod test {
         assert_eq!(session.id(), "test");
         assert_eq!(session.connected(), false);
         assert_eq!(session.keep_alive(), Duration::from_secs(10));
-        assert_eq!(session.subscriptions.len(), 0);
         assert_eq!(session.will_message(), None);
         assert_eq!(session.session_expiry, None);
     }

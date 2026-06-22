@@ -82,6 +82,7 @@ pub struct SessionState {
     pub(crate) last_packet_id: u16,
     pub(crate) auto_ack: bool,
     pub(crate) pingresp: bool,
+    pub(crate) keep_alive_enabled: bool,
 }
 
 impl Default for SessionState {
@@ -110,6 +111,7 @@ impl SessionState {
             last_packet_id: 0,
             auto_ack: true,
             pingresp: false,
+            keep_alive_enabled: true,
         }
     }
 }
@@ -171,6 +173,10 @@ impl ClientSession {
 
     pub(crate) fn auto_ack(&self) -> bool {
         self.state.auto_ack
+    }
+
+    pub(crate) fn keep_alive_enabled(&self) -> bool {
+        self.state.keep_alive_enabled
     }
 
     pub(crate) async fn connect(
