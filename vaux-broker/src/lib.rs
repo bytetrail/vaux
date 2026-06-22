@@ -314,6 +314,14 @@ impl Broker {
                 stream.write(&mut Packet::UnsubAck(unsuback)).await?;
                 Ok(())
             }
+            Packet::Publish(publish) => {
+                let session_id = {
+                    let session = session.read().await;
+                    session.id().to_string()
+                };
+                Broker::route_publish(&publish, &session_id, state).await;
+                Ok(())
+            }
             Packet::Disconnect(packet) => {
                 if let Reason::Success = packet.reason {
                     let mut session = session.write().await;
@@ -571,40 +579,53 @@ impl Broker {
     }
 
     async fn publish_will(will: &WillMessage, state: &BrokerState) {
+        let mut publish = Publish::new_from_header(vaux_mqtt::FixedHeader::new(
+            vaux_mqtt::PacketType::Publish,
+        ))
+        .unwrap();
+        publish.topic_name = will.topic.clone();
+        publish.set_qos(will.qos);
+        publish.set_retain(will.retain);
+        publish.payload = Some(will.payload.clone());
+        publish.message_expiry = will.header.message_expiry;
+        publish.content_type = will.header.content_type.clone();
+        publish.response_topic = will.header.response_topic.clone();
+        publish.correlation_data = will.header.correlation_data.clone();
+        if let Some(format) = will.header.payload_format {
+            publish.set_payload_format(format);
+        }
+        Broker::route_publish(&publish, "", state).await;
+    }
+
+    async fn route_publish(publish: &Publish, sender_session_id: &str, state: &BrokerState) {
         let subscribers = {
             let tree = state.topic_tree.read().await;
-            tree.matching_subscribers(&will.topic)
+            tree.matching_subscribers(&publish.topic_name)
         };
-
+        let session_pool = state.session_pool.read().await;
         for sub in &subscribers {
-            let granted_qos = std::cmp::min(will.qos as u8, sub.qos as u8);
+            if sub.no_local && *sub.session_id == *sender_session_id {
+                continue;
+            }
+            let granted_qos = std::cmp::min(publish.qos() as u8, sub.qos as u8);
             let qos: QoSLevel = granted_qos.try_into().unwrap_or(QoSLevel::AtMostOnce);
-            let mut publish = Publish::new_from_header(vaux_mqtt::FixedHeader::new(
-                vaux_mqtt::PacketType::Publish,
-            ))
-            .unwrap();
-            publish.topic_name = will.topic.clone();
-            publish.set_qos(qos);
+            let mut out = publish.clone();
+            out.set_qos(qos);
             if qos != QoSLevel::AtMostOnce {
-                let _ = publish.set_packet_id(Some(1));
+                let _ = out.set_packet_id(Some(1));
+            } else {
+                out = Publish::new_from_header(vaux_mqtt::FixedHeader::new(
+                    vaux_mqtt::PacketType::Publish,
+                ))
+                .unwrap();
+                out.topic_name = publish.topic_name.clone();
+                out.payload = publish.payload.clone();
             }
-            publish.set_retain(will.retain);
-            publish.payload = Some(will.payload.clone());
-            publish.message_expiry = will.header.message_expiry;
-            publish.content_type = will.header.content_type.clone();
-            publish.response_topic = will.header.response_topic.clone();
-            publish.correlation_data = will.header.correlation_data.clone();
-            if let Some(format) = will.header.payload_format {
-                publish.set_payload_format(format);
-            }
-
-            let session_pool = state.session_pool.read().await;
             if let Some(target_session) = session_pool.get_active(&sub.session_id) {
                 let target = target_session.read().await;
                 let _ = target
-                    .send_control(SessionControl::Deliver(Box::new(publish)))
+                    .send_control(SessionControl::Deliver(Box::new(out)))
                     .await;
-            } else {
             }
         }
     }
