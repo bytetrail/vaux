@@ -423,7 +423,7 @@ impl Broker {
         control_channel: &mut Option<Receiver<SessionControl>>,
     ) -> Option<SessionControl> {
         loop {
-            if let Some(ref mut rx) = control_channel {
+            if let Some(rx) = control_channel {
                 if let Some(control) = rx.recv().await {
                     return Some(control);
                 }
