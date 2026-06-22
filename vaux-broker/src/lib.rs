@@ -1,4 +1,3 @@
-pub(crate) mod codec;
 pub mod config;
 pub(crate) mod session;
 pub(crate) mod topic;
