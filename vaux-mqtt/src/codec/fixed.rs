@@ -106,11 +106,15 @@ impl Decode for FixedHeader {
             }
         };
         match self.packet_type {
+            PacketType::PubRel | PacketType::Subscribe | PacketType::Unsubscribe => {
+                if flags != PACKET_RESERVED_BIT1 {
+                    return Err(MqttCodecError::new(
+                        format!("invalid flags for {}: {flags}", self.packet_type).as_str(),
+                    ));
+                }
+            }
             PacketType::Connect
-            | PacketType::PubRel
             | PacketType::PubAck
-            | PacketType::Subscribe
-            | PacketType::Unsubscribe
             | PacketType::ConnAck
             | PacketType::PubRec
             | PacketType::PubComp
@@ -122,7 +126,7 @@ impl Decode for FixedHeader {
             | PacketType::Auth => {
                 if flags != PACKET_RESERVED_NONE {
                     return Err(MqttCodecError::new(
-                        format!("invalid flags for {}: {flags}", self.packet_type,).as_str(),
+                        format!("invalid flags for {}: {flags}", self.packet_type).as_str(),
                     ));
                 }
             }

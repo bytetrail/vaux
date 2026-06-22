@@ -156,7 +156,7 @@ pub(crate) fn encode_internal(input: TokenStream, as_packet: bool) -> TokenStrea
 
     let abbreviated_when = abbreviated_when_expr(&input.attrs);
 
-    let property_encode = if has_properties && as_packet {
+    let property_encode = if has_properties {
         quote! {
             self.property_encode(dest)?;
         }

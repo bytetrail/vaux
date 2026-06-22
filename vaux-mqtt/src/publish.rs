@@ -53,6 +53,7 @@ impl codec::PropertyCodecSize for PayloadFormat {
 }
 
 #[packet(packet_type = "codec::PacketType::Publish")]
+#[codec(skip_decode)]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Publish {
     pub topic_name: String,
@@ -272,6 +273,85 @@ impl Publish {
     pub fn with_payload_format(mut self, format: PayloadFormat) -> Self {
         self.set_payload_format(format);
         self
+    }
+}
+
+impl codec::Decode for Publish {
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<usize, MqttCodecError> {
+        use bytes::Buf;
+        let mut bytes_read = 0_usize;
+
+        bytes_read += self.topic_name.decode(src)?;
+
+        if self.fixed_header.qos() != QoSLevel::AtMostOnce {
+            self.packet_id = Some(src.get_u16());
+            bytes_read += 2;
+        }
+
+        let (property_length, var_bytes_read) = codec::decode_variable_byte_int(src)?;
+        let property_length = property_length as usize;
+        bytes_read += var_bytes_read;
+        let mut property_bytes_read = 0_usize;
+        while property_bytes_read < property_length {
+            let property_type: PropertyType = src.get_u8().try_into()?;
+            property_bytes_read += 1;
+            match property_type {
+                PropertyType::MessageExpiry => {
+                    let mut value = u32::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.message_expiry = Some(value);
+                }
+                PropertyType::PayloadFormat => {
+                    let mut value = PayloadFormat::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.payload_format = Some(value);
+                }
+                PropertyType::TopicAlias => {
+                    self.topic_alias = Some(src.get_u16());
+                    property_bytes_read += 2;
+                }
+                PropertyType::ResponseTopic => {
+                    let mut value = String::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.response_topic = Some(value);
+                }
+                PropertyType::CorrelationData => {
+                    let mut value = Vec::new();
+                    property_bytes_read += value.decode(src)?;
+                    self.correlation_data = value;
+                }
+                PropertyType::SubscriptionIdentifier => {
+                    let (value, decode_bytes_read) = codec::decode_opt_variable_byte_int(src)?;
+                    property_bytes_read += decode_bytes_read;
+                    self.subscription_identifiers = value;
+                }
+                PropertyType::ContentType => {
+                    let mut value = String::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.content_type = Some(value);
+                }
+                PropertyType::UserProperty => {
+                    property_bytes_read += self.user_properties.decode(src)?;
+                }
+                _ => {
+                    return Err(codec::MqttCodecError::new_with_kind(
+                        format!(
+                            "MQTT v5 property type {:?} is not supported for Publish",
+                            property_type
+                        )
+                        .as_str(),
+                        codec::ErrorKind::UnsupportedProperty(property_type as u8),
+                    ));
+                }
+            }
+        }
+        bytes_read += property_bytes_read;
+
+        let (value, decode_bytes_read) = codec::decode_opt_vec_u8_raw(src)?;
+        bytes_read += decode_bytes_read;
+        self.payload = value;
+
+        Ok(bytes_read)
     }
 }
 

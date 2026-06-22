@@ -449,10 +449,10 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, usize)>, MqttCodecEr
         }
     }
     let (packet_remaining, bytes_read) = decode_variable_byte_int(src)?;
-    if src.remaining() < bytes_read as usize {
+    if src.remaining() < packet_remaining as usize {
         return Err(MqttCodecError::new_with_kind(
             "Insufficient data",
-            ErrorKind::InsufficientData(bytes_read as usize, src.remaining()),
+            ErrorKind::InsufficientData(packet_remaining as usize, src.remaining()),
         ));
     }
     decode_len += bytes_read;
