@@ -4,8 +4,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
     RwLock,
+    mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
 use vaux_mqtt::{Publish, Reason, WillMessage};
@@ -60,6 +60,13 @@ impl SessionPool {
 
     pub fn inactive_sessions(&self) -> u32 {
         self.inactive_sessions
+    }
+
+    pub fn at_capacity(&self, max: Option<u32>) -> bool {
+        match max {
+            Some(limit) => self.active_sessions >= limit,
+            None => false,
+        }
     }
 
     /// Inserts a new session into the pool. If the session is connected, the
@@ -174,12 +181,6 @@ pub(crate) enum SessionControl {
 }
 
 #[derive(Debug)]
-pub(crate) struct Subscription {
-    topic_filter: String,
-    qos: u8,
-}
-
-#[derive(Debug)]
 pub struct Session {
     id: String,
     last_active: Instant,
@@ -195,8 +196,13 @@ pub struct Session {
 
 impl Session {
     /// Creates a new session with the last active time set to Instant::now()
-    pub fn new(id: String, will_message: Option<WillMessage>, keep_alive: Duration) -> Self {
-        let (sender, receiver) = mpsc::channel(10);
+    pub fn new(
+        id: String,
+        will_message: Option<WillMessage>,
+        keep_alive: Duration,
+        channel_size: usize,
+    ) -> Self {
+        let (sender, receiver) = mpsc::channel(channel_size);
         Session {
             id,
             last_active: Instant::now(),
@@ -211,8 +217,8 @@ impl Session {
         }
     }
 
-    pub fn reset_control(&mut self) {
-        let (sender, receiver) = mpsc::channel(10);
+    pub fn reset_control(&mut self, channel_size: usize) {
+        let (sender, receiver) = mpsc::channel(channel_size);
         self.control = (sender, Some(receiver));
     }
 
@@ -228,8 +234,18 @@ impl Session {
         let _ = self.send_control(SessionControl::Disconnect(reason)).await;
     }
 
-    pub async fn send_control(&self, msg: SessionControl) -> Result<(), tokio::sync::mpsc::error::SendError<SessionControl>> {
+    pub async fn send_control(
+        &self,
+        msg: SessionControl,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<SessionControl>> {
         self.control.0.send(msg).await
+    }
+
+    pub fn try_send_control(
+        &self,
+        msg: SessionControl,
+    ) -> Result<(), tokio::sync::mpsc::error::TrySendError<SessionControl>> {
+        self.control.0.try_send(msg)
     }
 
     /// Clears the will message from the session. This is typically done on a successful
@@ -338,7 +354,7 @@ pub mod test {
 
     #[test]
     fn test_session_new() {
-        let session = Session::new("test".to_string(), None, Duration::from_secs(10));
+        let session = Session::new("test".to_string(), None, Duration::from_secs(10), 10);
         assert_eq!(session.id(), "test");
         assert_eq!(session.connected(), false);
         assert_eq!(session.keep_alive(), Duration::from_secs(10));
@@ -349,7 +365,7 @@ pub mod test {
     #[tokio::test]
     async fn test_add_active() {
         let mut pool = SessionPool::new_with_expiry(Duration::from_secs(30));
-        let mut session = Session::new("test".to_string(), None, Duration::from_secs(10));
+        let mut session = Session::new("test".to_string(), None, Duration::from_secs(10), 10);
         session.set_connected(true);
         let session = Arc::new(RwLock::new(session));
         pool.add(session).await;
@@ -364,6 +380,7 @@ pub mod test {
             "test".to_string(),
             None,
             Duration::from_secs(10),
+            10,
         )));
         pool.add(session).await;
         assert_eq!(pool.active_sessions(), 0);
@@ -377,6 +394,7 @@ pub mod test {
             "test_1".to_string(),
             None,
             Duration::from_secs(10),
+            10,
         )));
         pool.add(session).await;
         assert_eq!(pool.active_sessions(), 0);
@@ -394,7 +412,7 @@ pub mod test {
     #[tokio::test]
     async fn test_session_deactivate() {
         let mut pool = SessionPool::new_with_expiry(Duration::from_secs(30));
-        let mut session = Session::new("test".to_string(), None, Duration::from_secs(10));
+        let mut session = Session::new("test".to_string(), None, Duration::from_secs(10), 10);
         session.set_connected(true);
         let session = Arc::new(RwLock::new(session));
         pool.add(session).await;

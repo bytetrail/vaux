@@ -132,10 +132,7 @@ impl Broker {
     pub async fn stop(&mut self) {}
 
     pub async fn run(&mut self) -> Result<(), BrokerError> {
-        println!(
-            "broker accepting request on {:?}",
-            self.state.config.listen_addr
-        );
+        tracing::info!(addr = %self.state.config.listen_addr, "broker starting");
         let state = self.state.clone();
         match TcpListener::bind(self.state.config.listen_addr).await {
             Ok(listener) => {
@@ -175,7 +172,7 @@ impl Broker {
                                                         MqttStream::ServerTlsStream(Box::new(tls_stream))
                                                     }
                                                     Err(e) => {
-                                                        eprintln!("TLS handshake failed: {e}");
+                                                        tracing::warn!(error = %e, "TLS handshake failed");
                                                         return Ok(());
                                                     }
                                                 }
@@ -191,7 +188,7 @@ impl Broker {
                                         });
                                     }
                                     Err(e) => {
-                                        println!("broker error accepting connection: {e}");
+                                        tracing::error!(error = %e, "error accepting connection");
                                         return Err(e.into());
                                     }
                                 }
@@ -247,10 +244,9 @@ impl Broker {
                 }
                 _ = Broker::keep_alive_timer(keep_alive) => {
                     if let Some(session) = &client_session {
+                        let session_id = session.read().await.id().to_string();
+                        tracing::info!(session_id = %session_id, "keep-alive expired");
                         Broker::initiate_will(session, &state).await;
-                        let session_id = {
-                            session.read().await.id().to_string()
-                        };
                         state.session_pool.write().await.deactivate(&session_id).await;
                     } else {
                         stream.shutdown().await?;
@@ -288,16 +284,18 @@ impl Broker {
                         }
                         Ok(None) => {
                             if let Some(session) = &client_session {
-                                Broker::initiate_will(session, &state).await;
                                 let session_id = session.read().await.id().to_string();
+                                tracing::info!(session_id = %session_id, "connection closed");
+                                Broker::initiate_will(session, &state).await;
                                 state.session_pool.write().await.deactivate(&session_id).await;
                             }
                             return Ok(());
                         }
                         Err(e) => {
                             if let Some(session) = &client_session {
-                                Broker::initiate_will(session, &state).await;
                                 let session_id = session.read().await.id().to_string();
+                                tracing::warn!(session_id = %session_id, error = %e, "connection error");
+                                Broker::initiate_will(session, &state).await;
                                 state.session_pool.write().await.deactivate(&session_id).await;
                             }
                             return Err(e.into());
@@ -440,6 +438,7 @@ impl Broker {
         match packet {
             Packet::Connect(packet) => {
                 if !state.accepting_connections() {
+                    tracing::info!("connection rejected: not accepting connections");
                     let mut ack = ConnAck::default();
                     ack.reason = Reason::ServerBusy;
                     stream.write(&mut Packet::ConnAck(ack)).await?;
@@ -513,6 +512,19 @@ impl Broker {
             session_id = connect.client_id.to_string();
         }
         let mut session_pool = state.session_pool.write().await;
+        let max_active = state.config.max_active_sessions;
+        let channel_size = state.config.session_channel_size;
+
+        let has_active_session = session_pool.get_active(&session_id).is_some();
+        if !has_active_session && session_pool.at_capacity(max_active) {
+            drop(session_pool);
+            tracing::info!(session_id = %session_id, "connection rejected: max active sessions reached");
+            ack.reason = Reason::QuotaExceeded;
+            stream.write(&mut Packet::ConnAck(ack)).await?;
+            stream.shutdown().await?;
+            return Ok(None);
+        }
+
         let session: Arc<RwLock<Session>> = if connect.clean_start() {
             if let Some(existing_session) = session_pool.remove(session_id.as_str()) {
                 let connected = { existing_session.read().await.connected() };
@@ -521,7 +533,7 @@ impl Broker {
                 }
             }
             let mut new_session =
-                Session::new(session_id.clone(), connect.will_message(), keep_alive);
+                Session::new(session_id.clone(), connect.will_message(), keep_alive, channel_size);
             new_session.set_connected(true);
             let new_session = Arc::new(RwLock::new(new_session));
             session_pool.add(Arc::clone(&new_session)).await;
@@ -533,7 +545,7 @@ impl Broker {
                     ack.set_session_present(true);
                     session.cancel_pending_will();
                     session.set_will(connect.will_message());
-                    session.reset_control();
+                    session.reset_control(channel_size);
                 }
                 session
             } else if let Some(session) = session_pool.get_active(&session_id) {
@@ -543,7 +555,7 @@ impl Broker {
                     ack.set_session_present(true);
                     session.cancel_pending_will();
                     session.set_will(connect.will_message());
-                    session.reset_control();
+                    session.reset_control(channel_size);
                     session.set_last_active();
                 }
                 session
@@ -552,6 +564,7 @@ impl Broker {
                     session_id.clone(),
                     connect.will_message().clone(),
                     keep_alive,
+                    channel_size,
                 );
                 new_session.set_connected(true);
                 let new_session = Arc::new(RwLock::new(new_session));
@@ -566,6 +579,7 @@ impl Broker {
                 session.set_session_expiry(expiry);
             }
         }
+        tracing::info!(session_id = %session_id, "client connected");
         stream.write(&mut Packet::ConnAck(ack)).await?;
         Ok(Some(Arc::clone(&session)))
     }
@@ -592,6 +606,7 @@ impl Broker {
         };
 
         if let Some(will) = will {
+            tracing::debug!(topic = %will.topic, "publishing will message");
             let delay_secs = will.header.will_delay.unwrap_or(0);
             if delay_secs == 0 {
                 Broker::publish_will(&will, state).await;
@@ -653,14 +668,24 @@ impl Broker {
                     let packet_id = target.next_packet_id();
                     let _ = out.set_packet_id(Some(packet_id));
                     target.track_qos_publish(packet_id, out.clone());
-                    let _ = target
-                        .send_control(SessionControl::Deliver(Box::new(out)))
-                        .await;
+                    if let Err(_) = target.try_send_control(SessionControl::Deliver(Box::new(out))) {
+                        tracing::warn!(
+                            session_id = %sub.session_id,
+                            topic = %publish.topic_name,
+                            "slow subscriber: channel full, disconnecting"
+                        );
+                        let _ = target.try_send_control(SessionControl::Disconnect(Reason::QuotaExceeded));
+                    }
                 } else {
                     let target = target_session.read().await;
-                    let _ = target
-                        .send_control(SessionControl::Deliver(Box::new(out)))
-                        .await;
+                    if let Err(_) = target.try_send_control(SessionControl::Deliver(Box::new(out))) {
+                        tracing::warn!(
+                            session_id = %sub.session_id,
+                            topic = %publish.topic_name,
+                            "slow subscriber: channel full, disconnecting"
+                        );
+                        let _ = target.try_send_control(SessionControl::Disconnect(Reason::QuotaExceeded));
+                    }
                 }
             }
         }

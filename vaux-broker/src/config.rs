@@ -15,6 +15,8 @@ pub const DEFAULT_KEEP_ALIVE: Duration =
 pub const MAX_KEEP_ALIVE: Duration =
     Duration::from_secs((MAX_KEEP_ALIVE_AS_SECS as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64);
 pub const DEFAULT_SESSION_EXPIRY: Duration = Duration::from_secs(60 * 10);
+pub const DEFAULT_SESSION_CHANNEL_SIZE: usize = 10;
+pub const DEFAULT_MAX_ACTIVE_SESSIONS: Option<u32> = None;
 
 #[derive(Clone)]
 pub struct Config {
@@ -24,6 +26,8 @@ pub struct Config {
     pub session_expiry: Duration,
     pub max_topic_name_len: usize,
     pub max_topic_mem: usize,
+    pub session_channel_size: usize,
+    pub max_active_sessions: Option<u32>,
     pub tls_acceptor: Option<TlsAcceptor>,
 }
 
@@ -36,6 +40,8 @@ impl std::fmt::Debug for Config {
             .field("session_expiry", &self.session_expiry)
             .field("max_topic_name_len", &self.max_topic_name_len)
             .field("max_topic_mem", &self.max_topic_mem)
+            .field("session_channel_size", &self.session_channel_size)
+            .field("max_active_sessions", &self.max_active_sessions)
             .field("tls", &self.tls_acceptor.is_some())
             .finish()
     }
@@ -50,6 +56,8 @@ impl Default for Config {
             session_expiry: DEFAULT_SESSION_EXPIRY,
             max_topic_name_len: DEFAULT_MAX_TOPIC_NAME_LEN,
             max_topic_mem: DEFAULT_MAX_TOPIC_MEM,
+            session_channel_size: DEFAULT_SESSION_CHANNEL_SIZE,
+            max_active_sessions: DEFAULT_MAX_ACTIVE_SESSIONS,
             tls_acceptor: None,
         }
     }

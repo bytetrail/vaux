@@ -15,6 +15,7 @@ bytes = "1.1.0"
 vaux-mqtt = { path = "../vaux-mqtt" }
 vaux-async = { path = "../vaux-async" }
 tokio-rustls = { version = "0.26" }
+tracing = "0.1.44"
 
 
 [dev-dependencies]

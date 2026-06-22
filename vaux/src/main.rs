@@ -35,6 +35,8 @@ struct Args {
     tls_cert: Option<String>,
     #[clap(long, help = "path to server private key PEM file")]
     tls_key: Option<String>,
+    #[clap(long, help = "session control channel buffer size (default: 10)")]
+    channel_size: Option<usize>,
 }
 
 fn load_tls_acceptor(
@@ -111,6 +113,12 @@ async fn main() {
     config.tls_acceptor = tls_acceptor;
     if let Some(expiration) = args.session_expiration {
         config.session_expiry = Duration::from_secs(expiration as u64);
+    }
+    if let Some(size) = args.channel_size {
+        config.session_channel_size = size;
+    }
+    if let Some(max) = args.max_active_sessions {
+        config.max_active_sessions = Some(max);
     }
 
     let tls_status = if config.tls_acceptor.is_some() {
