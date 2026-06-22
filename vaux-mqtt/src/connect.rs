@@ -136,9 +136,9 @@ impl Connect {
 
     pub fn set_username(&mut self, username: Option<String>) {
         if username.is_none() {
-            self.connect_flags = self.connect_flags & !CONNECT_FLAG_USERNAME;
+            self.connect_flags &= !CONNECT_FLAG_USERNAME;
         } else {
-            self.connect_flags = (self.connect_flags & !CONNECT_FLAG_USERNAME) | (1 as u8) << 7;
+            self.connect_flags = (self.connect_flags & !CONNECT_FLAG_USERNAME) | 1_u8 << 7;
         }
         self.username = username.unwrap_or_default();
     }
@@ -149,9 +149,9 @@ impl Connect {
 
     pub fn set_password(&mut self, password: Option<Vec<u8>>) {
         if password.is_none() {
-            self.connect_flags = self.connect_flags & !CONNECT_FLAG_PASSWORD;
+            self.connect_flags &= !CONNECT_FLAG_PASSWORD;
         } else {
-            self.connect_flags = (self.connect_flags & !CONNECT_FLAG_PASSWORD) | (1 as u8) << 6;
+            self.connect_flags = (self.connect_flags & !CONNECT_FLAG_PASSWORD) | 1_u8 << 6;
         }
         self.password = password.unwrap_or_default();
     }

@@ -261,8 +261,7 @@ impl MqttClient {
         topic_filter: &[&str],
         qos: QoSLevel,
     ) -> std::result::Result<(), SendError<Packet>> {
-        let mut subscribe = Subscribe::default();
-        subscribe.packet_id = packet_id;
+        let mut subscribe = Subscribe { packet_id, ..Default::default() };
         for topic in topic_filter {
             let subscription = SubscriptionFilter::new((*topic).to_string(), qos);
             subscribe.add_filter(subscription);
@@ -324,15 +323,15 @@ impl MqttClient {
             }
             Err(start_err) => {
                 // if the client is connected then stop the client
-                if self.connected().await {
-                    if let Err(stop_err) = self.stop().await {
-                        return Err(MqttError::new(
-                            &format!(
-                                "error starting: {start_err} unable to stop client: {stop_err} "
-                            ),
-                            ErrorKind::Transport,
-                        ));
-                    }
+                if self.connected().await
+                    && let Err(stop_err) = self.stop().await
+                {
+                    return Err(MqttError::new(
+                        &format!(
+                            "error starting: {start_err} unable to stop client: {stop_err} "
+                        ),
+                        ErrorKind::Transport,
+                    ));
                 }
                 Err(MqttError::new(
                     &format!("unable to connect to broker: {start_err}"),

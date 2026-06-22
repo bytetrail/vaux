@@ -2,19 +2,20 @@ use crate::{ErrorKind, MqttClient, MqttError};
 use std::mem;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::{Mutex, RwLock};
+use vaux_mqtt::WillMessage;
 use vaux_mqtt::publish::Publish;
 use vaux_mqtt::pubresp::PubResp;
 use vaux_mqtt::{
-    codec::{CodecSize, Encode, PropertyCodecSize},
     ConnAck, Connect, Packet, QoSLevel, Reason,
+    codec::{CodecSize, Encode},
 };
-use vaux_mqtt::{PubAck, PubComp, PubRec, PubRel, WillMessage};
 
 const DEFAULT_MAX_PACKET_SIZE: usize = 64 * 1024;
 const DEFAULT_CLIENT_ID_PREFIX: &str = "vaux-client";
 const DEFAULT_CLIENT_KEEP_ALIVE: Duration = Duration::from_secs(60);
 const DEFAULT_SESSION_EXPIRY: Duration = Duration::from_secs(600);
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 enum QoSPacket {
     PubAck,
@@ -229,20 +230,20 @@ impl ClientSession {
                                 return Err(MqttError::new(
                                     &format!("disconnect received: {}", disconnect.reason),
                                     ErrorKind::Protocol(disconnect.reason),
-                                ))
+                                ));
                             }
                             _ => {
                                 return Err(MqttError::new(
                                     "unexpected packet type",
                                     ErrorKind::Protocol(Reason::ProtocolErr),
-                                ))
+                                ));
                             }
                         },
                         Ok(None) => {
                             return Err(MqttError::new(
                                 "no MQTT packet received",
                                 ErrorKind::Protocol(Reason::ProtocolErr),
-                            ))
+                            ));
                         }
                         Err(e) => match e.kind {
                             ErrorKind::Timeout => {
@@ -312,7 +313,13 @@ impl ClientSession {
                         {
                             self.state.last_packet_id = self.state.last_packet_id.wrapping_add(1);
                         }
-                        p.set_packet_id(Some(self.state.last_packet_id));
+                        p.set_packet_id(Some(self.state.last_packet_id))
+                            .map_err(|e| {
+                                MqttError::new(
+                                    &format!("{e}"),
+                                    ErrorKind::Protocol(Reason::MalformedPacket),
+                                )
+                            })?;
                     } else {
                         // if no packet ID is set and auto packet ID is disabled, return an error
                         return Err(MqttError::new(

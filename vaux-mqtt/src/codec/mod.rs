@@ -229,7 +229,7 @@ impl Decode for Reason {
     }
 }
 
-pub fn codec_size_vec_reason(reason_codes: &Vec<Reason>) -> u32 {
+pub fn codec_size_vec_reason(reason_codes: &[Reason]) -> u32 {
     reason_codes.len() as u32
 }
 
@@ -764,21 +764,19 @@ pub fn encode_variable_byte_int_ref(val: &u32, dest: &mut BytesMut) -> Result<()
     encode_variable_byte_int(*val, dest)
 }
 
-pub fn codec_size_vec_u8_raw(src: &Vec<u8>) -> u32 {
+pub fn codec_size_vec_u8_raw(src: &[u8]) -> u32 {
     src.len() as u32
 }
 
-pub fn encode_vec_u8_raw(src: &Vec<u8>, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+pub fn encode_vec_u8_raw(src: &[u8], dest: &mut BytesMut) -> Result<(), MqttCodecError> {
     dest.put_slice(src);
     Ok(())
 }
 
 pub fn decode_vec_u8_raw(src: &mut BytesMut) -> Result<(Option<Vec<u8>>, usize), MqttCodecError> {
     let len = src.remaining();
-    let mut dest = Vec::with_capacity(len);
-    dest.resize(len, 0);
-    let dest_buf: &mut [u8] = &mut dest[0..len];
-    src.try_copy_to_slice(dest_buf).map_err(|e| {
+    let mut dest = vec![0; len];
+    src.try_copy_to_slice(&mut dest).map_err(|e| {
         MqttCodecError::new_with_kind(
             format!("{e:?}").as_str(),
             ErrorKind::InsufficientData(len, src.remaining()),

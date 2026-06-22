@@ -147,6 +147,7 @@ pub fn packet(args: TokenStream, input: TokenStream) -> TokenStream {
         #default_impl
 
         impl #struct_name {
+            #[allow(clippy::needless_update)]
             #struct_vis fn new_with_fixed_header(fixed_header: codec::FixedHeader) -> Result<Self, codec::MqttCodecError> {
                 if fixed_header.packet_type != #packet_type {
                     return Err( MqttCodecError::new(

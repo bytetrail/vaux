@@ -182,7 +182,7 @@ impl codec::Decode for UserProperty {
         let (key_value, key_len) = codec::decode_string(src)?;
         let (value, len) = codec::decode_string(src)?;
         let bytes_read = 2 + key_len + 2 + len;
-        self.0.entry(key_value).or_insert_with(Vec::new).push(value);
+        self.0.entry(key_value).or_default().push(value);
         Ok(bytes_read)
     }
 }
@@ -201,7 +201,7 @@ impl UserProperty {
     }
 
     pub fn add(&mut self, key: String, value: String) {
-        self.0.entry(key).or_insert_with(Vec::new).push(value);
+        self.0.entry(key).or_default().push(value);
     }
 
     pub fn get(&self, key: &str) -> Option<&Vec<String>> {

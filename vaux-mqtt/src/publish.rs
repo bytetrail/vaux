@@ -1,7 +1,7 @@
 use crate::{
+    MqttCodecError, PacketType, PropertyType, QoSLevel,
     codec::{self},
     property::UserProperty,
-    MqttCodecError, PacketType, PropertyType, QoSLevel,
 };
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use vaux_macro::packet;
@@ -125,7 +125,7 @@ impl Publish {
     ///   section 3.3.2.2.
     /// * If `packet_id` is `Some`, not 0, and `qos_level` is `AtMostOnce`, an error is returned.
     ///   This is because a packet identifier is not supported for QoS 0. See MQTTv5 specification
-    ///  section 3.3.2.2.
+    ///   section 3.3.2.2.
     pub fn new_with_message(
         packet_id: Option<u16>,
         topic: String,
@@ -133,7 +133,7 @@ impl Publish {
         message: &str,
     ) -> Result<Self, MqttCodecError> {
         Publish::new_with_payload(packet_id, topic, qos_level, message.as_bytes().to_vec())
-            .and_then(|p| Ok(p.with_payload_format(PayloadFormat::Utf8)))
+            .map(|p| p.with_payload_format(PayloadFormat::Utf8))
     }
 
     /// Create a new Publish packet with the given topic name and QoS level and
@@ -150,7 +150,7 @@ impl Publish {
     ///   section 3.3.2.2.
     /// * If `packet_id` is `Some`, not 0, and `qos_level` is `AtMostOnce`, an error is returned.
     ///   This is because a packet identifier is not supported for QoS 0. See MQTTv5 specification
-    ///  section 3.3.2.2.
+    ///   section 3.3.2.2.
     pub fn new_with_payload(
         packet_id: Option<u16>,
         topic: String,
