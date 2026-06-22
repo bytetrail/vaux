@@ -3,7 +3,7 @@ use crate::{
     property::UserProperty,
     MqttCodecError, PacketType, PropertyType, QoSLevel,
 };
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use vaux_macro::packet;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
@@ -88,7 +88,7 @@ pub struct Publish {
         encode_with = "codec::encode_opt_vec_u8_raw_ref",
         size_with = "codec::codec_size_opt_vec_u8_raw"
     )]
-    pub payload: Option<Vec<u8>>,
+    pub payload: Option<Bytes>,
 }
 
 impl Default for Publish {
@@ -171,7 +171,7 @@ impl Publish {
             fixed_header: codec::FixedHeader::new(PacketType::Publish),
             topic_name: topic,
             packet_id,
-            payload: Some(payload),
+            payload: Some(Bytes::from(payload)),
             ..Default::default()
         }
         .with_qos(qos_level)
@@ -372,7 +372,7 @@ mod test {
         assert_eq!("topic".to_string(), publish.topic_name);
         assert_eq!(Some(10), publish.packet_id());
         assert_eq!(Some(PayloadFormat::Utf8), publish.payload_format);
-        assert_eq!(Some(b"hello".to_vec()), publish.payload);
+        assert_eq!(Some(Bytes::from_static(b"hello")), publish.payload);
     }
 
     #[test]
@@ -387,7 +387,7 @@ mod test {
         assert_eq!("topic".to_string(), publish.topic_name);
         assert_eq!(Some(10), publish.packet_id());
         assert_eq!(None, publish.payload_format);
-        assert_eq!(Some(b"hello".to_vec()), publish.payload);
+        assert_eq!(Some(Bytes::from_static(b"hello")), publish.payload);
     }
 
     #[test]

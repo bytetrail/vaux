@@ -147,7 +147,7 @@ async fn publish(
 
         let message = arg_message.clone();
         publish.topic_name = topic.clone();
-        publish.payload = Some(Vec::from(message.as_bytes()));
+        publish.payload = Some(bytes::Bytes::from(message.into_bytes()));
         publish.set_qos(args.qos);
         if args.qos != QoSLevel::AtMostOnce  {
             publish.set_packet_id(Some((i + 1) as u16)).unwrap();

@@ -168,7 +168,7 @@ impl Connect {
         if self.will() {
             Some(WillMessage {
                 topic: self.will_topic.clone().unwrap_or_default(),
-                payload: self.will_payload.clone(),
+                payload: bytes::Bytes::from(self.will_payload.clone()),
                 qos: self.will_qos().unwrap_or(QoSLevel::AtMostOnce),
                 retain: self.will_retain(),
                 header: self.will_properties.clone().unwrap_or_default(),
@@ -180,7 +180,7 @@ impl Connect {
 
     pub fn set_will_message(&mut self, will: WillMessage) {
         self.will_topic = Some(will.topic);
-        self.will_payload = will.payload;
+        self.will_payload = will.payload.to_vec();
         self.will_properties = Some(will.header);
         self.set_will(true);
         self.set_will_qos(will.qos);

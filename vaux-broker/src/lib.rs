@@ -262,10 +262,20 @@ impl Broker {
                         Ok(Some(packet)) => {
                             if !connected {
                                 if let Some(session) = Broker::handle_pre_connect(packet, stream, &state).await? {
-                                    {
+                                    let pending = {
                                         let mut session = session.write().await;
                                         keep_alive = session.keep_alive();
                                         session_control = session.take_control_receiver();
+                                        session.drain_pending()
+                                    };
+                                    for (packet_id, mut publish) in pending {
+                                        publish.set_dup(true).ok();
+                                        let _ = publish.set_packet_id(Some(packet_id));
+                                        {
+                                            let mut s = session.write().await;
+                                            s.track_qos_publish(packet_id, publish.clone());
+                                        }
+                                        stream.write(&mut Packet::Publish(publish)).await?;
                                     }
                                     client_session = Some(Arc::clone(&session));
                                 } else {
@@ -333,7 +343,18 @@ impl Broker {
                     let session = session.read().await;
                     session.id().to_string()
                 };
+                if publish.qos() == QoSLevel::AtLeastOnce {
+                    if let Some(packet_id) = publish.packet_id() {
+                        let puback = vaux_mqtt::PubAck::new_puback_with_packet_id(packet_id);
+                        stream.write(&mut Packet::PubAck(puback)).await?;
+                    }
+                }
                 Broker::route_publish(&publish, &session_id, state).await;
+                Ok(())
+            }
+            Packet::PubAck(puback) => {
+                let mut session = session.write().await;
+                session.acknowledge(puback.packet_id);
                 Ok(())
             }
             Packet::Disconnect(packet) => {
@@ -623,23 +644,24 @@ impl Broker {
             }
             let granted_qos = std::cmp::min(publish.qos() as u8, sub.qos as u8);
             let qos: QoSLevel = granted_qos.try_into().unwrap_or(QoSLevel::AtMostOnce);
-            let mut out = publish.clone();
-            out.set_qos(qos);
-            if qos != QoSLevel::AtMostOnce {
-                let _ = out.set_packet_id(Some(1));
-            } else {
-                out = Publish::new_from_header(vaux_mqtt::FixedHeader::new(
-                    vaux_mqtt::PacketType::Publish,
-                ))
-                .unwrap();
-                out.topic_name = publish.topic_name.clone();
-                out.payload = publish.payload.clone();
-            }
+
             if let Some(target_session) = session_pool.get_active(&sub.session_id) {
-                let target = target_session.read().await;
-                let _ = target
-                    .send_control(SessionControl::Deliver(Box::new(out)))
-                    .await;
+                let mut out = publish.clone();
+                out.set_qos(qos);
+                if qos != QoSLevel::AtMostOnce {
+                    let mut target = target_session.write().await;
+                    let packet_id = target.next_packet_id();
+                    let _ = out.set_packet_id(Some(packet_id));
+                    target.track_qos_publish(packet_id, out.clone());
+                    let _ = target
+                        .send_control(SessionControl::Deliver(Box::new(out)))
+                        .await;
+                } else {
+                    let target = target_session.read().await;
+                    let _ = target
+                        .send_control(SessionControl::Deliver(Box::new(out)))
+                        .await;
+                }
             }
         }
     }

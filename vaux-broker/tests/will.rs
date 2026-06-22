@@ -106,7 +106,7 @@ async fn will_on_network_close() {
     match packet {
         vaux_mqtt::Packet::Publish(publish) => {
             assert_eq!(publish.topic_name, WILL_TOPIC);
-            assert_eq!(publish.payload, Some(WILL_PAYLOAD.to_vec()));
+            assert_eq!(publish.payload, Some(bytes::Bytes::from_static(WILL_PAYLOAD)));
         }
         other => panic!("expected Publish, got {:?}", other),
     }
@@ -166,7 +166,7 @@ async fn will_on_keep_alive_expiry() {
     match packet {
         vaux_mqtt::Packet::Publish(publish) => {
             assert_eq!(publish.topic_name, WILL_TOPIC);
-            assert_eq!(publish.payload, Some(WILL_PAYLOAD.to_vec()));
+            assert_eq!(publish.payload, Some(bytes::Bytes::from_static(WILL_PAYLOAD)));
         }
         other => panic!("expected Publish, got {:?}", other),
     }

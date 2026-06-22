@@ -122,7 +122,7 @@ async fn subscribe_exact_topic() {
 
     let msg = subscriber.recv_publish().await;
     assert_eq!(msg.topic_name, "sensor/temp");
-    assert_eq!(msg.payload, Some(b"22.5".to_vec()));
+    assert_eq!(msg.payload, Some(bytes::Bytes::from_static(b"22.5")));
 
     // non-matching topic should not arrive
     publisher
@@ -252,11 +252,11 @@ async fn multiple_subscribers_same_topic() {
 
     let msg_a = sub_a.recv_publish().await;
     assert_eq!(msg_a.topic_name, "events/alert");
-    assert_eq!(msg_a.payload, Some(b"fire".to_vec()));
+    assert_eq!(msg_a.payload, Some(bytes::Bytes::from_static(b"fire")));
 
     let msg_b = sub_b.recv_publish().await;
     assert_eq!(msg_b.topic_name, "events/alert");
-    assert_eq!(msg_b.payload, Some(b"fire".to_vec()));
+    assert_eq!(msg_b.payload, Some(bytes::Bytes::from_static(b"fire")));
 
     sub_a.stop().await;
     sub_b.stop().await;

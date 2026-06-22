@@ -8,7 +8,7 @@ use tokio::sync::{
     RwLock,
 };
 use tokio_util::sync::CancellationToken;
-use vaux_mqtt::{Reason, WillMessage};
+use vaux_mqtt::{Publish, Reason, WillMessage};
 
 #[derive(Debug, Default)]
 pub struct SessionPool {
@@ -188,6 +188,8 @@ pub struct Session {
     pub session_expiry: Option<Duration>,
     will_message: Option<WillMessage>,
     pending_will: Option<CancellationToken>,
+    next_packet_id: u16,
+    pending_ack: HashMap<u16, Publish>,
     control: (Sender<SessionControl>, Option<Receiver<SessionControl>>),
 }
 
@@ -203,6 +205,8 @@ impl Session {
             session_expiry: None,
             will_message,
             pending_will: None,
+            next_packet_id: 1,
+            pending_ack: HashMap::new(),
             control: (sender, Some(receiver)),
         }
     }
@@ -252,6 +256,31 @@ impl Session {
         if let Some(token) = self.pending_will.take() {
             token.cancel();
         }
+    }
+
+    pub fn next_packet_id(&mut self) -> u16 {
+        let id = self.next_packet_id;
+        self.next_packet_id = self.next_packet_id.wrapping_add(1);
+        if self.next_packet_id == 0 {
+            self.next_packet_id = 1;
+        }
+        id
+    }
+
+    pub fn track_qos_publish(&mut self, packet_id: u16, publish: Publish) {
+        self.pending_ack.insert(packet_id, publish);
+    }
+
+    pub fn acknowledge(&mut self, packet_id: u16) -> bool {
+        self.pending_ack.remove(&packet_id).is_some()
+    }
+
+    pub fn pending_ack_count(&self) -> usize {
+        self.pending_ack.len()
+    }
+
+    pub fn drain_pending(&mut self) -> Vec<(u16, Publish)> {
+        self.pending_ack.drain().collect()
     }
 
     pub fn id(&self) -> &str {

@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use crate::connect::Connect;
 use crate::property::UserProperty;
 use crate::publish::PayloadFormat;
@@ -42,7 +43,7 @@ pub struct WillHeader {
 pub struct WillMessage {
     pub header: WillHeader,
     pub topic: String,
-    pub payload: Vec<u8>,
+    pub payload: Bytes,
     pub qos: QoSLevel,
     pub retain: bool,
 }
@@ -60,7 +61,7 @@ impl WillMessage {
         WillMessage {
             header: WillHeader::default(),
             topic,
-            payload: payload.to_vec(),
+            payload: Bytes::copy_from_slice(payload),
             qos,
             retain,
         }

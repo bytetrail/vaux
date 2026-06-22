@@ -119,7 +119,7 @@ async fn subscribe(
                             match p.payload_format {
                                         None | Some(PayloadFormat::Utf8) => {
                                             let message =
-                                                String::from_utf8(p.payload.take().unwrap()).unwrap();
+                                                String::from_utf8(p.payload.take().unwrap().to_vec()).unwrap();
                                             println!("{message}");
                                         }
                                         Some(PayloadFormat::Bin) => {

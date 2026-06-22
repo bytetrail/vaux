@@ -3,7 +3,7 @@ pub use fixed::FixedHeader;
 use crate::{
     ConnAck, Disconnect, Subscribe, connect::Connect, publish::Publish, pubresp::{PubAck, PubComp, PubRec, PubRel}, subscribe::SubAck, unsubscribe::{UnsubAck, Unsubscribe}
 };
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::fmt::{Display, Formatter};
 
 pub(crate) const PACKET_RESERVED_NONE: u8 = 0x00;
@@ -789,44 +789,26 @@ pub fn decode_vec_u8_raw(src: &mut BytesMut) -> Result<(Option<Vec<u8>>, usize),
 
 pub fn decode_opt_vec_u8_raw(
     src: &mut BytesMut,
-) -> Result<(Option<Vec<u8>>, usize), MqttCodecError> {
+) -> Result<(Option<Bytes>, usize), MqttCodecError> {
     let len = src.remaining();
-    let mut vec = Vec::new();
-    vec.resize(len, 0);
-    let dest_buf: &mut [u8] = &mut vec[0..len];
-    src.try_copy_to_slice(dest_buf).map_err(|e| {
-        MqttCodecError::new_with_kind(
-            format!("{e:?}").as_str(),
-            ErrorKind::InsufficientData(len, src.remaining()),
-        )
-    })?;
-    Ok((Some(vec), len))    
+    let bytes = src.split_to(len).freeze();
+    Ok((Some(bytes), len))
 }
 
 
-pub fn codec_size_opt_vec_u8_raw(src: &Option<Vec<u8>>) -> u32 {
+pub fn codec_size_opt_vec_u8_raw(src: &Option<Bytes>) -> u32 {
     match src {
-        Some(vec) => vec.len() as u32,
+        Some(bytes) => bytes.len() as u32,
         None => 0,
     }
 }
 
-pub fn encode_opt_vec_u8_raw(
-    src: Option<Vec<u8>>,
-    dest: &mut BytesMut,
-) -> Result<(), MqttCodecError> {
-    if let Some(vec) = src {
-        dest.put_slice(&vec);
-    }
-    Ok(())
-}
-
 pub fn encode_opt_vec_u8_raw_ref(
-    src: &Option<Vec<u8>>,
+    src: &Option<Bytes>,
     dest: &mut BytesMut,
 ) -> Result<(), MqttCodecError> {
-    if let Some(vec) = src {
-        dest.put_slice(vec);
+    if let Some(bytes) = src {
+        dest.put_slice(bytes);
     }
     Ok(())
 }

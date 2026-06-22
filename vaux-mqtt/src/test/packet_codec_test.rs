@@ -1,4 +1,4 @@
-use bytes::BytesMut;
+use bytes::{Bytes, BytesMut};
 
 use crate::codec::{self, Encode, Packet, Reason};
 use crate::{
@@ -109,7 +109,7 @@ fn test_connect_with_will() {
             assert_eq!(c.will_qos().unwrap(), QoSLevel::AtLeastOnce);
             let wm = c.will_message().expect("expected will message");
             assert_eq!(wm.topic, "will/topic");
-            assert_eq!(wm.payload, b"goodbye");
+            assert_eq!(wm.payload, Bytes::from_static(b"goodbye"));
         }
         _ => panic!("expected Connect"),
     }
@@ -180,7 +180,7 @@ fn test_publish_qos0_roundtrip() {
     match decoded {
         Packet::Publish(p) => {
             assert_eq!(p.topic_name, "test/topic");
-            assert_eq!(p.payload, Some(b"hello mqtt".to_vec()));
+            assert_eq!(p.payload, Some(Bytes::from_static(b"hello mqtt")));
             assert_eq!(p.qos(), QoSLevel::AtMostOnce);
             assert!(p.retain());
             assert_eq!(p.packet_id(), None);
@@ -205,7 +205,7 @@ fn test_publish_qos1_roundtrip() {
             assert_eq!(p.topic_name, "sensor/temp");
             assert_eq!(p.packet_id(), Some(42));
             assert_eq!(p.qos(), QoSLevel::AtLeastOnce);
-            assert_eq!(p.payload, Some(vec![0xDE, 0xAD, 0xBE, 0xEF]));
+            assert_eq!(p.payload, Some(Bytes::from_static(&[0xDE, 0xAD, 0xBE, 0xEF])));
         }
         _ => panic!("expected Publish"),
     }

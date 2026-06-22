@@ -134,7 +134,7 @@ async fn tls_connect_and_publish() {
     match msg {
         vaux_mqtt::Packet::Publish(p) => {
             assert_eq!(p.topic_name, "tls/test");
-            assert_eq!(p.payload, Some(b"encrypted hello".to_vec()));
+            assert_eq!(p.payload, Some(bytes::Bytes::from_static(b"encrypted hello")));
         }
         other => panic!("expected Publish, got {:?}", other),
     }
