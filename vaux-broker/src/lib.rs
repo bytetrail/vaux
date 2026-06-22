@@ -166,13 +166,27 @@ impl Broker {
                             result = listener.accept() => {
                                 match result {
                                     Ok((socket, _)) => {
-                                        let mut stream = PacketStream::new(
-                                            AsyncMqttStream(MqttStream::TcpStream(socket)),
-                                            Some(INIT_STREAM_BUFFER_SIZE),
-                                            None,
-                                        );
                                         let client_state = state.clone();
+                                        let tls = client_state.config.tls_acceptor.clone();
                                         tokio::spawn(async move {
+                                            let mqtt_stream = if let Some(acceptor) = tls {
+                                                match acceptor.accept(socket).await {
+                                                    Ok(tls_stream) => {
+                                                        MqttStream::ServerTlsStream(Box::new(tls_stream))
+                                                    }
+                                                    Err(e) => {
+                                                        eprintln!("TLS handshake failed: {e}");
+                                                        return Ok(());
+                                                    }
+                                                }
+                                            } else {
+                                                MqttStream::TcpStream(socket)
+                                            };
+                                            let mut stream = PacketStream::new(
+                                                AsyncMqttStream(mqtt_stream),
+                                                Some(INIT_STREAM_BUFFER_SIZE),
+                                                None,
+                                            );
                                             Broker::handle_client(&mut stream, client_state).await
                                         });
                                     }

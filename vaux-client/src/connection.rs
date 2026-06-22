@@ -164,7 +164,7 @@ impl MqttConnection {
                     ErrorKind::Connection,
                 )
             })?;
-            Ok(AsyncMqttStream(MqttStream::TlsStream(Box::new(stream))))
+            Ok(AsyncMqttStream(MqttStream::ClientTlsStream(Box::new(stream))))
         } else {
             Err(MqttError::new(
                 "no trusted CA(s) provided for TLS connection",
