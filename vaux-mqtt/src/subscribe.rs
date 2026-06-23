@@ -117,14 +117,22 @@ impl SubscriptionFilter {
         self.options = (self.options & !0b0000_0100) | ((no_local as u8) << 2);
     }
 
+    pub fn retain_as_published(&self) -> bool {
+        (self.options & 0b0000_1000) != 0
+    }
+
+    pub fn set_retain_as_published(&mut self, rap: bool) {
+        self.options = (self.options & !0b0000_1000) | ((rap as u8) << 3);
+    }
+
     pub fn retain_handling(&self) -> RetainHandling {
-        (self.options & 0b0000_1000)
+        ((self.options & 0b0011_0000) >> 4)
             .try_into()
             .unwrap_or(RetainHandling::Send)
     }
 
     pub fn set_retain_handling(&mut self, retain: RetainHandling) {
-        self.options = (self.options & !0b0000_1000) | ((retain as u8) << 3);
+        self.options = (self.options & !0b0011_0000) | ((retain as u8) << 4);
     }
 }
 

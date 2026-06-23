@@ -24,4 +24,3 @@ vaux-mqtt = { path = "../vaux-mqtt" }
 vaux-async = { path = "../vaux-async" }
 rcgen = "0.14.8"
 rustls = "0.23.41"
-tokio-rustls = "0.26"

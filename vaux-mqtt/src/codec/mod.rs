@@ -436,15 +436,13 @@ pub fn decode(src: &mut BytesMut) -> Result<Option<(Packet, usize)>, MqttCodecEr
     let mut decode_len = fixed_header.decode(src)?;
 
     for idx in 0..=3 {
-        if src[idx] & 0x80 != 0x00 {
-            // insufficient bytes left to read remaining
-            if src.remaining() < 1 {
-                return Err(MqttCodecError::new_with_kind(
-                    "Insufficient data",
-                    ErrorKind::InsufficientData(1, src.remaining()),
-                ));
-            }
-        } else {
+        if src.len() <= idx {
+            return Err(MqttCodecError::new_with_kind(
+                "Insufficient data",
+                ErrorKind::InsufficientData(idx + 1, src.len()),
+            ));
+        }
+        if src[idx] & 0x80 == 0x00 {
             break;
         }
     }
@@ -704,6 +702,12 @@ pub fn decode_opt_variable_byte_int(
 }
 
 pub fn decode_variable_byte_int(src: &mut BytesMut) -> Result<(u32, usize), MqttCodecError> {
+    if !src.has_remaining() {
+        return Err(MqttCodecError::new_with_kind(
+            "Insufficient data for variable byte integer",
+            ErrorKind::InsufficientData(1, 0),
+        ));
+    }
     let mut result = 0_u32;
     let mut shift = 0;
     let mut next_byte = src.get_u8();
@@ -714,6 +718,12 @@ pub fn decode_variable_byte_int(src: &mut BytesMut) -> Result<(u32, usize), Mqtt
         if next_byte & 0x80 == 0 {
             decode = false;
         } else {
+            if !src.has_remaining() {
+                return Err(MqttCodecError::new_with_kind(
+                    "Insufficient data for variable byte integer",
+                    ErrorKind::InsufficientData(1, 0),
+                ));
+            }
             next_byte = src.get_u8();
         }
         if shift > 21 {

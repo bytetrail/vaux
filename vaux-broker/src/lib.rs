@@ -103,7 +103,7 @@ pub struct Broker {
 
 impl Default for Broker {
     fn default() -> Self {
-        let (sender, receiver) = tokio::sync::mpsc::channel(10);
+        let (sender, receiver) = tokio::sync::mpsc::channel(config::DEFAULT_SESSION_CHANNEL_SIZE);
         Broker {
             state: BrokerState::new(config::Config::default()),
             command_channel: (sender, Some(receiver)),
@@ -113,7 +113,7 @@ impl Default for Broker {
 
 impl Broker {
     pub fn new_with_config(config: config::Config) -> Self {
-        let (sender, receiver) = tokio::sync::mpsc::channel(10);
+        let (sender, receiver) = tokio::sync::mpsc::channel(config.session_channel_size);
         Broker {
             state: BrokerState::new(config),
             command_channel: (sender, Some(receiver)),
@@ -341,9 +341,18 @@ impl Broker {
                     session.id().to_string()
                 };
                 if publish.qos() == QoSLevel::AtLeastOnce {
-                    if let Some(packet_id) = publish.packet_id() {
-                        let puback = vaux_mqtt::PubAck::new_puback_with_packet_id(packet_id);
-                        stream.write(&mut Packet::PubAck(puback)).await?;
+                    match publish.packet_id() {
+                        Some(packet_id) => {
+                            let puback = vaux_mqtt::PubAck::new_puback_with_packet_id(packet_id);
+                            stream.write(&mut Packet::PubAck(puback)).await?;
+                        }
+                        None => {
+                            let disconnect = Disconnect::new(Reason::MalformedPacket);
+                            stream.write(&mut Packet::Disconnect(disconnect)).await?;
+                            return Err(MqttCodecError::new(
+                                "QoS-1 PUBLISH missing packet ID",
+                            ).into());
+                        }
                     }
                 }
                 Broker::route_publish(&publish, &session_id, state).await;

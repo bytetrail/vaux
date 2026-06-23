@@ -194,7 +194,7 @@ impl ClientSession {
             ));
         }
         let mut connect = Connect::default();
-        connect.keep_alive = 100; //self.state.keep_alive.read().await.as_secs() as u16);
+        connect.keep_alive = self.state.keep_alive.read().await.as_secs() as u16;
         connect.set_clean_start(clean_start);
         {
             let set_id = self.state.client_id.lock().await;
@@ -349,7 +349,6 @@ impl ClientSession {
                 self.send_packet(Packet::Disconnect(d)).await?;
                 // TODO handle shutdown error?
                 let _ = self.packet_stream.shutdown().await;
-                //self.pending_qos.append(&mut self.pending_publish);
                 *self.connected.write().await = false;
                 Ok(())
             }
@@ -369,7 +368,6 @@ impl ClientSession {
             Packet::Disconnect(d) => {
                 // TODO handle disconnect - verify shutdown behavior
                 let _ = self.packet_stream.shutdown().await;
-                //self.pending_qos1.append(&mut self.pending_publish);
                 return Err(MqttError::new(
                     &format!("disconnect received: {d:?}"),
                     ErrorKind::Protocol(d.reason),

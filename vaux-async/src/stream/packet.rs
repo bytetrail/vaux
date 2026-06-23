@@ -167,7 +167,6 @@ impl PacketStream {
 
     pub async fn write(&mut self, packet: &mut Packet) -> Result<(), Error> {
         let mut dest = BytesMut::default();
-        // print out the packet being encoded for debugging
         let result = packet.encode(&mut dest);
         if let Err(e) = result {
             return Err(Error::Codec(e));
