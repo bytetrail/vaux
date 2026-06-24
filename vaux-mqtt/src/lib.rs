@@ -2,44 +2,28 @@ pub mod codec;
 pub mod connack;
 pub mod connect;
 pub mod disconnect;
-pub mod fixed;
 pub mod property;
 pub mod publish;
 pub mod pubresp;
 pub mod subscribe;
 pub mod test;
 pub mod unsubscribe;
-mod will;
+pub mod will;
 
-use crate::codec::{put_utf8, variable_byte_int_size};
+pub use codec::{MqttCodecError, Packet, PacketType, QoSLevel, Reason};
+use vaux_macro::packet;
 
-pub use crate::property::PropertyType;
-
-pub use crate::codec::{
-    decode, decode_fixed_header, encode, MqttCodecError, Packet, PacketType, QoSLevel, Reason,
+pub use {
+    codec::fixed::FixedHeader,
+    connack::ConnAck,
+    connect::Connect,
+    disconnect::Disconnect,
+    property::PropertyType,
+    publish::{PayloadFormat, Publish},
+    pubresp::{PubAck, PubComp, PubRec, PubRel},
+    subscribe::{Subscribe, SubscriptionFilter},
+    will::{WillHeader, WillMessage},
 };
-pub use crate::connack::ConnAck;
-pub use crate::connect::Connect;
-pub use crate::will::WillMessage;
-pub use crate::{
-    disconnect::Disconnect, fixed::FixedHeader, pubresp::PubResp, subscribe::Subscribe,
-    subscribe::SubscriptionFilter,
-};
-use bytes::BytesMut;
-
-pub trait Size {
-    fn size(&self) -> u32;
-    fn property_size(&self) -> u32;
-    fn payload_size(&self) -> u32;
-}
-
-pub trait Encode: Size {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError>;
-}
-
-pub trait Decode {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError>;
-}
 
 pub enum MqttVersion {
     V3,
@@ -91,4 +75,26 @@ impl std::fmt::Display for MqttError {
     }
 }
 
-//pub type Result<T> = std::result::Result<T, MqttError>;
+#[packet(packet_type = "codec::PacketType::PingReq")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct PingReq;
+
+impl Default for PingReq {
+    fn default() -> Self {
+        Self {
+            fixed_header: codec::FixedHeader::new(codec::PacketType::PingReq),
+        }
+    }
+}
+
+#[packet(packet_type = "codec::PacketType::PingResp")]
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct PingResp;
+
+impl Default for PingResp {
+    fn default() -> Self {
+        Self {
+            fixed_header: codec::FixedHeader::new(codec::PacketType::PingResp),
+        }
+    }
+}

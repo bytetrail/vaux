@@ -2,7 +2,7 @@ use super::AsyncMqttStream;
 use bytes::{Bytes, BytesMut};
 use std::fmt::Display;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use vaux_mqtt::{decode, encode, Packet};
+use vaux_mqtt::codec::{Encode, Packet, decode};
 
 const READ_BUFFER_SIZE: usize = 4096;
 const MAX_BUFFER_SIZE: usize = 4096 * 1024;
@@ -100,18 +100,17 @@ impl PacketStream {
                         if let Some((packet, decode_len)) = data_read {
                             if with_bytes {
                                 // split the buffer into packet and remaining bytes
-                                let packet_bytes = bytes_mut.split_to(decode_len as usize);
+                                let packet_bytes = bytes_mut.split_to(decode_len);
                                 // resize the buffer if less than requested initial size
                                 if self.read_buffer.len() < self.initial_buffer_size {
                                     self.read_buffer.resize(self.initial_buffer_size, 0);
                                 }
                                 return Ok(Some((packet, Some(packet_bytes.freeze()))));
                             } else {
-                                if decode_len < bytes_read as u32 {
-                                    self.read_buffer
-                                        .copy_within(decode_len as usize..bytes_read, 0);
+                                if decode_len < bytes_read {
+                                    self.read_buffer.copy_within(decode_len..bytes_read, 0);
                                     // adjust offset to end of decoded bytes
-                                    self.read_offset = bytes_read - decode_len as usize;
+                                    self.read_offset = bytes_read - decode_len;
                                 } else {
                                     self.read_offset = 0;
                                 }
@@ -166,9 +165,9 @@ impl PacketStream {
         }
     }
 
-    pub async fn write(&mut self, packet: &Packet) -> Result<(), Error> {
+    pub async fn write(&mut self, packet: &mut Packet) -> Result<(), Error> {
         let mut dest = BytesMut::default();
-        let result = encode(packet, &mut dest);
+        let result = packet.encode(&mut dest);
         if let Err(e) = result {
             return Err(Error::Codec(e));
         }

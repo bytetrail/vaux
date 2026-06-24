@@ -6,7 +6,7 @@ use rustls::pki_types::CertificateDer;
 use tokio::{select, task::JoinHandle};
 use vaux_client::PacketChannel;
 use vaux_mqtt::{
-    property::{PacketProperties, Property},
+    codec::{CodecSize, PropertyCodecSize},
     publish::Publish,
     Packet, QoSLevel,
 };
@@ -100,6 +100,7 @@ async fn main() {
     let mut packet_in = client.take_packet_consumer().unwrap();
     let producer = client.packet_producer();
 
+    println!("starting publish example");
     publish(
         &mut client,
         producer,
@@ -140,20 +141,22 @@ async fn publish(
     let start = std::time::Instant::now();
     for i in 0..iterations {
         let mut publish = Publish::default();
-        publish
-            .properties_mut()
-            .set_property(Property::PayloadFormat(
-                vaux_mqtt::property::PayloadFormat::Utf8,
-            ));
-        publish
-            .properties_mut()
-            .set_property(Property::MessageExpiry(1000));
+        println!("publish property size {}", publish.property_size());
+        publish.set_payload_format(vaux_mqtt::PayloadFormat::Utf8);
+        publish.message_expiry = Some(1000);
 
         let message = arg_message.clone();
-        publish.topic_name = Some(topic.clone());
-        publish.set_payload(Vec::from(message.as_bytes()));
+        publish.topic_name = topic.clone();
+        publish.payload = Some(bytes::Bytes::from(message.into_bytes()));
         publish.set_qos(args.qos);
-        publish.packet_id = Some((i + 1) as u16);
+        if args.qos != QoSLevel::AtMostOnce  {
+            publish.set_packet_id(Some((i + 1) as u16)).unwrap();
+        }
+
+        println!("publish property size {}", publish.property_size());
+        println!("sending publish: {:?}", publish);
+        println!("publish codec size {}", publish.codec_size());
+
         if packet_out
             .send(vaux_mqtt::Packet::Publish(publish.clone()))
             .await

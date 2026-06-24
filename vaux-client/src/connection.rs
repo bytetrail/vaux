@@ -48,10 +48,10 @@ impl MqttConnection {
     }
 
     pub(crate) fn credentials(&self) -> Option<(String, String)> {
-        if let Some(username) = &self.username {
-            if let Some(password) = &self.password {
-                return Some((username.clone(), password.clone()));
-            }
+        if let Some(username) = &self.username
+            && let Some(password) = &self.password
+        {
+            return Some((username.clone(), password.clone()));
         }
         None
     }
@@ -164,7 +164,7 @@ impl MqttConnection {
                     ErrorKind::Connection,
                 )
             })?;
-            Ok(AsyncMqttStream(MqttStream::TlsStream(Box::new(stream))))
+            Ok(AsyncMqttStream(MqttStream::ClientTlsStream(Box::new(stream))))
         } else {
             Err(MqttError::new(
                 "no trusted CA(s) provided for TLS connection",

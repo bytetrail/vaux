@@ -4,10 +4,11 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
     RwLock,
+    mpsc::{self, Receiver, Sender},
 };
-use vaux_mqtt::{subscribe::Subscription, Reason, WillMessage};
+use tokio_util::sync::CancellationToken;
+use vaux_mqtt::{Publish, Reason, WillMessage};
 
 #[derive(Debug, Default)]
 pub struct SessionPool {
@@ -59,6 +60,13 @@ impl SessionPool {
 
     pub fn inactive_sessions(&self) -> u32 {
         self.inactive_sessions
+    }
+
+    pub fn at_capacity(&self, max: Option<u32>) -> bool {
+        match max {
+            Some(limit) => self.active_sessions >= limit,
+            None => false,
+        }
     }
 
     /// Inserts a new session into the pool. If the session is connected, the
@@ -166,8 +174,10 @@ impl SessionPool {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum SessionControl {
     Disconnect(Reason),
+    Deliver(Box<vaux_mqtt::Publish>),
 }
 
 #[derive(Debug)]
@@ -178,14 +188,21 @@ pub struct Session {
     keep_alive: Duration,
     pub session_expiry: Option<Duration>,
     will_message: Option<WillMessage>,
-    subscriptions: Vec<Subscription>,
+    pending_will: Option<CancellationToken>,
+    next_packet_id: u16,
+    pending_ack: HashMap<u16, Publish>,
     control: (Sender<SessionControl>, Option<Receiver<SessionControl>>),
 }
 
 impl Session {
     /// Creates a new session with the last active time set to Instant::now()
-    pub fn new(id: String, will_message: Option<WillMessage>, keep_alive: Duration) -> Self {
-        let (sender, receiver) = mpsc::channel(10);
+    pub fn new(
+        id: String,
+        will_message: Option<WillMessage>,
+        keep_alive: Duration,
+        channel_size: usize,
+    ) -> Self {
+        let (sender, receiver) = mpsc::channel(channel_size);
         Session {
             id,
             last_active: Instant::now(),
@@ -193,13 +210,15 @@ impl Session {
             keep_alive,
             session_expiry: None,
             will_message,
-            subscriptions: Vec::new(),
+            pending_will: None,
+            next_packet_id: 1,
+            pending_ack: HashMap::new(),
             control: (sender, Some(receiver)),
         }
     }
 
-    pub fn reset_control(&mut self) {
-        let (sender, receiver) = mpsc::channel(10);
+    pub fn reset_control(&mut self, channel_size: usize) {
+        let (sender, receiver) = mpsc::channel(channel_size);
         self.control = (sender, Some(receiver));
     }
 
@@ -212,12 +231,21 @@ impl Session {
     }
 
     pub async fn disconnect(&self, reason: Reason) {
-        // TODO - handle errors and return
-        self.control
-            .0
-            .send(SessionControl::Disconnect(reason))
-            .await
-            .expect("Failed to send disconnect message");
+        let _ = self.send_control(SessionControl::Disconnect(reason)).await;
+    }
+
+    pub async fn send_control(
+        &self,
+        msg: SessionControl,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<SessionControl>> {
+        self.control.0.send(msg).await
+    }
+
+    pub fn try_send_control(
+        &self,
+        msg: SessionControl,
+    ) -> Result<(), tokio::sync::mpsc::error::TrySendError<SessionControl>> {
+        self.control.0.try_send(msg)
     }
 
     /// Clears the will message from the session. This is typically done on a successful
@@ -225,6 +253,50 @@ impl Session {
     /// (3.14.4 DICONNECT Actions)[https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html#_Toc3901216]
     pub fn clear_will(&mut self) {
         self.will_message = None;
+    }
+
+    pub fn set_will(&mut self, will: Option<WillMessage>) {
+        self.will_message = will;
+    }
+
+    pub fn take_will(&mut self) -> Option<WillMessage> {
+        self.will_message.take()
+    }
+
+    pub fn set_pending_will(&mut self, token: CancellationToken) {
+        self.cancel_pending_will();
+        self.pending_will = Some(token);
+    }
+
+    pub fn cancel_pending_will(&mut self) {
+        if let Some(token) = self.pending_will.take() {
+            token.cancel();
+        }
+    }
+
+    pub fn next_packet_id(&mut self) -> u16 {
+        let id = self.next_packet_id;
+        self.next_packet_id = self.next_packet_id.wrapping_add(1);
+        if self.next_packet_id == 0 {
+            self.next_packet_id = 1;
+        }
+        id
+    }
+
+    pub fn track_qos_publish(&mut self, packet_id: u16, publish: Publish) {
+        self.pending_ack.insert(packet_id, publish);
+    }
+
+    pub fn acknowledge(&mut self, packet_id: u16) -> bool {
+        self.pending_ack.remove(&packet_id).is_some()
+    }
+
+    pub fn pending_ack_count(&self) -> usize {
+        self.pending_ack.len()
+    }
+
+    pub fn drain_pending(&mut self) -> Vec<(u16, Publish)> {
+        self.pending_ack.drain().collect()
     }
 
     pub fn id(&self) -> &str {
@@ -282,11 +354,10 @@ pub mod test {
 
     #[test]
     fn test_session_new() {
-        let session = Session::new("test".to_string(), None, Duration::from_secs(10));
+        let session = Session::new("test".to_string(), None, Duration::from_secs(10), 10);
         assert_eq!(session.id(), "test");
         assert_eq!(session.connected(), false);
         assert_eq!(session.keep_alive(), Duration::from_secs(10));
-        assert_eq!(session.subscriptions.len(), 0);
         assert_eq!(session.will_message(), None);
         assert_eq!(session.session_expiry, None);
     }
@@ -294,7 +365,7 @@ pub mod test {
     #[tokio::test]
     async fn test_add_active() {
         let mut pool = SessionPool::new_with_expiry(Duration::from_secs(30));
-        let mut session = Session::new("test".to_string(), None, Duration::from_secs(10));
+        let mut session = Session::new("test".to_string(), None, Duration::from_secs(10), 10);
         session.set_connected(true);
         let session = Arc::new(RwLock::new(session));
         pool.add(session).await;
@@ -309,6 +380,7 @@ pub mod test {
             "test".to_string(),
             None,
             Duration::from_secs(10),
+            10,
         )));
         pool.add(session).await;
         assert_eq!(pool.active_sessions(), 0);
@@ -322,6 +394,7 @@ pub mod test {
             "test_1".to_string(),
             None,
             Duration::from_secs(10),
+            10,
         )));
         pool.add(session).await;
         assert_eq!(pool.active_sessions(), 0);
@@ -339,7 +412,7 @@ pub mod test {
     #[tokio::test]
     async fn test_session_deactivate() {
         let mut pool = SessionPool::new_with_expiry(Duration::from_secs(30));
-        let mut session = Session::new("test".to_string(), None, Duration::from_secs(10));
+        let mut session = Session::new("test".to_string(), None, Duration::from_secs(10), 10);
         session.set_connected(true);
         let session = Arc::new(RwLock::new(session));
         pool.add(session).await;

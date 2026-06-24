@@ -1,4 +1,4 @@
 #[cfg(test)]
 mod codec_test;
 #[cfg(test)]
-mod connect_test;
+mod packet_codec_test;

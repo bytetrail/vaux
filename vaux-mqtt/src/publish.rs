@@ -1,40 +1,110 @@
 use crate::{
-    codec::{get_utf8, put_utf8, variable_byte_int_size, SIZE_UTF8_STRING},
-    property::{PacketProperties, PayloadFormat, Property, PropertyBundle},
-    Decode, Encode, FixedHeader, MqttCodecError, PacketType, PropertyType, QoSLevel, Size,
+    MqttCodecError, PacketType, PropertyType, QoSLevel,
+    codec::{self},
+    property::UserProperty,
 };
-use bytes::{Buf, BufMut};
-use std::{collections::HashSet, sync::LazyLock};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use vaux_macro::packet;
 
-static PUBLISH_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
-    let mut set = HashSet::new();
-    set.insert(PropertyType::PayloadFormat);
-    set.insert(PropertyType::MessageExpiry);
-    set.insert(PropertyType::TopicAlias);
-    set.insert(PropertyType::ResponseTopic);
-    set.insert(PropertyType::CorrelationData);
-    set.insert(PropertyType::SubscriptionIdentifier);
-    set.insert(PropertyType::ContentType);
-    set.insert(PropertyType::UserProperty);
-    set
-});
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum PayloadFormat {
+    #[default]
+    Bin = 0x00,
+    Utf8 = 0x01,
+}
 
+impl TryFrom<u8> for PayloadFormat {
+    type Error = MqttCodecError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0x00 => Ok(PayloadFormat::Bin),
+            0x01 => Ok(PayloadFormat::Utf8),
+            _ => Err(MqttCodecError::new("invalid payload format")),
+        }
+    }
+}
+
+impl codec::Encode for PayloadFormat {
+    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
+        dest.put_u8(*self as u8);
+        Ok(())
+    }
+}
+
+impl codec::Decode for PayloadFormat {
+    fn decode(&mut self, src: &mut BytesMut) -> Result<usize, MqttCodecError> {
+        *self = PayloadFormat::try_from(src.get_u8())?;
+        Ok(1)
+    }
+}
+
+impl codec::CodecSize for PayloadFormat {
+    fn codec_size(&self) -> u32 {
+        1
+    }
+}
+
+impl codec::PropertyCodecSize for PayloadFormat {
+    fn property_size(&self) -> u32 {
+        2
+    }
+}
+
+#[packet(packet_type = "codec::PacketType::Publish")]
+#[codec(skip_decode)]
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Publish {
-    pub header: FixedHeader,
-    pub topic_name: Option<String>,
-    pub packet_id: Option<u16>,
-    props: PropertyBundle,
-    payload: Option<Vec<u8>>,
+    pub topic_name: String,
+    packet_id: Option<u16>,
+    #[codec(property_type = "PropertyType::MessageExpiry")]
+    pub message_expiry: Option<u32>,
+    #[codec(property_type = "PropertyType::PayloadFormat")]
+    pub payload_format: Option<PayloadFormat>,
+    #[codec(property_type = "PropertyType::TopicAlias")]
+    pub topic_alias: Option<u16>,
+    #[codec(property_type = "PropertyType::ResponseTopic")]
+    pub response_topic: Option<String>,
+    #[codec(
+        property_type = "PropertyType::CorrelationData",
+        skip_if = "Vec::is_empty"
+    )]
+    pub correlation_data: Vec<u8>,
+    #[codec(property_type = "PropertyType::SubscriptionIdentifier")]
+    #[codec(
+        size_with = "codec::codec_size_opt_variable_byte_int_ref",
+        encode_with = "codec::encode_opt_variable_byte_int_ref",
+        decode_with = "codec::decode_opt_variable_byte_int"
+    )]
+    pub subscription_identifiers: Option<u32>,
+    #[codec(property_type = "PropertyType::ContentType")]
+    pub content_type: Option<String>,
+    #[codec(property_type = "PropertyType::UserProperty")]
+    pub user_properties: UserProperty,
+    #[codec(
+        payload_type = "remaining",
+        decode_with = "codec::decode_opt_vec_u8_raw",
+        encode_with = "codec::encode_opt_vec_u8_raw_ref",
+        size_with = "codec::codec_size_opt_vec_u8_raw"
+    )]
+    pub payload: Option<Bytes>,
 }
 
 impl Default for Publish {
     fn default() -> Self {
-        Self {
-            header: FixedHeader::new(PacketType::Publish),
-            topic_name: None,
+        Publish {
+            fixed_header: codec::FixedHeader::new(PacketType::Publish),
+            topic_name: String::new(),
             packet_id: None,
-            props: PropertyBundle::new(&PUBLISH_PROPS),
+            payload_format: None,
+            message_expiry: None,
+            topic_alias: None,
+            response_topic: None,
+            correlation_data: Vec::new(),
+            subscription_identifiers: None,
+            content_type: None,
+            user_properties: UserProperty::default(),
             payload: None,
         }
     }
@@ -55,7 +125,7 @@ impl Publish {
     ///   section 3.3.2.2.
     /// * If `packet_id` is `Some`, not 0, and `qos_level` is `AtMostOnce`, an error is returned.
     ///   This is because a packet identifier is not supported for QoS 0. See MQTTv5 specification
-    ///  section 3.3.2.2.
+    ///   section 3.3.2.2.
     pub fn new_with_message(
         packet_id: Option<u16>,
         topic: String,
@@ -63,7 +133,7 @@ impl Publish {
         message: &str,
     ) -> Result<Self, MqttCodecError> {
         Publish::new_with_payload(packet_id, topic, qos_level, message.as_bytes().to_vec())
-            .and_then(|p| Ok(p.with_payload_format(PayloadFormat::Utf8)))
+            .map(|p| p.with_payload_format(PayloadFormat::Utf8))
     }
 
     /// Create a new Publish packet with the given topic name and QoS level and
@@ -80,7 +150,7 @@ impl Publish {
     ///   section 3.3.2.2.
     /// * If `packet_id` is `Some`, not 0, and `qos_level` is `AtMostOnce`, an error is returned.
     ///   This is because a packet identifier is not supported for QoS 0. See MQTTv5 specification
-    ///  section 3.3.2.2.
+    ///   section 3.3.2.2.
     pub fn new_with_payload(
         packet_id: Option<u16>,
         topic: String,
@@ -96,26 +166,24 @@ impl Publish {
                 "Mqttv5 3.3.2.2 Packet Identifier not supported when QOS level is set to \"At Most Once\" (0)",
             ));
         }
+
         Publish {
-            header: FixedHeader::new(PacketType::Publish),
-            topic_name: Some(topic),
+            fixed_header: codec::FixedHeader::new(PacketType::Publish),
+            topic_name: topic,
             packet_id,
-            props: PropertyBundle::new(&PUBLISH_PROPS),
-            payload: Some(payload),
+            payload: Some(Bytes::from(payload)),
+            ..Default::default()
         }
         .with_qos(qos_level)
         .with_payload_format(PayloadFormat::Bin)
         .with_dup(false)
     }
 
-    pub fn new_from_header(header: FixedHeader) -> Result<Self, MqttCodecError> {
-        match header.packet_type {
+    pub fn new_from_header(fixed_header: codec::FixedHeader) -> Result<Self, MqttCodecError> {
+        match fixed_header.packet_type {
             PacketType::Publish => Ok(Publish {
-                header,
-                topic_name: None,
-                packet_id: None,
-                props: PropertyBundle::new(&PUBLISH_PROPS),
-                payload: None,
+                fixed_header,
+                ..Default::default()
             }),
             p => Err(MqttCodecError {
                 reason: format!("unable to construct from {p}"),
@@ -125,11 +193,11 @@ impl Publish {
     }
 
     pub fn qos(&self) -> QoSLevel {
-        self.header.qos()
+        self.fixed_header.qos()
     }
 
     pub fn set_qos(&mut self, qos: QoSLevel) {
-        self.header.set_qos(qos);
+        self.fixed_header.set_qos(qos);
     }
 
     pub fn with_qos(mut self, qos: QoSLevel) -> Self {
@@ -138,17 +206,17 @@ impl Publish {
     }
 
     pub fn dup(&self) -> bool {
-        self.header.dup()
+        self.fixed_header.dup()
     }
 
     pub fn set_dup(&mut self, dup: bool) -> Result<(), MqttCodecError> {
-        if self.header.qos() == QoSLevel::AtMostOnce && dup {
+        if self.fixed_header.qos() == QoSLevel::AtMostOnce && dup {
             return Err(MqttCodecError::new(
                 "Mqttv53.3.2.2 QOS level must not be At
     Most Once with DUP true",
             ));
         }
-        self.header.set_dup(dup);
+        self.fixed_header.set_dup(dup);
         Ok(())
     }
 
@@ -158,80 +226,48 @@ impl Publish {
     }
 
     pub fn retain(&self) -> bool {
-        self.header.retain()
+        self.fixed_header.retain()
     }
 
     pub fn set_retain(&mut self, retain: bool) {
-        self.header.set_retain(retain);
+        self.fixed_header.set_retain(retain);
     }
 
     pub fn with_retain(mut self, retain: bool) -> Self {
-        self.set_retain(retain);
+        self.fixed_header.set_retain(retain);
         self
     }
 
-    pub fn set_payload(&mut self, data: Vec<u8>) {
-        self.payload = Some(data);
+    pub fn packet_id(&self) -> Option<u16> {
+        self.packet_id
     }
 
-    pub fn take_payload(&mut self) -> Option<Vec<u8>> {
-        self.payload.take()
-    }
-
-    pub fn set_packet_id(&mut self, id: u16) -> Result<(), MqttCodecError> {
-        if self.header.qos() == QoSLevel::AtMostOnce {
+    pub fn set_packet_id(&mut self, id: Option<u16>) -> Result<(), MqttCodecError> {
+        if self.fixed_header.qos() == QoSLevel::AtMostOnce {
             return Err(MqttCodecError::new(
                 "Mqttv53.3.2.2 QOS level must not be At Most Once",
             ));
         }
-        self.packet_id = Some(id);
+        self.packet_id = id;
         Ok(())
     }
 
-    pub fn with_packet_id(mut self, id: u16) -> Result<Self, MqttCodecError> {
+    pub fn with_packet_id(mut self, id: Option<u16>) -> Result<Self, MqttCodecError> {
         self.set_packet_id(id)?;
         Ok(self)
     }
 
-    pub fn topic_alias(&self) -> Option<u16> {
-        self.props
-            .get_property(PropertyType::TopicAlias)
-            .and_then(|p| {
-                if let Property::TopicAlias(alias) = p {
-                    Some(*alias)
-                } else {
-                    None
-                }
-            })
-    }
-
-    pub fn set_topic_alias(&mut self, alias: u16) {
-        self.props.set_property(Property::TopicAlias(alias))
-    }
-
     pub fn with_topic_alias(mut self, alias: u16) -> Self {
-        self.set_topic_alias(alias);
+        self.topic_alias = Some(alias);
         self
-    }
-
-    pub fn payload_format(&self) -> Option<PayloadFormat> {
-        self.props
-            .get_property(PropertyType::PayloadFormat)
-            .and_then(|p| {
-                if let Property::PayloadFormat(format) = p {
-                    Some(*format)
-                } else {
-                    None
-                }
-            })
     }
 
     pub fn set_payload_format(&mut self, format: PayloadFormat) {
         if format == PayloadFormat::Bin {
-            self.props.clear_property(PropertyType::PayloadFormat);
+            self.payload_format = None;
             return;
         }
-        self.props.set_property(Property::PayloadFormat(format));
+        self.payload_format = Some(format);
     }
 
     pub fn with_payload_format(mut self, format: PayloadFormat) -> Self {
@@ -240,265 +276,89 @@ impl Publish {
     }
 }
 
-impl PacketProperties for Publish {
-    fn properties(&self) -> &PropertyBundle {
-        &self.props
-    }
-    fn properties_mut(&mut self) -> &mut PropertyBundle {
-        &mut self.props
-    }
+impl codec::Decode for Publish {
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<usize, MqttCodecError> {
+        use bytes::Buf;
+        let mut bytes_read = 0_usize;
 
-    fn set_properties(&mut self, properties: PropertyBundle) {
-        self.props = properties;
-    }
-}
+        bytes_read += self.topic_name.decode(src)?;
 
-impl Size for Publish {
-    fn size(&self) -> u32 {
-        let mut remaining = if let Some(topic_name) = self.topic_name.as_ref() {
-            SIZE_UTF8_STRING + topic_name.len() as u32
-        } else {
-            SIZE_UTF8_STRING
-        };
-        // packet identifier
-        remaining += if let QoSLevel::AtMostOnce = self.header.qos() {
-            0
-        } else {
-            2
-        };
-        let payload_size = self.payload_size();
-        let prop_remaining = self.property_size();
-        remaining + payload_size + prop_remaining + variable_byte_int_size(prop_remaining)
-    }
-
-    fn property_size(&self) -> u32 {
-        self.props.size()
-    }
-
-    fn payload_size(&self) -> u32 {
-        if let Some(payload) = &self.payload {
-            payload.len() as u32
-        } else {
-            0
+        if self.fixed_header.qos() != QoSLevel::AtMostOnce {
+            self.packet_id = Some(src.get_u16());
+            bytes_read += 2;
         }
-    }
-}
 
-impl Encode for Publish {
-    fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
-        let mut header = self.header.clone();
-        let size = self.size();
-        header.set_remaining(size);
-        header.encode(dest)?;
-        if self.topic_name.is_none() && self.props.get_property(PropertyType::TopicAlias).is_none()
-        {
-            return Err(MqttCodecError::new(
-                "MQTTv5 3.3.2.1 must have topic name or topic alias",
-            ));
-        }
-        match self.topic_name.as_ref() {
-            Some(topic_name) => put_utf8(topic_name, dest)?,
-            None => put_utf8("", dest)?,
-        };
-        if self.header.qos() != QoSLevel::AtMostOnce {
-            if let Some(packet_id) = self.packet_id {
-                dest.put_u16(packet_id);
-            } else {
-                return Err(MqttCodecError::new(
-                    "MQTTv5 3.3.2.2 packet identifier must be included for QOS 1 or 2",
-                ));
+        let (property_length, var_bytes_read) = codec::decode_variable_byte_int(src)?;
+        let property_length = property_length as usize;
+        bytes_read += var_bytes_read;
+        let mut property_bytes_read = 0_usize;
+        while property_bytes_read < property_length {
+            let property_type: PropertyType = src.get_u8().try_into()?;
+            property_bytes_read += 1;
+            match property_type {
+                PropertyType::MessageExpiry => {
+                    let mut value = u32::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.message_expiry = Some(value);
+                }
+                PropertyType::PayloadFormat => {
+                    let mut value = PayloadFormat::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.payload_format = Some(value);
+                }
+                PropertyType::TopicAlias => {
+                    self.topic_alias = Some(src.get_u16());
+                    property_bytes_read += 2;
+                }
+                PropertyType::ResponseTopic => {
+                    let mut value = String::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.response_topic = Some(value);
+                }
+                PropertyType::CorrelationData => {
+                    let mut value = Vec::new();
+                    property_bytes_read += value.decode(src)?;
+                    self.correlation_data = value;
+                }
+                PropertyType::SubscriptionIdentifier => {
+                    let (value, decode_bytes_read) = codec::decode_opt_variable_byte_int(src)?;
+                    property_bytes_read += decode_bytes_read;
+                    self.subscription_identifiers = value;
+                }
+                PropertyType::ContentType => {
+                    let mut value = String::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.content_type = Some(value);
+                }
+                PropertyType::UserProperty => {
+                    property_bytes_read += self.user_properties.decode(src)?;
+                }
+                _ => {
+                    return Err(codec::MqttCodecError::new_with_kind(
+                        format!(
+                            "MQTT v5 property type {:?} is not supported for Publish",
+                            property_type
+                        )
+                        .as_str(),
+                        codec::ErrorKind::UnsupportedProperty(property_type as u8),
+                    ));
+                }
             }
         }
-        self.props.encode(dest)?;
-        if let Some(p) = self.payload.as_ref() {
-            dest.put_slice(p)
-        }
-        Ok(())
-    }
-}
+        bytes_read += property_bytes_read;
 
-impl Decode for Publish {
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), MqttCodecError> {
-        let topic_name = get_utf8(src)?;
-        if topic_name.is_empty() {
-            self.topic_name = None;
-        } else {
-            self.topic_name = Some(topic_name);
-        }
-        if self.header.qos() != QoSLevel::AtMostOnce {
-            self.packet_id = Some(src.get_u16());
-        }
-        self.props.decode(src)?;
-        if src.remaining() > 0 {
-            let idx = src.len() - src.remaining();
-            let end = src.remaining();
-            self.payload = Some(src.copy_to_bytes(end - idx).to_vec());
-        }
-        Ok(())
+        let (value, decode_bytes_read) = codec::decode_opt_vec_u8_raw(src)?;
+        bytes_read += decode_bytes_read;
+        self.payload = value;
+
+        Ok(bytes_read)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use bytes::BytesMut;
 
     use super::*;
-
-    const LEN_TOPIC_NAME_LEN: u32 = 2;
-    const LEN_TOPIC_NAME: u32 = 5;
-
-    #[test]
-    fn test_encode_no_props() {
-        const LEN_PROP_LEN: u32 = 1;
-        const EXPECTED_REMAINING: u32 = LEN_TOPIC_NAME_LEN + LEN_TOPIC_NAME + LEN_PROP_LEN;
-        const EXPECTED_LEN: u32 = EXPECTED_REMAINING + 2;
-        let hdr = crate::FixedHeader::new(PacketType::Publish);
-        match Publish::new_from_header(hdr) {
-            Ok(mut publish) => {
-                publish.topic_name = Some("topic".to_string());
-                let mut dest = BytesMut::new();
-                match publish.encode(&mut dest) {
-                    Ok(_) => {
-                        assert_eq!(
-                            EXPECTED_LEN,
-                            dest.len() as u32,
-                            "expected length to be {}",
-                            EXPECTED_LEN
-                        );
-                        assert_eq!(EXPECTED_REMAINING, dest[1] as u32);
-                        assert_eq!(LEN_TOPIC_NAME, dest[3] as u32);
-                        assert_eq!(
-                            "topic".to_string(),
-                            String::from_utf8(Vec::from(dest.get(4..9).unwrap())).unwrap()
-                        );
-                    }
-                    Err(e) => panic!("unable to encode publish record: {}", e),
-                }
-            }
-            Err(e) => panic!("unable to create publish record: {}", e),
-        }
-    }
-
-    #[test]
-    fn test_fail_topic() {
-        let hdr = crate::FixedHeader::new(PacketType::Publish);
-        match Publish::new_from_header(hdr) {
-            Ok(publish) => {
-                let mut dest = BytesMut::new();
-                match publish.encode(&mut dest) {
-                    Ok(_) => panic!("expected error on encode"),
-                    Err(e) => {
-                        assert_eq!("MQTTv5 3.3.2.1", &e.reason[0..14]);
-                    }
-                }
-            }
-            Err(e) => panic!("unable to encode publish record: {}", e),
-        }
-    }
-
-    #[test]
-    fn test_fail_packet_id() {
-        let hdr = crate::FixedHeader::new(PacketType::Publish);
-        match Publish::new_from_header(hdr) {
-            Ok(publish) => {
-                let mut dest = BytesMut::new();
-                match publish.encode(&mut dest) {
-                    Ok(_) => panic!("expected error on encode"),
-                    Err(e) => {
-                        assert_eq!("MQTTv5 3.3.2.1", &e.reason[0..14]);
-                    }
-                }
-            }
-            Err(e) => panic!("unable to encode publish record: {}", e),
-        }
-    }
-
-    #[test]
-    fn test_basic_payload() {
-        const LEN_PROP_LEN: u32 = 1;
-        const LEN_PAYLOAD: u32 = 20;
-        const EXPECTED_REMAINING: u32 =
-            LEN_TOPIC_NAME_LEN + LEN_TOPIC_NAME + LEN_PROP_LEN + LEN_PAYLOAD;
-        const EXPECTED_LEN: u32 = EXPECTED_REMAINING + 2;
-        let hdr = crate::FixedHeader::new(PacketType::Publish);
-        match Publish::new_from_header(hdr) {
-            Ok(mut publish) => {
-                let mut dest = BytesMut::new();
-                publish.payload = Some([10_u8; 20].into());
-                publish.topic_name = Some(String::from("topic"));
-                match publish.encode(&mut dest) {
-                    Ok(_) => {
-                        assert_eq!(
-                            EXPECTED_LEN,
-                            dest.len() as u32,
-                            "expected length to be {}",
-                            EXPECTED_LEN
-                        );
-                        assert_eq!(EXPECTED_REMAINING, dest[1] as u32);
-                        let payload =
-                            dest.get((EXPECTED_LEN - LEN_PAYLOAD) as usize..EXPECTED_LEN as usize);
-                        for v in payload.unwrap() {
-                            assert_eq!(10_u8, *v, "expected 10 for payload byte value");
-                        }
-                    }
-                    Err(e) => panic!("unexpected error on encode {}", e),
-                }
-            }
-            Err(e) => panic!("unable to encode publish record: {}", e),
-        }
-    }
-
-    #[test]
-    fn test_decode_payload() {
-        const TEST_PACKET: [u8; 12] = [
-            0x00, 0x04, 0x76, 0x61, 0x75, 0x78, 0x00, 0x68, 0x65, 0x6c, 0x6c, 0x6f,
-        ];
-        let mut src = BytesMut::from(&TEST_PACKET[..]);
-        let mut hdr = FixedHeader::new(PacketType::Publish);
-        hdr.remaining = 0x0c;
-        let mut publish_packet = Publish::new_from_header(hdr).expect("unable to create packet");
-        match publish_packet.decode(&mut src) {
-            Ok(_) => {
-                assert_eq!("vaux", publish_packet.topic_name.unwrap());
-                assert_eq!(
-                    "hello",
-                    String::from_utf8(publish_packet.payload.unwrap()).expect("unable to decode")
-                );
-            }
-            Err(e) => panic!("unexpected error decoding publish: {}", e),
-        }
-    }
-
-    #[test]
-    /// MQTTv5
-    fn test_decode_packet_id() {
-        const EXPECTED_PACKET_ID: u16 = 270;
-        const TEST_PACKET_ID: [u8; 9] = [0x00, 0x04, 0x76, 0x61, 0x75, 0x78, 0x01, 0x0e, 0x00];
-        let mut src = BytesMut::from(&TEST_PACKET_ID[..]);
-        let mut hdr = FixedHeader::new(PacketType::Publish);
-        hdr.set_qos(QoSLevel::AtLeastOnce);
-        hdr.remaining = 0x09;
-        let mut publish_packet =
-            Publish::new_from_header(hdr.clone()).expect("unable to create packet");
-        match publish_packet.decode(&mut src) {
-            Ok(_) => {
-                assert_eq!(EXPECTED_PACKET_ID, publish_packet.packet_id.unwrap());
-                assert_eq!("vaux", publish_packet.topic_name.unwrap());
-            }
-            Err(e) => panic!("unexpected error decoding publish: {}", e),
-        }
-        hdr.clear_flags();
-        let mut src = BytesMut::from(&TEST_PACKET_ID[..]);
-        let mut publish_packet = Publish::new_from_header(hdr).expect("unable to create packet");
-        match publish_packet.decode(&mut src) {
-            Ok(_) => {
-                panic!("expected malformed packet");
-            }
-            Err(e) => {
-                assert_eq!("MQTTv5 2.2.2.1 invalid property length", e.reason);
-            }
-        }
-    }
 
     #[test]
     fn test_new_with_message() {
@@ -509,10 +369,10 @@ mod test {
             "hello",
         )
         .expect("unable to create publish");
-        assert_eq!(Some("topic".to_string()), publish.topic_name);
-        assert_eq!(Some(10), publish.packet_id);
-        assert_eq!(Some(PayloadFormat::Utf8), publish.payload_format());
-        assert_eq!(Some(b"hello".to_vec()), publish.payload);
+        assert_eq!("topic".to_string(), publish.topic_name);
+        assert_eq!(Some(10), publish.packet_id());
+        assert_eq!(Some(PayloadFormat::Utf8), publish.payload_format);
+        assert_eq!(Some(Bytes::from_static(b"hello")), publish.payload);
     }
 
     #[test]
@@ -524,10 +384,10 @@ mod test {
             b"hello".to_vec(),
         )
         .expect("unable to create publish");
-        assert_eq!(Some("topic".to_string()), publish.topic_name);
-        assert_eq!(Some(10), publish.packet_id);
-        assert_eq!(None, publish.payload_format());
-        assert_eq!(Some(b"hello".to_vec()), publish.payload);
+        assert_eq!("topic".to_string(), publish.topic_name);
+        assert_eq!(Some(10), publish.packet_id());
+        assert_eq!(None, publish.payload_format);
+        assert_eq!(Some(Bytes::from_static(b"hello")), publish.payload);
     }
 
     #[test]

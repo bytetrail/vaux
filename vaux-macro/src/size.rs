@@ -1,0 +1,530 @@
+use crate::{
+    skip_field,
+    util::{attribute_with_name_value, compile_error2, has_attribute_with_name_value, is_primitive_type},
+};
+use quote::quote;
+use syn::{punctuated::Punctuated, Meta, Token};
+
+pub(crate) fn field_size(field: &syn::Field) -> proc_macro2::TokenStream {
+    let field_name = field.ident.as_ref().unwrap();
+    let field_type = &field.ty;
+    let attrs = &field.attrs;
+    if skip_field(attrs).unwrap_or(false) {
+        return quote! {};
+    }
+    let is_property: bool = has_attribute_with_name_value(attrs, "codec", "property_type").unwrap();
+    let codec_size_with = has_attribute_with_name_value(attrs, "codec", "size_with").unwrap();
+    let field_calc = match field_type {
+        syn::Type::Path(type_path) => {
+            let segment = &type_path.path.segments.last().unwrap().ident;
+            if codec_size_with {
+                let optional = matches!(segment.to_string().as_str(), "Option");
+                match attribute_with_name_value(attrs, "codec", "size_with") {                    
+                    Ok(Some(attr)) => size_with_path(field_name, &attr, is_property, optional),
+                    Ok(None) | Err(_) => {
+                        compile_error2("Invalid 'size_with' attribute for Size derive")
+                    }
+                }
+            } else {
+                match segment.to_string().as_str() {
+                    "Vec" => size_for_vec(field_name, type_path, is_property, false),
+                    "String" => {
+                        if is_property {
+                            size_for_string_property(field_name, false)
+                        } else {
+                            size_for_string(field_name)
+                        }
+                    }
+                    "Option" => {
+                        let generic_type = match &type_path.path.segments.last().unwrap().arguments
+                        {
+                            syn::PathArguments::AngleBracketed(args) => args.args.first().unwrap(),
+                            _ => {
+                                return compile_error2("Unsupported Option type for Size derive");
+                            }
+                        };
+                        match generic_type {
+                            syn::GenericArgument::Type(syn::Type::Path(inner_type_path)) => {
+                                let inner_segment =
+                                    &inner_type_path.path.segments.last().unwrap().ident;
+                                match inner_segment.to_string().as_str() {
+                                    "Vec" => {
+                                        size_for_vec(field_name, inner_type_path, is_property, true)
+                                    }
+                                    "String" => {
+                                        if is_property {
+                                            size_for_string_property(field_name, true)
+                                        } else {
+                                            size_for_option_string(field_name)
+                                        }
+                                    }
+                                    type_name => {
+                                        if is_primitive_type(type_name) {
+                                            if is_property {
+                                                compile_error2(&format!(
+                                                    "Field {:?} is a primitive property",
+                                                    field_name,
+                                                ));
+                                                size_for_primitive_property(
+                                                    field_name, type_name, true,
+                                                )
+                                            } else {
+                                                size_for_primitive_optional(field_name, type_name)
+                                            }
+                                        } else {
+                                            size_for_codec_size(field_name, is_property, true)
+                                        }
+                                    }
+                                }
+                            }
+                            _ => compile_error2("Unsupported Option type for Size derive"),
+                        }
+                    }
+                    type_name => {
+                        if is_primitive_type(type_name) {
+                            if is_property {
+                                size_for_primitive_property(field_name, type_name, false)
+                            } else {
+                                size_for_primitive(field_type)
+                            }
+                        } else {
+                            size_for_codec_size(field_name, is_property, false)
+                        }
+                    }
+                }
+            }
+        }
+        _ => compile_error2("Unsupported field type for Size derive"),
+    };
+    field_calc
+}
+
+fn size_for_codec_size(
+    field_name: &syn::Ident,
+    is_property: bool,
+    optional: bool,
+) -> proc_macro2::TokenStream {
+    if is_property {
+        if optional {
+            quote! {
+                if let Some(field) = &self.#field_name {
+                    property_size += field.property_size();
+                }
+            }
+        } else {
+             quote! {
+                property_size += self.#field_name.property_size();
+             }
+        }
+    } else {
+        if optional {
+            quote! {
+                if let Some(field) = &self.#field_name {
+                    total_size += field.codec_size();
+                }
+            }
+        } else {
+            quote! {
+                total_size += self.#field_name.codec_size();
+            }
+        }
+    }
+}
+
+fn size_for_string_property(field_name: &syn::Ident, optional: bool) -> proc_macro2::TokenStream {
+    if optional {
+        quote! {
+                if let Some(field_name) = &self.#field_name {
+                    let value_size = field_name.len() as u32 + 2;
+                    property_size += 1 + value_size; // MQTT string length prefix
+                }
+        }
+    } else {
+        quote! {
+            let value_size = self.#field_name.len() as u32 + 2;
+            property_size += 1 + value_size; // MQTT string length prefix
+        }
+    }
+}
+
+fn size_for_primitive_property(
+    field_name: &syn::Ident,
+    field_type: &str,
+    optional: bool,
+) -> proc_macro2::TokenStream {
+    let size_calc = match field_type {
+        "u8" | "i8" | "bool" => quote! {
+            property_size += 1 + 1;
+        },
+        "u16" | "i16" => quote! {
+            property_size += 1 + 2;
+        },
+        "u32" | "i32" | "char" => quote! {
+            property_size += 1 + 4;
+        },
+        _ => compile_error2(&format!(
+            "Unsupported primitive type '{}' for Size derive",
+            field_type
+        )),
+    };
+    if optional {
+        quote! {
+            if let Some(_) = &self.#field_name {
+                #size_calc
+            }
+        }
+    } else {
+        quote! { #size_calc }
+    }
+}
+
+fn size_for_option_string(field_name: &syn::Ident) -> proc_macro2::TokenStream {
+    quote! {
+        if let Some(value) = &self.#field_name {
+            total_size += 2; // MQTT string length prefix
+            total_size += value.len() as u32;
+        }
+    }
+}
+
+fn size_for_string(field_name: &syn::Ident) -> proc_macro2::TokenStream {
+    quote! {
+        total_size += 2; // MQTT string length prefix
+        total_size += self.#field_name.len() as u32;
+    }
+}
+
+fn size_for_vec(
+    field_name: &syn::Ident,
+    type_path: &syn::TypePath,
+    is_property: bool,
+    optional: bool,
+) -> proc_macro2::TokenStream {
+    let (size_prefix, prop_ident_size) = if is_property {
+        (
+            quote! {
+                property_size +=
+            },
+            quote! { 1 + },
+        )
+    } else {
+        (
+            quote! {
+                total_size +=
+            },
+            quote! {},
+        )
+    };
+    let field_size = match &type_path.path.segments.last().unwrap().arguments {
+        syn::PathArguments::AngleBracketed(args) => match args.args.first().unwrap() {
+            syn::GenericArgument::Type(syn::Type::Path(vec_inner_type_path)) => {
+                match vec_inner_type_path
+                    .path
+                    .segments
+                    .last()
+                    .unwrap()
+                    .ident
+                    .to_string()
+                    .as_str()
+                {
+                    "u8" | "i8" => {
+                        if optional {
+                            quote! {
+                                #prop_ident_size 2 + #field_name.len() as u32
+                            }
+                        } else {
+                            quote! {
+                                  #prop_ident_size 2 + self.#field_name.len() as u32
+                            }
+                        }
+                    }
+                    "u16" | "i16" | "u32" | "i32" | "char" => {
+                        compile_error2("Unsupported Vec inner type for CodecSize")
+                    }
+                    _ => {
+                        if is_property {
+                            quote! {
+                                #field_name.iter().map(|item| 1 + item.codec_size()).sum::<u32>()
+                            }
+                        } else {
+                            quote! {
+                                self.#field_name.iter().map(|item| item.codec_size()).sum::<u32>()
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {
+                return compile_error2("Unsupported Vec type for Size derive");
+            }
+        },
+        _ => {
+            return compile_error2("Unsupported Vec type for Size derive");
+        }
+    };
+
+    if optional {
+        quote! {
+            if let Some(#field_name) = &self.#field_name {
+                if !#field_name.is_empty() {
+                    #size_prefix #field_size;
+                }
+            }
+        }
+    } else {
+        quote! {
+            if !self.#field_name.is_empty() {
+                #size_prefix #field_size;
+            }
+        }
+    }
+}
+
+fn size_for_primitive_optional(
+    field_name: &syn::Ident,
+    field_type: &str,
+) -> proc_macro2::TokenStream {
+    let size_calc = size_for_primitive_internal(field_type);
+    quote! {
+        if let Some(_) = &self.#field_name {
+            #size_calc
+        }
+    }
+}
+
+fn size_for_primitive(field_type: &syn::Type) -> proc_macro2::TokenStream {
+    // match the field type to determine if supported
+    match field_type {
+        syn::Type::Path(type_path) => {
+            let segment = &type_path.path.segments.last().unwrap().ident;
+            size_for_primitive_internal(segment.to_string().as_str())
+        }
+        _ => compile_error2("Unsupported field type for Size derive"),
+    }
+}
+
+fn size_for_primitive_internal(field_type: &str) -> proc_macro2::TokenStream {
+    match field_type {
+        "u8" | "i8" | "bool" => {
+            quote! {
+                total_size += 1;
+            }
+        }
+        "u16" | "i16" => {
+            quote! {
+                total_size += 2;
+            }
+        }
+        "u32" | "i32" | "char" => {
+            quote! {
+                total_size += 4;
+            }
+        }
+        _ => compile_error2(&format!(
+            "Unsupported primitive type '{}' for Size derive",
+            field_type
+        )),
+    }
+}
+
+/// Extracts the path from the ```codec(size_with = "path")``` attribute when present
+fn size_with_path(
+    field_name: &syn::Ident,
+    attr: &syn::Attribute,
+    property_field: bool,
+    optional: bool
+) -> proc_macro2::TokenStream {
+    let size_prefix = if property_field {
+        quote! {
+            property_size += 1 +
+        }
+    } else {
+        quote! {
+            total_size +=
+        }
+    };
+    match attr.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated) {
+        Ok(nested) => {
+            let meta = nested.iter().find_map(|m| {
+                if let Meta::NameValue(nv_pair) = m {
+                    if nv_pair.path.is_ident("size_with") {
+                        if let syn::Expr::Lit(lit_expr) = &nv_pair.value {
+                            if let syn::Lit::Str(lit_str) = &lit_expr.lit {
+                                let path: syn::Path = lit_str.parse().unwrap();
+                                // if the field is optional, we need to check if it is Some before calling the size function
+                                if optional {
+                                    Some(quote! {
+                                        if let Some(_) = &self.#field_name {
+                                            #size_prefix #path(&self.#field_name);
+                                        }
+                                    })
+                                } else {
+                                     Some(quote! {
+                                        #size_prefix #path(&self.#field_name);
+                                    })
+                                }
+                            } else {
+                                Some(compile_error2(
+                                    "Expected string literal for 'size_with' attribute",
+                                ))
+                            }
+                        } else {
+                            Some(compile_error2(
+                                "Expected literal expression for 'size_with' attribute",
+                            ))
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            });
+            if let Some(tokens) = meta {
+                tokens
+            } else {
+                compile_error2("Expected 'size_with' attribute with a path literal")
+            }
+        }
+        Err(_) => compile_error2("Failed to parse 'size_with' attribute"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_size_for_string() {
+        let field_name = syn::Ident::new("test_string", proc_macro2::Span::call_site());
+        let tokens = size_for_string(&field_name);
+        let expected = quote! {
+            total_size += 2; // MQTT string length prefix
+            total_size += self.test_string.len() as u32;
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_size_for_option_string() {
+        let field_name = syn::Ident::new("opt_string", proc_macro2::Span::call_site());
+        let tokens = size_for_option_string(&field_name);
+        let expected = quote! {
+            if let Some(value) = &self.opt_string {
+                total_size += 2; // MQTT string length prefix
+                total_size += value.len() as u32;
+            }
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_size_for_vec_u8() {
+        let field_name = syn::Ident::new("data", proc_macro2::Span::call_site());
+        let tokens = size_for_vec(
+            &field_name,
+            &syn::parse_str::<syn::TypePath>("Vec<u8>").unwrap(),
+            false,
+            false,
+        );
+        let expected = quote! {
+            if !self.#field_name.is_empty() { total_size += 2 + self.data.len() as u32; }
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_size_for_u8_primitive() {
+        // u8
+        let _field_name = Some(syn::Ident::new("test_u8", proc_macro2::Span::call_site()));
+        let field_type = syn::parse_str::<syn::Type>("u8").unwrap();
+        let tokens = size_for_primitive(&field_type);
+        let expected = quote! {
+            total_size += 1;
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_size_for_u16_primitive() {
+        // u16
+        let _field_name = Some(syn::Ident::new("test_u16", proc_macro2::Span::call_site()));
+        let field_type = syn::parse_str::<syn::Type>("u16").unwrap();
+        let tokens = size_for_primitive(&field_type);
+        let expected = quote! {
+            total_size += 2;
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_size_for_option_u16_primitive() {
+        // Option<u16>
+        let field_name = syn::Ident::new("opt_u16", proc_macro2::Span::call_site());
+        let tokens = size_for_primitive_optional(&field_name, "u16");
+        let expected = quote! {
+            if let Some(_) = &self.opt_u16 {
+                total_size += 2;
+            }
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_field_size_for_option_u16() {
+        let item_struct: syn::ItemStruct = syn::parse_str(
+            r#"struct S { 
+            #[codec(property_type = "TestProperty::PropertyOne")]
+            pub opt_value: Option<u16> }"#,
+        )
+        .unwrap();
+        let field = item_struct
+            .fields
+            .iter()
+            .find(|f| f.ident.as_ref().unwrap() == "opt_value")
+            .unwrap();
+        let tokens = field_size(field);
+        let expected = quote! {
+            if let Some(_) = &self.opt_value {
+                property_size += 1 + 2;
+            }
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_size_for_u32_primitive() {
+        // u32
+        let _field_name = Some(syn::Ident::new("test_u32", proc_macro2::Span::call_site()));
+        let field_type = syn::parse_str::<syn::Type>("u32").unwrap();
+        let tokens = size_for_primitive(&field_type);
+        let expected = quote! {
+            total_size += 4;
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_size_option_u32_primitive() {
+        // Option<u32>
+        let field_name = syn::Ident::new("opt_u32", proc_macro2::Span::call_site());
+        let tokens = size_for_primitive_optional(&field_name, "u32");
+        let expected = quote! {
+            if let Some(_) = &self.opt_u32 {
+                total_size += 4;
+            }
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+
+    #[test]
+    fn test_size_with_path() {
+        let field_name = syn::Ident::new("custom_field", proc_macro2::Span::call_site());
+        let attr: syn::Attribute = syn::parse_quote!(#[codec(size_with = "custom_size_function")]);
+        let tokens = size_with_path(&field_name, &attr, false, false);
+        let expected = quote! {
+            total_size += custom_size_function(&self.custom_field);
+        };
+        assert_eq!(tokens.to_string(), expected.to_string());
+    }
+}

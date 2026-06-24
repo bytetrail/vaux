@@ -1,7 +1,7 @@
 [package]
 name = "vaux-broker"
-version = "0.8.1"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 authors = ["ByteTrail, LLC"]
 description = "MQTT Broker"
 
@@ -14,9 +14,13 @@ futures = "0.3.21"
 bytes = "1.1.0"
 vaux-mqtt = { path = "../vaux-mqtt" }
 vaux-async = { path = "../vaux-async" }
+tokio-rustls = { version = "0.26" }
+tracing = "0.1.44"
 
 
 [dev-dependencies]
 vaux-client = { path = "../vaux-client" }
 vaux-mqtt = { path = "../vaux-mqtt" }
 vaux-async = { path = "../vaux-async" }
+rcgen = "0.14.8"
+rustls = "0.23.41"

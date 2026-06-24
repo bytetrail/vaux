@@ -1,7 +1,7 @@
 [package]
 name = "vaux-mqtt"
-version = "0.8.1"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 [features]
 default = []
@@ -12,3 +12,4 @@ pedantic = []
 bytes = "1.5.0"
 uuid = { version = "1.2.1", features = ["v4", "fast-rng"] }
 lazy_static = "1.4"
+vaux-macro = { path = "../vaux-macro" }

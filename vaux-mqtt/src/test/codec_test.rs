@@ -113,16 +113,26 @@ fn test_control_packet_type_from() {
     );
 }
 
+
+#[test]
+fn text_encode_single_byte_var_int() {
+    let value = 100_u32;
+    let mut dest = BytesMut::with_capacity(6);
+    encode_variable_byte_int(value, &mut dest).unwrap();
+    assert_eq!(1, dest.len());
+    assert_eq!(value as u8, dest[0]);
+}
+
 #[test]
 fn test_encode_var_int() {
     let test = 128_u32;
     let mut encoded: BytesMut = BytesMut::with_capacity(6);
-    put_var_u32(test, &mut encoded);
+    encode_variable_byte_int(test, &mut encoded).unwrap();
     assert_eq!(0x80, encoded[0]);
     assert_eq!(0x01, encoded[1]);
     let test = 777;
     let mut encoded: BytesMut = BytesMut::with_capacity(6);
-    put_var_u32(test, &mut encoded);
+    encode_variable_byte_int(test, &mut encoded).unwrap();
     assert_eq!(0x89, encoded[0]);
     assert_eq!(0x06, encoded[1]);
 }
@@ -133,12 +143,12 @@ fn test_decode_var_int() {
     // 0x80
     encoded.put_u8(0x80);
     encoded.put_u8(0x01);
-    let val = get_var_u32(&mut encoded).unwrap();
+    let val = decode_variable_byte_int(&mut encoded).unwrap().0;
     assert_eq!(128, val);
     // 777 --- 0x309
     encoded.clear();
     encoded.put_u8(0x89);
     encoded.put_u8(0x06);
-    let val = get_var_u32(&mut encoded).unwrap();
+    let val = decode_variable_byte_int(&mut encoded).unwrap().0;
     assert_eq!(777, val);
 }

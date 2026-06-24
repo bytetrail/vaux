@@ -5,12 +5,12 @@ pub use packet::{Error, PacketStream};
 use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream;
 
 #[derive(Debug)]
 pub enum MqttStream {
     TcpStream(TcpStream),
-    TlsStream(Box<TlsStream<TcpStream>>),
+    ClientTlsStream(Box<tokio_rustls::client::TlsStream<TcpStream>>),
+    ServerTlsStream(Box<tokio_rustls::server::TlsStream<TcpStream>>),
 }
 
 #[derive(Debug)]
@@ -23,14 +23,9 @@ impl AsyncRead for AsyncMqttStream {
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         match self.get_mut().0 {
-            MqttStream::TcpStream(ref mut stream) => {
-                let stream = Pin::new(stream);
-                stream.poll_read(cx, buf)
-            }
-            MqttStream::TlsStream(ref mut stream) => {
-                let stream = Pin::new(stream);
-                stream.poll_read(cx, buf)
-            }
+            MqttStream::TcpStream(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
+            MqttStream::ClientTlsStream(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
+            MqttStream::ServerTlsStream(ref mut stream) => Pin::new(stream).poll_read(cx, buf),
         }
     }
 }
@@ -42,14 +37,9 @@ impl AsyncWrite for AsyncMqttStream {
         buf: &[u8],
     ) -> std::task::Poll<Result<usize, std::io::Error>> {
         match self.get_mut().0 {
-            MqttStream::TcpStream(ref mut stream) => {
-                let stream = Pin::new(stream);
-                stream.poll_write(cx, buf)
-            }
-            MqttStream::TlsStream(ref mut stream) => {
-                let stream = Pin::new(stream);
-                stream.poll_write(cx, buf)
-            }
+            MqttStream::TcpStream(ref mut stream) => Pin::new(stream).poll_write(cx, buf),
+            MqttStream::ClientTlsStream(ref mut stream) => Pin::new(stream).poll_write(cx, buf),
+            MqttStream::ServerTlsStream(ref mut stream) => Pin::new(stream).poll_write(cx, buf),
         }
     }
 
@@ -58,14 +48,9 @@ impl AsyncWrite for AsyncMqttStream {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
         match self.get_mut().0 {
-            MqttStream::TcpStream(ref mut stream) => {
-                let stream = Pin::new(stream);
-                stream.poll_flush(cx)
-            }
-            MqttStream::TlsStream(ref mut stream) => {
-                let stream = Pin::new(stream);
-                stream.poll_flush(cx)
-            }
+            MqttStream::TcpStream(ref mut stream) => Pin::new(stream).poll_flush(cx),
+            MqttStream::ClientTlsStream(ref mut stream) => Pin::new(stream).poll_flush(cx),
+            MqttStream::ServerTlsStream(ref mut stream) => Pin::new(stream).poll_flush(cx),
         }
     }
 
@@ -74,14 +59,9 @@ impl AsyncWrite for AsyncMqttStream {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), std::io::Error>> {
         match self.get_mut().0 {
-            MqttStream::TcpStream(ref mut stream) => {
-                let stream = Pin::new(stream);
-                stream.poll_shutdown(cx)
-            }
-            MqttStream::TlsStream(ref mut stream) => {
-                let stream = Pin::new(stream);
-                stream.poll_shutdown(cx)
-            }
+            MqttStream::TcpStream(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
+            MqttStream::ClientTlsStream(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
+            MqttStream::ServerTlsStream(ref mut stream) => Pin::new(stream).poll_shutdown(cx),
         }
     }
 }

@@ -1,16 +1,10 @@
-use crate::codec::{get_bin, get_utf8, put_bin, MqttCodecError};
-use crate::property::{PacketProperties, Property, PropertyBundle};
 use crate::{
-    put_utf8, variable_byte_int_size, Decode, Encode, FixedHeader, PacketType, PropertyType,
-    QoSLevel, Size, WillMessage,
+    codec::{self},
+    property,
+    will::WillHeader,
+    MqttCodecError, PropertyType, QoSLevel, WillMessage,
 };
-use bytes::{Buf, BufMut, BytesMut};
-use std::collections::HashSet;
-use std::sync::LazyLock;
-
-const MQTT_PROTOCOL_NAME_LEN: u16 = 0x00_04;
-const MQTT_PROTOCOL_U32: u32 = 0x4d515454;
-const MQTT_PROTOCOL_VERSION: u8 = 0x05;
+use vaux_macro::packet;
 
 pub(crate) const CONNECT_FLAG_USERNAME: u8 = 0b_1000_0000;
 pub(crate) const CONNECT_FLAG_PASSWORD: u8 = 0b_0100_0000;
@@ -18,228 +12,290 @@ pub(crate) const CONNECT_FLAG_WILL_RETAIN: u8 = 0b_0010_0000;
 pub(crate) const CONNECT_FLAG_WILL_QOS: u8 = 0b_0001_1000;
 pub(crate) const CONNECT_FLAG_WILL: u8 = 0b_0000_0100;
 pub(crate) const CONNECT_FLAG_CLEAN_START: u8 = 0b_0000_0010;
-pub(crate) const CONNECT_FLAG_SHIFT: u8 = 0x03;
 
-/// Default remaining size for connect packet
-const DEFAULT_CONNECT_REMAINING: u32 = 10;
+const MQTT_PROTOCOL_NAME: &str = "MQTT";
+const MQTT_PROTOCOL_VERSION: u8 = 0x05;
 
-static CONNECT_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
-    let mut set = HashSet::new();
-    set.insert(PropertyType::SessionExpiryInterval);
-    set.insert(PropertyType::RecvMax);
-    set.insert(PropertyType::MaxPacketSize);
-    set.insert(PropertyType::TopicAliasMax);
-    set.insert(PropertyType::ReqRespInfo);
-    set.insert(PropertyType::ReqProblemInfo);
-    set.insert(PropertyType::UserProperty);
-    set.insert(PropertyType::AuthMethod);
-    set.insert(PropertyType::AuthData);
-    set
-});
-
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[packet(packet_type = "codec::PacketType::Connect")]
+#[codec(skip_decode)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Connect {
-    props: PropertyBundle,
-    pub clean_start: bool,
+    protocol_name: String,
+    protocol_version: u8,
+    connect_flags: u8,
     pub keep_alive: u16,
-    pub will_message: Option<WillMessage>,
+
+    #[codec(property_type = "PropertyType::SessionExpiryInterval")]
+    pub session_expiry_interval: Option<u32>,
+    #[codec(property_type = "PropertyType::RecvMax")]
+    pub receive_maximum: Option<u16>,
+    #[codec(property_type = "PropertyType::MaxPacketSize")]
+    pub max_packet_size: Option<u32>,
+    #[codec(property_type = "PropertyType::TopicAliasMax")]
+    pub topic_alias_maximum: Option<u16>,
+    #[codec(property_type = "PropertyType::ReqRespInfo")]
+    pub request_response_info: Option<bool>,
+    #[codec(property_type = "PropertyType::ReqProblemInfo")]
+    pub request_problem_info: Option<bool>,
+    #[codec(property_type = "PropertyType::AuthMethod")]
+    pub auth_method: Option<String>,
+    #[codec(skip_if = "Vec::is_empty", property_type = "PropertyType::AuthData")]
+    pub auth_data: Vec<u8>,
+    #[codec(property_type = "PropertyType::UserProperty")]
+    pub user_properties: property::UserProperty,
+
+    // payload fields
+    #[codec(payload_type = "field")]
     pub client_id: String,
-    pub username: Option<String>,
-    pub password: Option<Vec<u8>>,
-}
-
-impl PacketProperties for Connect {
-    fn properties(&self) -> &PropertyBundle {
-        &self.props
-    }
-    fn properties_mut(&mut self) -> &mut PropertyBundle {
-        &mut self.props
-    }
-    fn set_properties(&mut self, props: PropertyBundle) {
-        self.props = props;
-    }
-}
-
-impl Connect {
-    pub fn session_expiry(&self) -> Option<u32> {
-        self.props
-            .get_property(PropertyType::SessionExpiryInterval)
-            .and_then(|p| {
-                if let Property::SessionExpiryInterval(interval) = p {
-                    Some(*interval)
-                } else {
-                    None
-                }
-            })
-    }
-
-    pub fn set_session_expiry(&mut self, interval: u32) {
-        if interval == 0 {
-            self.props
-                .clear_property(PropertyType::SessionExpiryInterval);
-            return;
-        }
-        self.props
-            .set_property(Property::SessionExpiryInterval(interval));
-    }
-
-    fn encode_flags(&self, dest: &mut BytesMut) {
-        let mut flags = 0_u8;
-        if self.clean_start {
-            flags |= CONNECT_FLAG_CLEAN_START;
-        }
-        if self.username.is_some() {
-            flags |= CONNECT_FLAG_USERNAME;
-        }
-        if self.password.is_some() {
-            flags |= CONNECT_FLAG_PASSWORD;
-        }
-        if let Some(will) = &self.will_message {
-            flags |= CONNECT_FLAG_WILL;
-            if will.retain {
-                flags |= CONNECT_FLAG_WILL_RETAIN
-            }
-            flags |= (will.qos as u8) << CONNECT_FLAG_SHIFT;
-        }
-        dest.put_u8(flags);
-    }
-
-    pub fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
-        let len = src.get_u16();
-        if len != 0x04 {
-            return Err(MqttCodecError::new(
-                format!("invalid protocol name length: {len}").as_str(),
-            ));
-        }
-        let mqtt_str = src.get_u32();
-        if mqtt_str != MQTT_PROTOCOL_U32 {
-            return Err(MqttCodecError::new("unsupported protocol"));
-        }
-        let protocol_version = src.get_u8();
-        if protocol_version != MQTT_PROTOCOL_VERSION {
-            return Err(MqttCodecError::new(
-                format!("unsupported protocol version: {protocol_version}").as_str(),
-            ));
-        }
-        // connect flags
-        let connect_flags = src.get_u8();
-        let username = connect_flags & CONNECT_FLAG_USERNAME != 0;
-        let password = connect_flags & CONNECT_FLAG_PASSWORD != 0;
-        self.clean_start = connect_flags & CONNECT_FLAG_CLEAN_START != 0;
-        if connect_flags & CONNECT_FLAG_WILL != 0 {
-            let will_retain = connect_flags & CONNECT_FLAG_WILL_RETAIN != 0;
-            let qos = connect_flags & (CONNECT_FLAG_WILL_QOS >> CONNECT_FLAG_SHIFT);
-            if let Ok(qos) = QoSLevel::try_from(qos) {
-                self.will_message = Some(WillMessage::new(qos, will_retain));
-            } else {
-                return Err(MqttCodecError::new("invalid Will QoS level"));
-            }
-        }
-        self.keep_alive = src.get_u16();
-        if src.remaining() > 0 {
-            self.props.decode(src)?;
-        }
-        self.decode_payload(src, username, password)?;
-        Ok(())
-    }
-
-    fn decode_payload(
-        &mut self,
-        src: &mut BytesMut,
-        username: bool,
-        password: bool,
-    ) -> Result<(), MqttCodecError> {
-        self.client_id = get_utf8(src)?;
-        if self.will_message.is_some() {
-            let will_message = self.will_message.as_mut().unwrap();
-            will_message.decode(src)?;
-        }
-        if username {
-            self.username = Some(get_utf8(src)?);
-        }
-        if password {
-            self.password = Some(get_bin(src)?);
-        }
-        Ok(())
-    }
-}
-
-impl crate::Size for Connect {
-    fn size(&self) -> u32 {
-        let property_remaining = self.property_size();
-        let len = variable_byte_int_size(property_remaining);
-        DEFAULT_CONNECT_REMAINING + len + property_remaining + self.payload_size()
-    }
-
-    fn property_size(&self) -> u32 {
-        self.props.size()
-    }
-
-    fn payload_size(&self) -> u32 {
-        let mut remaining = 2 + self.client_id.len() as u32;
-        if let Some(will_message) = &self.will_message {
-            remaining += will_message.size();
-        }
-        if let Some(username) = &self.username {
-            remaining += username.len() as u32 + 2;
-        }
-        if let Some(password) = &self.password {
-            remaining += password.len() as u32 + 2;
-        }
-        remaining
-    }
-}
-
-impl Encode for Connect {
-    fn encode(&self, dest: &mut BytesMut) -> Result<(), MqttCodecError> {
-        let mut header = FixedHeader::new(PacketType::Connect);
-        let prop_remaining = self.property_size();
-        let payload_remaining = self.payload_size();
-        header.set_remaining(
-            DEFAULT_CONNECT_REMAINING
-                + prop_remaining
-                + payload_remaining
-                + variable_byte_int_size(prop_remaining),
-        );
-        header.encode(dest)?;
-        dest.put_u16(MQTT_PROTOCOL_NAME_LEN);
-        dest.put_u32(MQTT_PROTOCOL_U32);
-        dest.put_u8(MQTT_PROTOCOL_VERSION);
-        self.encode_flags(dest);
-        dest.put_u16(self.keep_alive);
-        self.props.encode(dest)?;
-        // payload
-        put_utf8(&self.client_id, dest)?;
-        // connect payload
-        if let Some(will_message) = &self.will_message {
-            will_message.encode(dest)?;
-        }
-        if let Some(username) = &self.username {
-            put_utf8(username, dest)?;
-        }
-        if let Some(password) = &self.password {
-            put_bin(password, dest)?;
-        }
-        Ok(())
-    }
-}
-
-impl Decode for Connect {
-    fn decode(&mut self, src: &mut BytesMut) -> Result<(), MqttCodecError> {
-        self.decode(src)
-    }
+    #[codec(payload_type = "field")]
+    pub(crate) will_properties: Option<WillHeader>,
+    #[codec(payload_type = "field", skip_if = "Vec::is_empty")]
+    pub(crate) will_payload: Vec<u8>,
+    #[codec(payload_type = "field")]
+    pub(crate) will_topic: Option<String>,
+    #[codec(skip_if = "String::is_empty", payload_type = "field")]
+    username: String,
+    #[codec(skip_if = "Vec::is_empty", payload_type = "field")]
+    password: Vec<u8>,
 }
 
 impl Default for Connect {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Connect {
+    /// Creates a new ConnectHeader with default values. The protocol name is set to "MQTT"
+    /// and the protocol version is set to 5. The protocol version is not configurable in
+    /// this implementation.
+    ///  Conntect Flags:
+    /// |
+    pub fn new() -> Self {
         Connect {
-            props: PropertyBundle::new(&CONNECT_PROPS),
-            clean_start: false,
-            keep_alive: 0,
-            will_message: None,
-            client_id: "".to_string(),
-            username: None,
-            password: None,
+            fixed_header: codec::FixedHeader::new(codec::PacketType::Connect),
+            protocol_name: MQTT_PROTOCOL_NAME.to_string(),
+            protocol_version: MQTT_PROTOCOL_VERSION,
+            connect_flags: 0,
+            keep_alive: 60,
+            session_expiry_interval: None,
+            receive_maximum: None,
+            max_packet_size: None,
+            topic_alias_maximum: None,
+            request_response_info: None,
+            request_problem_info: None,
+            auth_method: None,
+            auth_data: Vec::new(),
+            user_properties: property::UserProperty::new(),
+            client_id: uuid::Uuid::new_v4().to_string(),
+            will_properties: None,
+            will_payload: Vec::new(),
+            will_topic: None,
+            username: String::new(),
+            password: Vec::new(),
         }
+    }
+
+    pub fn clean_start(&self) -> bool {
+        (self.connect_flags & CONNECT_FLAG_CLEAN_START) != 0
+    }
+
+    pub fn set_clean_start(&mut self, clean_start: bool) {
+        self.connect_flags =
+            (self.connect_flags & !CONNECT_FLAG_CLEAN_START) | (clean_start as u8) << 1;
+    }
+
+    pub fn will_retain(&self) -> bool {
+        (self.connect_flags & CONNECT_FLAG_WILL_RETAIN) != 0
+    }
+
+    pub(crate) fn set_will_retain(&mut self, will_retain: bool) {
+        self.connect_flags =
+            (self.connect_flags & !CONNECT_FLAG_WILL_RETAIN) | (will_retain as u8) << 5;
+    }
+
+    pub fn will_qos(&self) -> Result<QoSLevel, MqttCodecError> {
+        ((self.connect_flags & CONNECT_FLAG_WILL_QOS) >> 3).try_into()
+    }
+
+    pub(crate) fn set_will_qos(&mut self, qos: QoSLevel) {
+        self.connect_flags = (self.connect_flags & !CONNECT_FLAG_WILL_QOS) | ((qos as u8) << 3);
+    }
+
+    pub fn will(&self) -> bool {
+        (self.connect_flags & CONNECT_FLAG_WILL) != 0
+    }
+
+    pub(crate) fn set_will(&mut self, will: bool) {
+        self.connect_flags = (self.connect_flags & !CONNECT_FLAG_WILL) | (will as u8) << 2;
+    }
+
+    pub fn username(&self) -> bool {
+        (self.connect_flags & CONNECT_FLAG_USERNAME) != 0
+    }
+
+    pub fn set_username(&mut self, username: Option<String>) {
+        if username.is_none() {
+            self.connect_flags &= !CONNECT_FLAG_USERNAME;
+        } else {
+            self.connect_flags = (self.connect_flags & !CONNECT_FLAG_USERNAME) | 1_u8 << 7;
+        }
+        self.username = username.unwrap_or_default();
+    }
+
+    pub fn password(&self) -> bool {
+        (self.connect_flags & CONNECT_FLAG_PASSWORD) != 0
+    }
+
+    pub fn set_password(&mut self, password: Option<Vec<u8>>) {
+        if password.is_none() {
+            self.connect_flags &= !CONNECT_FLAG_PASSWORD;
+        } else {
+            self.connect_flags = (self.connect_flags & !CONNECT_FLAG_PASSWORD) | 1_u8 << 6;
+        }
+        self.password = password.unwrap_or_default();
+    }
+
+    pub fn set_session_expiry_interval(&mut self, interval: u32) {
+        if interval == 0 {
+            self.session_expiry_interval = None;
+        } else {
+            self.session_expiry_interval = Some(interval);
+        }
+    }
+
+    pub fn will_message(&self) -> Option<WillMessage> {
+        if self.will() {
+            Some(WillMessage {
+                topic: self.will_topic.clone().unwrap_or_default(),
+                payload: bytes::Bytes::from(self.will_payload.clone()),
+                qos: self.will_qos().unwrap_or(QoSLevel::AtMostOnce),
+                retain: self.will_retain(),
+                header: self.will_properties.clone().unwrap_or_default(),
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn set_will_message(&mut self, will: WillMessage) {
+        self.will_topic = Some(will.topic);
+        self.will_payload = will.payload.to_vec();
+        self.will_properties = Some(will.header);
+        self.set_will(true);
+        self.set_will_qos(will.qos);
+        self.set_will_retain(will.retain);
+    }
+}
+
+impl codec::Decode for Connect {
+    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<usize, MqttCodecError> {
+        use bytes::Buf;
+        let mut bytes_read = 0_usize;
+
+        // header fields
+        bytes_read += self.protocol_name.decode(src)?;
+        self.protocol_version = src.get_u8();
+        bytes_read += 1;
+        self.connect_flags = src.get_u8();
+        bytes_read += 1;
+        self.keep_alive = src.get_u16();
+        bytes_read += 2;
+
+        // properties
+        let (property_length, var_bytes_read) = codec::decode_variable_byte_int(src)?;
+        let property_length = property_length as usize;
+        bytes_read += var_bytes_read;
+        let mut property_bytes_read = 0_usize;
+        while property_bytes_read < property_length {
+            let property_type: PropertyType = src.get_u8().try_into()?;
+            property_bytes_read += 1;
+            match property_type {
+                PropertyType::SessionExpiryInterval => {
+                    let mut value = u32::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.session_expiry_interval = Some(value);
+                }
+                PropertyType::RecvMax => {
+                    self.receive_maximum = Some(src.get_u16());
+                    property_bytes_read += 2;
+                }
+                PropertyType::MaxPacketSize => {
+                    let mut value = u32::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.max_packet_size = Some(value);
+                }
+                PropertyType::TopicAliasMax => {
+                    self.topic_alias_maximum = Some(src.get_u16());
+                    property_bytes_read += 2;
+                }
+                PropertyType::ReqRespInfo => {
+                    self.request_response_info = Some(src.get_u8() != 0);
+                    property_bytes_read += 1;
+                }
+                PropertyType::ReqProblemInfo => {
+                    self.request_problem_info = Some(src.get_u8() != 0);
+                    property_bytes_read += 1;
+                }
+                PropertyType::AuthMethod => {
+                    let mut value = String::default();
+                    property_bytes_read += value.decode(src)?;
+                    self.auth_method = Some(value);
+                }
+                PropertyType::AuthData => {
+                    let mut value = Vec::new();
+                    property_bytes_read += value.decode(src)?;
+                    self.auth_data = value;
+                }
+                PropertyType::UserProperty => {
+                    property_bytes_read += self.user_properties.decode(src)?;
+                }
+                _ => {
+                    return Err(codec::MqttCodecError::new_with_kind(
+                        format!(
+                            "MQTT v5 property type {:?} is not supported for Connect",
+                            property_type
+                        )
+                        .as_str(),
+                        codec::ErrorKind::UnsupportedProperty(property_type as u8),
+                    ));
+                }
+            }
+        }
+        bytes_read += property_bytes_read;
+
+        // payload: client_id (always present)
+        bytes_read += self.client_id.decode(src)?;
+
+        // payload: will fields (only if WILL flag set)
+        if self.will() {
+            let mut will_header = WillHeader::default();
+            bytes_read += will_header.decode(src)?;
+            self.will_properties = Some(will_header);
+
+            let mut value = Vec::new();
+            let var_bytes_read = value.decode(src)?;
+            bytes_read += var_bytes_read;
+            self.will_payload = value;
+
+            let mut value = String::default();
+            bytes_read += value.decode(src)?;
+            self.will_topic = Some(value);
+        }
+
+        // payload: username (only if USERNAME flag set)
+        if self.username() {
+            bytes_read += self.username.decode(src)?;
+        }
+
+        // payload: password (only if PASSWORD flag set)
+        if self.password() {
+            let mut value = Vec::new();
+            let var_bytes_read = value.decode(src)?;
+            bytes_read += var_bytes_read;
+            self.password = value;
+        }
+
+        Ok(bytes_read)
     }
 }

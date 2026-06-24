@@ -1,12 +1,13 @@
-pub(crate) mod codec;
 pub mod config;
 pub(crate) mod session;
+pub(crate) mod topic;
 
 pub use config::Config;
 use config::{BROKER_KEEP_ALIVE_FACTOR, DEFAULT_KEEP_ALIVE};
 use session::Session;
 use session::SessionControl;
 use session::SessionPool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::{
@@ -15,11 +16,15 @@ use tokio::{
     sync::{mpsc::Receiver, mpsc::Sender, RwLock},
     task::{yield_now, JoinHandle},
 };
+use topic::TopicTree;
 use uuid::Uuid;
 use vaux_async::stream::{AsyncMqttStream, MqttStream, PacketStream};
+use vaux_mqtt::subscribe::SubAck;
+use vaux_mqtt::unsubscribe::{UnsubAck, Unsubscribe};
 use vaux_mqtt::Packet::PingResponse;
 use vaux_mqtt::{
-    ConnAck, Connect, Disconnect, FixedHeader, MqttCodecError, Packet, PacketType, Reason,
+    ConnAck, Connect, Disconnect, MqttCodecError, Packet, PingResp, Publish, QoSLevel, Reason,
+    Subscribe, WillMessage,
 };
 
 const INIT_STREAM_BUFFER_SIZE: usize = 4096;
@@ -66,21 +71,41 @@ pub enum BrokerCommand {
     SetSessionExpiry(Duration),
 }
 
+#[derive(Debug, Clone)]
+pub struct BrokerState {
+    config: Arc<config::Config>,
+    session_pool: Arc<RwLock<SessionPool>>,
+    topic_tree: Arc<RwLock<TopicTree>>,
+    accept_connections: Arc<AtomicBool>,
+}
+
+impl BrokerState {
+    fn new(config: config::Config) -> Self {
+        let session_pool = SessionPool::new_with_config(&config);
+        Self {
+            config: Arc::new(config),
+            session_pool: Arc::new(RwLock::new(session_pool)),
+            topic_tree: Arc::new(RwLock::new(TopicTree::new())),
+            accept_connections: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    pub fn accepting_connections(&self) -> bool {
+        self.accept_connections.load(Ordering::Acquire)
+    }
+}
+
 #[derive(Debug)]
 pub struct Broker {
-    config: config::Config,
-    session_pool: Arc<RwLock<SessionPool>>,
+    state: BrokerState,
     command_channel: (Sender<BrokerCommand>, Option<Receiver<BrokerCommand>>),
 }
 
 impl Default for Broker {
     fn default() -> Self {
-        let (sender, receiver) = tokio::sync::mpsc::channel(10);
+        let (sender, receiver) = tokio::sync::mpsc::channel(config::DEFAULT_SESSION_CHANNEL_SIZE);
         Broker {
-            config: config::Config::default(),
-            session_pool: Arc::new(RwLock::new(SessionPool::new_with_expiry(
-                config::DEFAULT_SESSION_EXPIRY,
-            ))),
+            state: BrokerState::new(config::Config::default()),
             command_channel: (sender, Some(receiver)),
         }
     }
@@ -88,16 +113,16 @@ impl Default for Broker {
 
 impl Broker {
     pub fn new_with_config(config: config::Config) -> Self {
-        let (sender, receiver) = tokio::sync::mpsc::channel(10);
+        let (sender, receiver) = tokio::sync::mpsc::channel(config.session_channel_size);
         Broker {
-            config: config.clone(),
-            session_pool: Arc::new(RwLock::new(SessionPool::new_with_config(&config))),
+            state: BrokerState::new(config),
             command_channel: (sender, Some(receiver)),
         }
     }
 
     pub async fn set_session_expiration(&mut self, expiration: Duration) {
-        self.session_pool
+        self.state
+            .session_pool
             .write()
             .await
             .set_session_expiry(expiration);
@@ -106,12 +131,12 @@ impl Broker {
     pub async fn stop(&mut self) {}
 
     pub async fn run(&mut self) -> Result<(), BrokerError> {
-        // TODO recreate the command channel here
-        println!("broker accepting request on {:?}", self.config.listen_addr);
-        let session_pool = Arc::clone(&self.session_pool);
-        match TcpListener::bind(self.config.listen_addr).await {
+        tracing::info!(addr = %self.state.config.listen_addr, "broker starting");
+        let state = self.state.clone();
+        match TcpListener::bind(self.state.config.listen_addr).await {
             Ok(listener) => {
                 let mut command = self.command_channel.1.take().unwrap();
+
                 let _handle: JoinHandle<Result<(), BrokerError>> = tokio::spawn(async move {
                     loop {
                         select! {
@@ -121,13 +146,13 @@ impl Broker {
                                         return Ok(());
                                     }
                                     Some(BrokerCommand::PauseAccept) => {
-                                        // TODO pause accept
+                                        state.accept_connections.store(false, Ordering::Release);
                                     }
                                     Some(BrokerCommand::ResumeAccept) => {
-                                        // TODO resume accept
+                                        state.accept_connections.store(true, Ordering::Release);
                                     }
                                     Some(BrokerCommand::SetSessionExpiry(expiration)) => {
-                                        session_pool.write().await.set_session_expiry(expiration);
+                                        state.session_pool.write().await.set_session_expiry(expiration);
                                     }
                                     None => {
                                         return Ok(());
@@ -137,19 +162,32 @@ impl Broker {
                             result = listener.accept() => {
                                 match result {
                                     Ok((socket, _)) => {
-                                        // create an mqtt stream from the tcp stream
-                                        let mut stream = PacketStream::new(
-                                            AsyncMqttStream(MqttStream::TcpStream(socket)),
-                                            Some(INIT_STREAM_BUFFER_SIZE),
-                                            None,
-                                        );
-                                        let _session_pool = Arc::clone(&session_pool);
+                                        let client_state = state.clone();
+                                        let tls = client_state.config.tls_acceptor.clone();
                                         tokio::spawn(async move {
-                                            Broker::handle_client(&mut stream, _session_pool).await
+                                            let mqtt_stream = if let Some(acceptor) = tls {
+                                                match acceptor.accept(socket).await {
+                                                    Ok(tls_stream) => {
+                                                        MqttStream::ServerTlsStream(Box::new(tls_stream))
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::warn!(error = %e, "TLS handshake failed");
+                                                        return Ok(());
+                                                    }
+                                                }
+                                            } else {
+                                                MqttStream::TcpStream(socket)
+                                            };
+                                            let mut stream = PacketStream::new(
+                                                AsyncMqttStream(mqtt_stream),
+                                                Some(INIT_STREAM_BUFFER_SIZE),
+                                                None,
+                                            );
+                                            Broker::handle_client(&mut stream, client_state).await
                                         });
                                     }
                                     Err(e) => {
-                                        println!("broker error accepting connection: {e}");
+                                        tracing::error!(error = %e, "error accepting connection");
                                         return Err(e.into());
                                     }
                                 }
@@ -165,14 +203,13 @@ impl Broker {
 
     async fn handle_client(
         stream: &mut PacketStream,
-        session_pool: Arc<RwLock<SessionPool>>,
+        state: BrokerState,
     ) -> Result<(), BrokerError> {
         let mut connected = false;
         let mut client_session: Option<Arc<RwLock<Session>>> = None;
         let mut session_control: Option<Receiver<SessionControl>> = None;
         let mut keep_alive = DEFAULT_KEEP_ALIVE;
         loop {
-            // TODO separate out the session handling from pre-connect handling
             select! {
                 ctrl = Broker::handle_control(&mut session_control) => {
                     if let Some(control) = ctrl {
@@ -189,51 +226,51 @@ impl Broker {
                                             // by another client, just send the disconnect packet
                                         }
                                         _ => {
-                                            // currently all other cases will deactivate the session
-                                            let _session_pool  = Arc::clone(&session_pool);
-                                            {
-                                                // in some cases the session pool will not have the session
-                                                _session_pool.write().await.deactivate(&session_id).await;
-                                            }
+                                            state.session_pool.write().await.deactivate(&session_id).await;
                                         }
                                     }
-                                    stream.write(&Packet::Disconnect(Disconnect::new(reason))).await?;
+                                    stream.write(&mut Packet::Disconnect(Disconnect::new(reason))).await?;
                                 } else {
-                                    // no active session to deactivate, shutdown the stream
                                     stream.shutdown().await?;
                                     return Ok(());
                                 }
+                            }
+                            SessionControl::Deliver(publish) => {
+                                stream.write(&mut Packet::Publish(*publish)).await?;
                             }
                         }
                     }
                 }
                 _ = Broker::keep_alive_timer(keep_alive) => {
-                   // disconnect the client and deactivate the session
-                     if let Some(session) = &client_session {
-                          let session = session.read().await;
-                            if session.connected() {
-                                // TODO send a disconnect packet to the client
-                                // TODO send a will message
-                                {
-                                    let _session_pool  = Arc::clone(&session_pool);
-                                   _session_pool.write().await.deactivate(session.id()).await;
-                                }
-                            }
-                     } else {
-                        // no active session to deactivate, shutdown the stream
+                    if let Some(session) = &client_session {
+                        let session_id = session.read().await.id().to_string();
+                        tracing::info!(session_id = %session_id, "keep-alive expired");
+                        Broker::initiate_will(session, &state).await;
+                        state.session_pool.write().await.deactivate(&session_id).await;
+                    } else {
                         stream.shutdown().await?;
                         return Ok(());
-                     }
+                    }
                 }
                 packet_result = stream.read() => {
                     match packet_result {
                         Ok(Some(packet)) => {
                             if !connected {
-                                if let Some(session) = Broker::handle_pre_connect(packet, stream,  Arc::clone(&session_pool)).await? {
-                                    {
+                                if let Some(session) = Broker::handle_pre_connect(packet, stream, &state).await? {
+                                    let pending = {
                                         let mut session = session.write().await;
                                         keep_alive = session.keep_alive();
                                         session_control = session.take_control_receiver();
+                                        session.drain_pending()
+                                    };
+                                    for (packet_id, mut publish) in pending {
+                                        publish.set_dup(true).ok();
+                                        let _ = publish.set_packet_id(Some(packet_id));
+                                        {
+                                            let mut s = session.write().await;
+                                            s.track_qos_publish(packet_id, publish.clone());
+                                        }
+                                        stream.write(&mut Packet::Publish(publish)).await?;
                                     }
                                     client_session = Some(Arc::clone(&session));
                                 } else {
@@ -241,14 +278,25 @@ impl Broker {
                                 }
                                 connected = true;
                             } else if let Some(session) = &client_session {
-                                Broker::handle_packet(packet, stream, Arc::clone(session), Arc::clone(&session_pool)).await?;
+                                Broker::handle_packet(packet, stream, Arc::clone(session), &state).await?;
                             }
-                            // TODO evaluate cases where connected and session may be None
                         }
                         Ok(None) => {
-                            // handle the stream disconnect
+                            if let Some(session) = &client_session {
+                                let session_id = session.read().await.id().to_string();
+                                tracing::info!(session_id = %session_id, "connection closed");
+                                Broker::initiate_will(session, &state).await;
+                                state.session_pool.write().await.deactivate(&session_id).await;
+                            }
+                            return Ok(());
                         }
                         Err(e) => {
+                            if let Some(session) = &client_session {
+                                let session_id = session.read().await.id().to_string();
+                                tracing::warn!(session_id = %session_id, error = %e, "connection error");
+                                Broker::initiate_will(session, &state).await;
+                                state.session_pool.write().await.deactivate(&session_id).await;
+                            }
                             return Err(e.into());
                         }
                     }
@@ -261,44 +309,127 @@ impl Broker {
         packet: Packet,
         stream: &mut PacketStream,
         session: Arc<RwLock<Session>>,
-        _session_pool: Arc<RwLock<SessionPool>>,
+        state: &BrokerState,
     ) -> Result<(), BrokerError> {
         match packet {
-            Packet::PingRequest(_) => {
-                let packet = PingResponse(FixedHeader::new(PacketType::PingResp));
-                stream.write(&packet).await?;
+            Packet::PingRequest(_p) => {
+                let mut packet = PingResponse(PingResp::default());
+                stream.write(&mut packet).await?;
+                Ok(())
+            }
+            Packet::Subscribe(subscribe) => {
+                let session_id = {
+                    let session = session.read().await;
+                    session.id().to_string()
+                };
+                let suback = Broker::handle_subscribe(&subscribe, &session_id, state).await;
+                stream.write(&mut Packet::SubAck(suback)).await?;
+                Ok(())
+            }
+            Packet::Unsubscribe(unsubscribe) => {
+                let session_id = {
+                    let session = session.read().await;
+                    session.id().to_string()
+                };
+                let unsuback = Broker::handle_unsubscribe(&unsubscribe, &session_id, state).await;
+                stream.write(&mut Packet::UnsubAck(unsuback)).await?;
+                Ok(())
+            }
+            Packet::Publish(publish) => {
+                let session_id = {
+                    let session = session.read().await;
+                    session.id().to_string()
+                };
+                if publish.qos() == QoSLevel::AtLeastOnce {
+                    match publish.packet_id() {
+                        Some(packet_id) => {
+                            let puback = vaux_mqtt::PubAck::new_puback_with_packet_id(packet_id);
+                            stream.write(&mut Packet::PubAck(puback)).await?;
+                        }
+                        None => {
+                            let disconnect = Disconnect::new(Reason::MalformedPacket);
+                            stream.write(&mut Packet::Disconnect(disconnect)).await?;
+                            return Err(MqttCodecError::new(
+                                "QoS-1 PUBLISH missing packet ID",
+                            ).into());
+                        }
+                    }
+                }
+                Broker::route_publish(&publish, &session_id, state).await;
+                Ok(())
+            }
+            Packet::PubAck(puback) => {
+                let mut session = session.write().await;
+                session.acknowledge(puback.packet_id);
                 Ok(())
             }
             Packet::Disconnect(packet) => {
                 if let Reason::Success = packet.reason {
-                    // discard the will message
-                    {
-                        let mut session = session.write().await;
-                        session.clear_will();
-                    }
+                    let mut session = session.write().await;
+                    session.clear_will();
                 } else {
-                    // TODO send the will message
+                    Broker::initiate_will(&session, state).await;
                 }
-                // deactivate the session
-                {
-                    let session_id = {
-                        let session = session.read().await;
-                        (*session).id().to_string()
-                    };
-                    let _session_pool = Arc::clone(&_session_pool);
-                    _session_pool.write().await.deactivate(&session_id).await;
-                }
+                let session_id = {
+                    let session = session.read().await;
+                    (*session).id().to_string()
+                };
+                state
+                    .session_pool
+                    .write()
+                    .await
+                    .deactivate(&session_id)
+                    .await;
                 Ok(())
             }
             _ => Ok(()),
         }
     }
 
+    async fn handle_subscribe(
+        subscribe: &Subscribe,
+        session_id: &str,
+        state: &BrokerState,
+    ) -> SubAck {
+        let mut suback = SubAck::new_with_packet_id(subscribe.packet_id).unwrap_or_default();
+        let mut tree = state.topic_tree.write().await;
+        for filter in &subscribe.filter {
+            let granted_qos = filter.qos();
+            tree.subscribe(&filter.filter, session_id, granted_qos, filter.no_local());
+            let reason = match granted_qos {
+                vaux_mqtt::QoSLevel::AtMostOnce => Reason::Success,
+                vaux_mqtt::QoSLevel::AtLeastOnce => Reason::GrantedQoS1,
+                vaux_mqtt::QoSLevel::ExactlyOnce => Reason::GrantedQoS2,
+            };
+            suback.reason_codes.push(reason);
+        }
+        suback
+    }
+
+    async fn handle_unsubscribe(
+        unsubscribe: &Unsubscribe,
+        session_id: &str,
+        state: &BrokerState,
+    ) -> UnsubAck {
+        let mut unsuback = UnsubAck::default();
+        unsuback.packet_id = unsubscribe.packet_id;
+        let mut tree = state.topic_tree.write().await;
+        for topic in &unsubscribe.topics {
+            let reason = if tree.unsubscribe(topic, session_id) {
+                Reason::Success
+            } else {
+                Reason::NoSubscribers
+            };
+            unsuback.reason_code.push(reason);
+        }
+        unsuback
+    }
+
     async fn handle_control(
         control_channel: &mut Option<Receiver<SessionControl>>,
     ) -> Option<SessionControl> {
         loop {
-            if let Some(ref mut rx) = control_channel {
+            if let Some(rx) = control_channel {
                 if let Some(control) = rx.recv().await {
                     return Some(control);
                 }
@@ -310,20 +441,29 @@ impl Broker {
     async fn handle_pre_connect(
         packet: Packet,
         stream: &mut PacketStream,
-        session_pool: Arc<RwLock<SessionPool>>,
+        state: &BrokerState,
     ) -> Result<Option<Arc<RwLock<Session>>>, BrokerError> {
         match packet {
-            Packet::Connect(packet) => Broker::handle_connect(*packet, stream, session_pool).await,
+            Packet::Connect(packet) => {
+                if !state.accepting_connections() {
+                    tracing::info!("connection rejected: not accepting connections");
+                    let mut ack = ConnAck::default();
+                    ack.reason = Reason::ServerBusy;
+                    stream.write(&mut Packet::ConnAck(ack)).await?;
+                    stream.shutdown().await?;
+                    return Ok(None);
+                }
+                Broker::handle_connect(*packet, stream, state).await
+            }
             Packet::PingRequest(_packet) => {
-                // allow clients without connected session to ping
-                let packet = PingResponse(FixedHeader::new(PacketType::PingResp));
-                stream.write(&packet).await?;
+                let mut packet = PingResponse(PingResp::default());
+                stream.write(&mut packet).await?;
                 Ok(None)
             }
             _ => {
                 let header = Disconnect::new(Reason::ProtocolErr);
-                let packet = Packet::Disconnect(header);
-                stream.write(&packet).await?;
+                let mut packet = Packet::Disconnect(header);
+                stream.write(&mut packet).await?;
                 Ok(None)
             }
         }
@@ -332,12 +472,12 @@ impl Broker {
     async fn handle_connect(
         connect: Connect,
         stream: &mut PacketStream,
-        session_pool: Arc<RwLock<SessionPool>>,
+        state: &BrokerState,
     ) -> Result<Option<Arc<RwLock<Session>>>, BrokerError> {
         let session_id: String;
         let mut ack = ConnAck::default();
         let (default_keep_alive_secs, max_keep_alive_secs) = {
-            let session_pool = session_pool.read().await;
+            let session_pool = state.session_pool.read().await;
             (
                 session_pool.default_keep_alive_secs(),
                 session_pool.max_keep_alive_secs(),
@@ -354,12 +494,11 @@ impl Broker {
             Duration::from_secs((connect.keep_alive as f32 * BROKER_KEEP_ALIVE_FACTOR) as u64)
         };
         // handle the session expiry request
-        let session_expiry = if let Some(requested_expiry) = connect.session_expiry() {
+        let session_expiry = if let Some(requested_expiry) = connect.session_expiry_interval {
             if requested_expiry > 0 {
-                // set the ack expiry if the requested expiry is less greater than max allowed
                 let max_expiry: u32;
                 {
-                    max_expiry = session_pool.read().await.session_expiry().as_secs() as u32;
+                    max_expiry = state.session_pool.read().await.session_expiry().as_secs() as u32;
                 }
                 if requested_expiry > max_expiry {
                     ack.set_session_expiry(max_expiry);
@@ -376,56 +515,65 @@ impl Broker {
         // handle the client id
         if connect.client_id.is_empty() {
             session_id = Uuid::new_v4().to_string();
-            ack.properties_mut()
-                .set_property(vaux_mqtt::property::Property::AssignedClientId(
-                    session_id.clone(),
-                ));
+            ack.assigned_client_id = Some(session_id.clone());
         } else {
-            session_id = connect.client_id.clone();
+            session_id = connect.client_id.to_string();
         }
-        let mut session_pool = session_pool.write().await;
-        let session: Arc<RwLock<Session>> = if connect.clean_start {
-            // clean start will remove any existing session if it exists and create a new session
-            // if the session is active, the session will be taken over by the new client
+        let mut session_pool = state.session_pool.write().await;
+        let max_active = state.config.max_active_sessions;
+        let channel_size = state.config.session_channel_size;
+
+        let has_active_session = session_pool.get_active(&session_id).is_some();
+        if !has_active_session && session_pool.at_capacity(max_active) {
+            drop(session_pool);
+            tracing::info!(session_id = %session_id, "connection rejected: max active sessions reached");
+            ack.reason = Reason::QuotaExceeded;
+            stream.write(&mut Packet::ConnAck(ack)).await?;
+            stream.shutdown().await?;
+            return Ok(None);
+        }
+
+        let session: Arc<RwLock<Session>> = if connect.clean_start() {
             if let Some(existing_session) = session_pool.remove(session_id.as_str()) {
                 let connected = { existing_session.read().await.connected() };
                 if connected {
-                    // send a disconnect packet to the client with reason TakenOver
                     let _ = Broker::handle_takeover(Arc::clone(&existing_session)).await;
                 }
             }
             let mut new_session =
-                Session::new(session_id.clone(), connect.will_message.clone(), keep_alive);
+                Session::new(session_id.clone(), connect.will_message(), keep_alive, channel_size);
             new_session.set_connected(true);
             let new_session = Arc::new(RwLock::new(new_session));
             session_pool.add(Arc::clone(&new_session)).await;
             new_session
         } else {
-            // activate existing session if in the inactive pool
             if let Some(session) = session_pool.activate(&session_id).await {
                 {
                     let mut session = session.write().await;
-                    ack.session_present = true;
-                    // take over the session control channel
-                    session.reset_control();
+                    ack.set_session_present(true);
+                    session.cancel_pending_will();
+                    session.set_will(connect.will_message());
+                    session.reset_control(channel_size);
                 }
                 session
             } else if let Some(session) = session_pool.get_active(&session_id) {
-                // take over an existing session if it is active and clean start is false
                 {
-                    // TODO handle errors
                     let _ = Broker::handle_takeover(Arc::clone(&session)).await;
                     let mut session = session.write().await;
-                    ack.session_present = true;
-                    // take over the session control channel
-                    session.reset_control();
+                    ack.set_session_present(true);
+                    session.cancel_pending_will();
+                    session.set_will(connect.will_message());
+                    session.reset_control(channel_size);
                     session.set_last_active();
                 }
                 session
             } else {
-                // create a new session from the connect request
-                let mut new_session =
-                    Session::new(session_id.clone(), connect.will_message.clone(), keep_alive);
+                let mut new_session = Session::new(
+                    session_id.clone(),
+                    connect.will_message().clone(),
+                    keep_alive,
+                    channel_size,
+                );
                 new_session.set_connected(true);
                 let new_session = Arc::new(RwLock::new(new_session));
                 session_pool.add(Arc::clone(&new_session)).await;
@@ -433,16 +581,15 @@ impl Broker {
             }
         };
         drop(session_pool);
-        // set the session expiration
         {
             let mut session = session.write().await;
             if let Some(expiry) = session_expiry {
                 session.set_session_expiry(expiry);
             }
         }
-        stream.write(&Packet::ConnAck(ack)).await?;
+        tracing::info!(session_id = %session_id, "client connected");
+        stream.write(&mut Packet::ConnAck(ack)).await?;
         Ok(Some(Arc::clone(&session)))
-        //Ok(None)
     }
 
     async fn keep_alive_timer(keep_alive: Duration) {
@@ -450,7 +597,6 @@ impl Broker {
     }
 
     async fn handle_takeover(session: Arc<RwLock<Session>>) -> Result<(), BrokerError> {
-        // send a disconnect packet to the client with reason TakenOver
         session
             .read()
             .await
@@ -459,6 +605,98 @@ impl Broker {
         // TODO wait for disconnect to complete from session state
         tokio::time::sleep(Duration::from_millis(500)).await;
         Ok(())
+    }
+
+    async fn initiate_will(session: &Arc<RwLock<Session>>, state: &BrokerState) {
+        let will = {
+            let mut session = session.write().await;
+            session.take_will()
+        };
+
+        if let Some(will) = will {
+            tracing::debug!(topic = %will.topic, "publishing will message");
+            let delay_secs = will.header.will_delay.unwrap_or(0);
+            if delay_secs == 0 {
+                Broker::publish_will(&will, state).await;
+            } else {
+                let token = tokio_util::sync::CancellationToken::new();
+                let child_token = token.child_token();
+                let state = state.clone();
+                tokio::spawn(async move {
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_secs(delay_secs as u64)) => {
+                            Broker::publish_will(&will, &state).await;
+                        }
+                        _ = child_token.cancelled() => {}
+                    }
+                });
+                let mut session = session.write().await;
+                session.set_pending_will(token);
+            }
+        }
+    }
+
+    async fn publish_will(will: &WillMessage, state: &BrokerState) {
+        let mut publish = Publish::new_from_header(vaux_mqtt::FixedHeader::new(
+            vaux_mqtt::PacketType::Publish,
+        ))
+        .unwrap();
+        publish.topic_name = will.topic.clone();
+        publish.set_qos(will.qos);
+        publish.set_retain(will.retain);
+        publish.payload = Some(will.payload.clone());
+        publish.message_expiry = will.header.message_expiry;
+        publish.content_type = will.header.content_type.clone();
+        publish.response_topic = will.header.response_topic.clone();
+        publish.correlation_data = will.header.correlation_data.clone();
+        if let Some(format) = will.header.payload_format {
+            publish.set_payload_format(format);
+        }
+        Broker::route_publish(&publish, "", state).await;
+    }
+
+    async fn route_publish(publish: &Publish, sender_session_id: &str, state: &BrokerState) {
+        let subscribers = {
+            let tree = state.topic_tree.read().await;
+            tree.matching_subscribers(&publish.topic_name)
+        };
+        let session_pool = state.session_pool.read().await;
+        for sub in &subscribers {
+            if sub.no_local && *sub.session_id == *sender_session_id {
+                continue;
+            }
+            let granted_qos = std::cmp::min(publish.qos() as u8, sub.qos as u8);
+            let qos: QoSLevel = granted_qos.try_into().unwrap_or(QoSLevel::AtMostOnce);
+
+            if let Some(target_session) = session_pool.get_active(&sub.session_id) {
+                let mut out = publish.clone();
+                out.set_qos(qos);
+                if qos != QoSLevel::AtMostOnce {
+                    let mut target = target_session.write().await;
+                    let packet_id = target.next_packet_id();
+                    let _ = out.set_packet_id(Some(packet_id));
+                    target.track_qos_publish(packet_id, out.clone());
+                    if let Err(_) = target.try_send_control(SessionControl::Deliver(Box::new(out))) {
+                        tracing::warn!(
+                            session_id = %sub.session_id,
+                            topic = %publish.topic_name,
+                            "slow subscriber: channel full, disconnecting"
+                        );
+                        let _ = target.try_send_control(SessionControl::Disconnect(Reason::QuotaExceeded));
+                    }
+                } else {
+                    let target = target_session.read().await;
+                    if let Err(_) = target.try_send_control(SessionControl::Deliver(Box::new(out))) {
+                        tracing::warn!(
+                            session_id = %sub.session_id,
+                            topic = %publish.topic_name,
+                            "slow subscriber: channel full, disconnecting"
+                        );
+                        let _ = target.try_send_control(SessionControl::Disconnect(Reason::QuotaExceeded));
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -476,24 +714,22 @@ mod test {
     use super::*;
 
     #[test]
-    /// Tests the default initialization behaviors for the broker. Changing the
-    /// default behavior changes implicit contracts with clients and should be
-    /// backwards compatible.
     fn test_default() {
-        // tests would create false positives on contract behavior change
-        // if the module level defaults were used to verify test results
         const EXPECTED_IP_ADDR: &str = "127.0.0.1";
         const EXPECTED_PORT: u16 = 1883;
         let broker = Broker::default();
-        assert!(broker.config.listen_addr.is_ipv4(), "expected IPV4 address");
+        assert!(
+            broker.state.config.listen_addr.is_ipv4(),
+            "expected IPV4 address"
+        );
         assert_eq!(
             EXPECTED_IP_ADDR,
-            broker.config.listen_addr.ip().to_string(),
+            broker.state.config.listen_addr.ip().to_string(),
             "expected local loopback address: 127.0.0.1"
         );
         assert_eq!(
             EXPECTED_PORT,
-            broker.config.listen_addr.port(),
+            broker.state.config.listen_addr.port(),
             "expected default listen port to be 1883"
         );
     }
@@ -518,12 +754,12 @@ mod test {
         });
         assert_eq!(
             EXPECTED_IP_ADDR,
-            broker.config.listen_addr.ip().to_string(),
+            broker.state.config.listen_addr.ip().to_string(),
             "expected local loopback address: 127.0.0.1"
         );
         assert_eq!(
             EXPECTED_PORT,
-            broker.config.listen_addr.port(),
+            broker.state.config.listen_addr.port(),
             "expected default listen port to be 1883"
         );
     }

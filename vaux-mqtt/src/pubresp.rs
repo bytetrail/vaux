@@ -1,84 +1,107 @@
 use crate::{
-    codec::variable_byte_int_size, property::PropertyBundle, Decode, Encode, FixedHeader,
-    MqttCodecError, PacketType, PropertyType, Reason, Size,
+    codec::{self, ErrorKind},
+    property::UserProperty,
+    MqttCodecError, PacketType, PropertyType, Reason,
 };
-use bytes::{Buf, BufMut};
-use std::{collections::HashSet, sync::LazyLock};
+use vaux_macro::{CodecSize, Decode, Encode, PropertyCodecSize, PropertyEncode};
 
-const VARIABLE_HEADER_LEN: u32 = 2;
-static PUBRESP_PROPS: LazyLock<HashSet<PropertyType>> = LazyLock::new(|| {
-    let mut set = HashSet::new();
-    set.insert(PropertyType::ReasonString);
-    set.insert(PropertyType::UserProperty);
-    set
-});
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PubRelCompReason {
+    #[default]
+    Success = 0x00,
+    PacketIdInUse = 0x91,
+}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+pub type PubAck = PubResp;
+pub type PubRec = PubResp;
+pub type PubComp = PubResp;
+pub type PubRel = PubResp;
+
+#[derive(Default, Debug, Clone, PartialEq, Eq, PropertyCodecSize, PropertyEncode, Encode, Decode)]
+#[codec(
+    as_packet,
+    abbreviated_when = "self.reason.unwrap_or_default() == codec::Reason::Success && self.property_size() == 0"
+)]
+#[derive(CodecSize)]
 pub struct PubResp {
-    resp_type: PacketType,
-    reason: Reason,
+    #[codec(skip)]
+    fixed_header: codec::FixedHeader,
     pub packet_id: u16,
-    props: PropertyBundle,
+    #[codec(non_abbreviated)]
+    reason: Option<codec::Reason>,
+    #[codec(property_type = "PropertyType::ReasonString")]
+    reason_desc: Option<String>,
+    #[codec(property_type = "PropertyType::UserProperty")]
+    user_properties: UserProperty,
 }
 
 impl PubResp {
-    pub fn new_puback() -> Self {
-        PubResp::new(PacketType::PubAck).unwrap()
-    }
-
-    pub fn new_pubcomp() -> Self {
-        PubResp::new(PacketType::PubComp).unwrap()
-    }
-    pub fn new_pubrec() -> Self {
-        PubResp::new(PacketType::PubRec).unwrap()
-    }
-    pub fn new_pubrel() -> Self {
-        PubResp::new(PacketType::PubRel).unwrap()
-    }
-
-    fn new(resp_type: PacketType) -> Result<Self, MqttCodecError> {
-        match resp_type {
-            PacketType::PubAck | PacketType::PubComp | PacketType::PubRec | PacketType::PubRel => {
-                Ok(Self {
-                    resp_type,
-                    reason: Reason::Success,
-                    packet_id: 0,
-                    props: PropertyBundle::new(&PUBRESP_PROPS),
-                })
-            }
-            _ => Err(MqttCodecError {
-                reason: "unsupported response type".to_string(),
-                kind: crate::codec::ErrorKind::UnsupportedResponseType,
-            }),
+    pub fn new_puback_with_packet_id(packet_id: u16) -> Self {
+        PubResp {
+            fixed_header: codec::FixedHeader::new(codec::PacketType::PubAck),
+            packet_id,
+            ..Default::default()
         }
     }
 
-    pub fn reason(&self) -> Reason {
+    pub fn new_pubrec_with_packet_id(packet_id: u16) -> Self {
+        PubResp {
+            fixed_header: codec::FixedHeader::new(codec::PacketType::PubRec),
+            packet_id,
+            ..Default::default()
+        }
+    }
+
+    pub fn new_pubrel_with_packet_id(packet_id: u16) -> Self {
+        PubResp {
+            fixed_header: codec::FixedHeader::new(codec::PacketType::PubRel),
+            packet_id,
+            ..Default::default()
+        }
+    }
+
+    pub fn new_pubcomp_with_packet_id(packet_id: u16) -> Self {
+        PubResp {
+            fixed_header: codec::FixedHeader::new(codec::PacketType::PubComp),
+            packet_id,
+            ..Default::default()
+        }
+    }
+
+    pub fn new_with_fixed_header(fixed_header: codec::FixedHeader) -> Result<Self, MqttCodecError> {
+        match fixed_header.packet_type {
+            codec::PacketType::PubAck
+            | codec::PacketType::PubRec
+            | codec::PacketType::PubComp
+            | codec::PacketType::PubRel => Ok(PubResp {
+                fixed_header,
+                ..Default::default()
+            }),
+            _ => Err(MqttCodecError::new_with_kind(
+                "Packet must be one of [PubAck, PubRec, PubComp, PubRel]",
+                codec::ErrorKind::InvalidPacket,
+            )),
+        }
+    }
+
+    pub fn reason(&self) -> Option<Reason> {
         self.reason
     }
 
     pub fn set_reason(&mut self, reason: Reason) -> Result<(), MqttCodecError> {
-        if PubResp::supported_reason(&self.resp_type, &reason) {
-            self.reason = reason;
+        if self.supported_reason(reason) {
+            self.reason = Some(reason);
             Ok(())
         } else {
             Err(MqttCodecError {
                 reason: "unsupported reason".to_string(),
-                kind: crate::codec::ErrorKind::UnsupportedReason,
+                kind: ErrorKind::UnsupportedReason(reason as u8),
             })
         }
     }
 
-    pub fn properties(&self) -> &PropertyBundle {
-        &self.props
-    }
-
-    pub fn properties_mut(&mut self) -> &mut PropertyBundle {
-        &mut self.props
-    }
-
-    fn supported_reason(resp_type: &PacketType, reason: &Reason) -> bool {
-        match resp_type {
+    fn supported_reason(&self, reason: Reason) -> bool {
+        match self.fixed_header.packet_type {
             PacketType::PubAck | PacketType::PubRec => matches!(
                 reason,
                 Reason::Success
@@ -96,107 +119,5 @@ impl PubResp {
             }
             _ => false,
         }
-    }
-}
-
-impl Size for PubResp {
-    fn size(&self) -> u32 {
-        let prop_size = self.property_size();
-        let prop_size_len = variable_byte_int_size(prop_size);
-
-        if prop_size == 0 {
-            VARIABLE_HEADER_LEN
-        } else {
-            let remaining = 3 + prop_size + prop_size_len;
-            VARIABLE_HEADER_LEN + remaining
-        }
-    }
-
-    fn property_size(&self) -> u32 {
-        self.props.size()
-    }
-
-    fn payload_size(&self) -> u32 {
-        0
-    }
-}
-
-impl Encode for PubResp {
-    fn encode(&self, dest: &mut bytes::BytesMut) -> Result<(), crate::MqttCodecError> {
-        let mut header = match self.resp_type {
-            PacketType::PubAck => FixedHeader::new(PacketType::PubAck),
-            PacketType::PubRec => FixedHeader::new(PacketType::PubRec),
-            PacketType::PubComp => FixedHeader::new(PacketType::PubComp),
-            PacketType::PubRel => FixedHeader::new(PacketType::PubRel),
-            _ => {
-                return Err(MqttCodecError {
-                    reason: "usupported response type".to_string(),
-                    kind: crate::codec::ErrorKind::UnsupportedResponseType,
-                })
-            }
-        };
-        header.set_remaining(self.size());
-        header.encode(dest)?;
-        dest.put_u16(self.packet_id);
-        if self.reason == Reason::Success && self.props.is_empty() {
-            Ok(())
-        } else {
-            dest.put_u8(self.reason as u8);
-            self.props.encode(dest)?;
-            Ok(())
-        }
-    }
-}
-
-impl Decode for PubResp {
-    fn decode(&mut self, src: &mut bytes::BytesMut) -> Result<(), crate::MqttCodecError> {
-        if src.remaining() == 2 {
-            self.reason = Reason::Success;
-            self.packet_id = src.get_u16();
-            return Ok(());
-        }
-        self.packet_id = src.get_u16();
-        self.reason = Reason::try_from(src.get_u8())?;
-        if src.remaining() > 0 {
-            self.props.decode(src)?;
-        }
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use bytes::BytesMut;
-
-    use crate::property::Property;
-
-    use super::*;
-
-    #[test]
-    fn basic_encode() {
-        const EXPECTED_LEN: usize = 4;
-        let mut pubrec = PubResp::new_pubrec();
-        pubrec.packet_id = 12345;
-        assert!(pubrec.set_reason(Reason::Success).is_ok());
-        let mut dest = BytesMut::new();
-        let result = pubrec.encode(&mut dest);
-        assert!(result.is_ok());
-        assert_eq!(EXPECTED_LEN, dest.len());
-    }
-
-    #[test]
-    fn encode_with_reason() {
-        const EXPECTED_LEN: usize = 25;
-        let mut pubrec = PubResp::new_pubrec();
-        pubrec.packet_id = 12345;
-        assert!(pubrec.set_reason(Reason::UnspecifiedErr).is_ok());
-        pubrec
-            .properties_mut()
-            .set_property(Property::ReasonString("unable to comply".to_string()));
-
-        let mut dest = BytesMut::new();
-        let result = pubrec.encode(&mut dest);
-        assert!(result.is_ok());
-        assert_eq!(EXPECTED_LEN, dest.len());
     }
 }

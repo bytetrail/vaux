@@ -5,6 +5,10 @@ members = [
     "vaux-mqtt",
     "vaux-client",
     "vaux-broker",
-    "prop-macro",
+    "vaux-macro",
     "vaux",
 ]
+
+[workspace.package]
+version = "0.8.5"
+edition = "2024"

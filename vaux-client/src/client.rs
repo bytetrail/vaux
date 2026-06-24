@@ -8,7 +8,6 @@ use tokio::{
     sync::mpsc::{self, error::SendError, Receiver, Sender},
     task::JoinHandle,
 };
-use vaux_mqtt::property::{PacketProperties, Property};
 use vaux_mqtt::{Packet, PacketType, QoSLevel, Subscribe, SubscriptionFilter};
 
 // 64K is the default max packet size
@@ -185,93 +184,19 @@ impl MqttClient {
         self.packet_in.0.send(ping).await
     }
 
-    pub async fn publish(
-        &mut self,
-        topic: Option<String>,
-        topic_alias: Option<u16>,
-        qos: QoSLevel,
-        payload: Vec<u8>,
-        utf8: bool,
-        user_props: Option<Vec<Property>>,
-    ) -> std::result::Result<(), SendError<Packet>> {
-        let mut publish = vaux_mqtt::publish::Publish::default();
-        publish.topic_name = topic;
-        publish.set_payload(payload);
-        publish
-            .properties_mut()
-            .set_property(vaux_mqtt::property::Property::PayloadFormat(if utf8 {
-                vaux_mqtt::property::PayloadFormat::Utf8
-            } else {
-                vaux_mqtt::property::PayloadFormat::Bin
-            }));
-        match qos {
-            QoSLevel::AtLeastOnce => {
-                publish.header.set_dup(true);
-            }
-            QoSLevel::ExactlyOnce => {
-                publish.header.set_dup(false);
-            }
-            _ => {
-                publish.header.set_dup(false);
-            }
-        }
-        publish.set_qos(qos);
-        if let Some(alias) = topic_alias {
-            publish.set_topic_alias(alias);
-        }
-        if let Some(props) = user_props {
-            for prop in props {
-                if let Property::UserProperty(key, value) = prop {
-                    publish
-                        .properties_mut()
-                        .set_property(vaux_mqtt::property::Property::UserProperty(key, value));
-                }
-            }
-        }
-        self.packet_out
-            .0
-            .send(vaux_mqtt::Packet::Publish(publish))
-            .await
-    }
-
-    /// Helper method to publish a message to the given topic. This helper
-    /// method will publish the message with a QoS level of "At Most Once",
-    /// or 0.
-    pub async fn publish_str(
-        &mut self,
-        topic: &str,
-        payload: &str,
-    ) -> std::result::Result<(), SendError<Packet>> {
-        self.publish(
-            Some(topic.to_string()),
-            None,
-            QoSLevel::AtMostOnce,
-            payload.as_bytes().to_vec(),
-            true,
-            None,
-        )
-        .await
-    }
-
     /// Helper method to subscribe to the topics in the topic filter. This helper
     /// subscribes with a QoS level of "At Most Once", or 0. A SUBACK will
     /// typically be returned on the consumer on a successful subscribe.
-    pub async fn subscribe(
+     pub async fn subscribe(
         &mut self,
         packet_id: u16,
         topic_filter: &[&str],
         qos: QoSLevel,
     ) -> std::result::Result<(), SendError<Packet>> {
-        let mut subscribe = Subscribe::default();
-        subscribe.set_packet_id(packet_id);
+        let mut subscribe = Subscribe { packet_id, ..Default::default() };
         for topic in topic_filter {
-            let subscription = SubscriptionFilter {
-                filter: (*topic).to_string(),
-                qos,
-                ..Default::default()
-            };
-            // self.subscriptions.push(subscription.clone());
-            subscribe.add_subscription(subscription);
+            let subscription = SubscriptionFilter::new((*topic).to_string(), qos);
+            subscribe.add_filter(subscription);
         }
         self.packet_in
             .0
@@ -324,18 +249,21 @@ impl MqttClient {
         })
         .await
         {
-            Ok(_) => handle,
+            Ok(_) => 
+            {
+                handle
+            }
             Err(start_err) => {
                 // if the client is connected then stop the client
-                if self.connected().await {
-                    if let Err(stop_err) = self.stop().await {
-                        return Err(MqttError::new(
-                            &format!(
-                                "error starting: {start_err} unable to stop client: {stop_err} "
-                            ),
-                            ErrorKind::Transport,
-                        ));
-                    }
+                if self.connected().await
+                    && let Err(stop_err) = self.stop().await
+                {
+                    return Err(MqttError::new(
+                        &format!(
+                            "error starting: {start_err} unable to stop client: {stop_err} "
+                        ),
+                        ErrorKind::Transport,
+                    ));
                 }
                 Err(MqttError::new(
                     &format!("unable to connect to broker: {start_err}"),
@@ -411,20 +339,18 @@ impl MqttClient {
                     return Err(ClientError::new(e, session.end_session().await));
                 }
             }
-            // get the session keep alive duration set after the connect
             let keep_alive = session.keep_alive().await;
-            // set the client keep alive duration
             {
                 *_keep_alive.write().await = keep_alive;
             }
-            // get the session expiry duration set after the connect
             let session_expiry = session.session_expiry().await;
             {
                 *_session_expiry.write().await = session_expiry;
             }
+            let keep_alive_enabled = session.keep_alive_enabled();
             loop {
                 select! {
-                    _ = MqttClient::keep_alive_timer(keep_alive) => {
+                    _ = MqttClient::keep_alive_timer(keep_alive), if keep_alive_enabled => {
                         match session.handle_keep_alive().await {
                             Ok(_) => {
                                 // do nothing
