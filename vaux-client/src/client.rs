@@ -5,7 +5,11 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::select;
 use tokio::sync::RwLock;
 use tokio::{
-    sync::mpsc::{self, error::SendError, Receiver, Sender},
+    sync::mpsc::{
+        self,
+        error::{SendError, TrySendError},
+        Receiver, Sender,
+    },
     task::JoinHandle,
 };
 use vaux_mqtt::{Packet, PacketType, QoSLevel, Subscribe, SubscriptionFilter};
@@ -348,6 +352,15 @@ impl MqttClient {
                 *_session_expiry.write().await = session_expiry;
             }
             let keep_alive_enabled = session.keep_alive_enabled();
+            // Holds a packet that has been read off the wire (and already acked,
+            // for auto-acked QoS 1/2) but could not be handed to the consumer
+            // because its channel was full. While this is set, reads from the
+            // socket are paused so we never decode further packets the consumer
+            // has no room for; keep-alive and outbound app commands keep flowing.
+            // This avoids the consumer's channel back-pressure deadlocking the
+            // whole client (no further reads => no further PubAcks => the broker
+            // eventually drops the connection for missed keep-alives).
+            let mut pending_forward: Option<Packet> = None;
             loop {
                 select! {
                     _ = MqttClient::keep_alive_timer(keep_alive), if keep_alive_enabled => {
@@ -361,24 +374,46 @@ impl MqttClient {
                             }
                         }
                     }
-                    packet_result = session.read_next() => {
+                    forward_result = MqttClient::forward_pending(&filter_channel, &packet_out, pending_forward.clone()), if pending_forward.is_some() => {
+                        match forward_result {
+                            Some(Ok(_)) => {
+                                pending_forward = None;
+                            }
+                            Some(Err(e)) => {
+                                *connected.write().await = false;
+                                return Err(ClientError::new(
+                                    MqttError::new(&format!("unable to send packet: {e}"), ErrorKind::Channel),
+                                    session.end_session().await));
+                            }
+                            None => {
+                                // guard was true when checked but pending_forward was
+                                // already cleared by the time the expression ran; no-op
+                            }
+                        }
+                    }
+                    packet_result = session.read_next(), if pending_forward.is_none() => {
                         match packet_result {
                             Ok(Some(packet)) => {
                                 match session.handle_packet(packet).await {
                                     Ok(Some(packet)) => {
                                         // check filter channels
-                                        if let Some(filter_out) = filter_channel.get(&PacketType::from(&packet)) {
-                                            if let Err(e) = filter_out.send(packet.clone()).await {
+                                        let send_result = if let Some(filter_out) = filter_channel.get(&PacketType::from(&packet)) {
+                                            filter_out.try_send(packet)
+                                        } else {
+                                            packet_out.try_send(packet)
+                                        };
+                                        match send_result {
+                                            Ok(_) => {}
+                                            Err(TrySendError::Full(packet)) => {
+                                                // consumer is behind; pause reads until it catches up
+                                                pending_forward = Some(packet);
+                                            }
+                                            Err(TrySendError::Closed(_)) => {
                                                 *connected.write().await = false;
                                                 return Err(ClientError::new(
-                                                    MqttError::new(&format!("unable to send packet to filter: {e}"), ErrorKind::Channel),
+                                                    MqttError::new("unable to send packet: channel closed", ErrorKind::Channel),
                                                     session.end_session().await));
                                             }
-                                        } else if let Err(e) = packet_out.send(packet).await {
-                                                *connected.write().await = false;
-                                                return Err(ClientError::new(
-                                                    MqttError::new(&format!("unable to send packet: {e}"), ErrorKind::Channel),
-                                                    session.end_session().await));
                                         }
                                     }
                                     Ok(None) => {
@@ -445,6 +480,24 @@ impl MqttClient {
 
     async fn keep_alive_timer(keep_alive: Duration) {
         tokio::time::sleep(keep_alive).await;
+    }
+
+    /// Retries delivery of a previously-undeliverable packet to its filtered
+    /// consumer if one is registered for its packet type, otherwise to the
+    /// default consumer. `tokio::select!` evaluates a branch's future-producing
+    /// expression even when its `if` guard is false, so this takes `Option`
+    /// rather than asserting the packet is present.
+    async fn forward_pending(
+        filter_channel: &FilteredChannel,
+        packet_out: &Sender<Packet>,
+        packet: Option<Packet>,
+    ) -> Option<Result<(), SendError<Packet>>> {
+        let packet = packet?;
+        Some(if let Some(filter_out) = filter_channel.get(&PacketType::from(&packet)) {
+            filter_out.send(packet).await
+        } else {
+            packet_out.send(packet).await
+        })
     }
 
     fn qos_control(packet: &Packet) -> bool {
